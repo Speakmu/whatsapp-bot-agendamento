@@ -1,0 +1,13 @@
+# CRÍTICO: Arquivos de Segurança - NÃO PODEM IR PARA O GITHUB
+.env
+# Arquivo de credenciais do Google Sheets (Altamente recomendado NÃO subir)
+whatsapp-bot-agendamentos.json 
+
+# Ambiente Python
+__pycache__/
+*.pyc
+venv/
+.pytest_cache/
+
+# Logs e arquivos temporários do Render/IDE
+*.log
