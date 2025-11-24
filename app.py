@@ -709,7 +709,7 @@ def webhook():
         if token == VERIFY_TOKEN:
             return challenge
         return 'Token inválido', 403
-   # Dentro do def webhook():
+        # Dentro do def webhook():
     elif request.method == 'POST':
         data = request.json
         # print(data) # Descomente para debug
@@ -761,7 +761,7 @@ def send_message(to, message):
     print(response.status_code, response.text)
 
 
-if __name__ == '__main__':
-    app.run(port=10000)
+app = Flask(__name__)
+
 
 
