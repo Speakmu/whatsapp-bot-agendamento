@@ -700,49 +700,38 @@ VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
 
+@app.route('/', methods=['GET'])
+def home():
+    return "API online - WhatsApp Bot Agendamento", 200
+
+
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
     if request.method == 'GET':
-        # Verificação de token feita pela Meta
         token = request.args.get('hub.verify_token')
         challenge = request.args.get('hub.challenge')
         if token == VERIFY_TOKEN:
             return challenge
         return 'Token inválido', 403
-        # Dentro do def webhook():
+
     elif request.method == 'POST':
         data = request.json
-        # print(data) # Descomente para debug
 
-        # Verifica se há mensagens
         if data and 'entry' in data:
             for entry in data['entry']:
-                # O loop 'change' está dentro do bloco 'entry'
                 if 'changes' in entry:
                     for change in entry['changes']:
-                        
-                        # Garante que 'value' e 'messages' existam no 'change'
                         if 'value' in change and 'messages' in change['value']:
-                            
                             for message in change['value']['messages']:
-                                
-                                # Extração de dados necessária
                                 phone_number = change['value']['metadata']['phone_number_id']
-                                from_number = message['from']  # Número do usuário (WA_ID)
-                                
-                                # Processar apenas mensagens de texto
-                                if 'text' in message:
-                                    text = message['text']['body'] # O texto da mensagem do usuário
-                                    
-                                    # 1. Chamar a IA com o texto e o WA_ID (from_number)
-                                    # Isso é crucial para o HISTÓRICO de conversas funcionar!
-                                    ai_response = get_openai_response(text, from_number)
-                                    
-                                    # 2. Enviar a resposta da IA de volta para o WhatsApp
-                                    send_message(from_number, ai_response)
-                                    
-        return 'EVENT_RECEIVED', 200
+                                from_number = message['from']
 
+                                if 'text' in message:
+                                    text = message['text']['body']
+                                    ai_response = get_openai_response(text, from_number)
+                                    send_message(from_number, ai_response)
+
+        return 'EVENT_RECEIVED', 200
 
 def send_message(to, message):
     """Função para enviar mensagens via API do WhatsApp Cloud."""
