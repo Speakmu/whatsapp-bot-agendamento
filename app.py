@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import requests
 import os
 import json
@@ -9,6 +9,7 @@ import datetime
 import re
 import calendar
 import unicodedata
+
 
 COL_WA_ID = 0            # Coluna A
 COL_TIPO_CLIENTE = 1     # Coluna B
@@ -748,9 +749,4 @@ def send_message(to, message):
     }
     response = requests.post(url, headers=headers, json=payload)
     print(response.status_code, response.text)
-
-
-app = Flask(__name__)
-
-
 
