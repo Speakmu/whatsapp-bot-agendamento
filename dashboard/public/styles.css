@@ -1,0 +1,233 @@
+/* ============================================================
+   styles.css — tema unificado do sistema (painel + login)
+   Alinhado às telas de módulos (Caixa, Financeiro, Estoque...).
+   ============================================================ */
+:root {
+    --accent: #ff5200;        /* Laranja (marca) */
+    --accent-dark: #e04800;
+    --secondary-color: #2c3e50;
+    --text-color: #2c3e50;
+    --muted: #7f8c8d;
+    --bg: #f4f6f9;
+    --card: #fff;
+    --line: #e1e5ea;
+    --blue: #2f6fed;
+    --ok: #2ecc71;
+    --warn: #e67e22;
+    --danger: #e74c3c;
+    --primary-color: var(--accent);
+    --success-color: var(--ok);
+    --background-light: var(--bg);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+    background-color: var(--bg);
+    color: var(--text-color);
+}
+
+#loading-overlay {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem; color: var(--accent); z-index: 9999;
+}
+
+/* ---------- Header ---------- */
+.painel-header {
+    background-color: #fff;
+    color: var(--text-color);
+    padding: 14px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    border-bottom: 3px solid var(--accent);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+.painel-header h1 { font-weight: 800; font-size: 1.4rem; }
+.painel-header > div { display: flex; align-items: center; gap: 12px; }
+
+#status-counter {
+    background-color: #fff4ee;
+    color: var(--accent-dark);
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: .9rem;
+    font-weight: 600;
+}
+#total-pedidos { color: var(--accent); font-size: 1.2rem; font-weight: 800; }
+
+.container { padding: 20px 24px; max-width: 1200px; }
+
+/* ---------- Abas internas do painel ---------- */
+.nav-painel { display: flex; gap: 8px; flex-wrap: wrap; }
+.nav-painel .btn-status {
+    background-color: #fff;
+    color: var(--text-color);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin: 0;
+    font-weight: 600;
+}
+.nav-painel .btn-status.active {
+    background-color: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.nav-painel .btn-status:hover:not(.active) { background-color: #f1f3f5; }
+
+/* ---------- Cards de pedidos ---------- */
+.cards-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 18px;
+    margin-top: 18px;
+}
+.order-card {
+    background-color: var(--card);
+    border: 1px solid var(--line);
+    border-left: 5px solid var(--accent);
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .04);
+    padding: 18px;
+    transition: transform .15s, box-shadow .15s;
+}
+.order-card:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0, 0, 0, .08); }
+.order-header {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 14px;
+}
+.order-id { font-weight: 800; font-size: 1.15rem; color: var(--accent); }
+.order-time { font-size: .85rem; color: var(--muted); }
+.order-details p { margin-bottom: 5px; font-size: .95rem; }
+.order-details strong { color: var(--secondary-color); }
+
+/* ---------- Status tags ---------- */
+.status-tag {
+    display: inline-block; padding: 5px 12px; border-radius: 20px;
+    font-weight: 700; font-size: .78rem; margin-top: 10px; text-transform: uppercase;
+}
+.status-AGUARDANDO_PIX { background-color: #fff3cd; color: #8a6d00; }
+.status-PENDENTE_PREPARO { background-color: #fde2d8; color: var(--accent-dark); }
+.status-EM_PREPARO { background-color: #ffe5cc; color: #a85b14; }
+.status-PRONTO_PARA_ENTREGA { background-color: #d8f5e3; color: #1e8e4f; }
+.status-SAIU_PARA_ENTREGA { background-color: #dce8ff; color: #1c47b8; }
+.status-CONCLUIDO { background-color: #eceff1; color: var(--muted); }
+
+.order-actions {
+    margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--line);
+    display: flex; gap: 8px; flex-wrap: wrap;
+}
+
+/* ---------- Botões ---------- */
+.btn-status {
+    background-color: var(--blue);
+    color: #fff;
+    border: none;
+    padding: 9px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: .9rem;
+    font-weight: 600;
+    transition: filter .15s, background-color .15s;
+}
+.btn-status:hover { filter: brightness(.93); }
+.btn-cancel { background-color: var(--danger); }
+.btn-cancel:hover { filter: brightness(.93); }
+
+/* ---------- Login ---------- */
+.full-screen-center {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh; background: linear-gradient(135deg, #fff4ee 0%, var(--bg) 100%);
+    text-align: center; padding: 20px;
+}
+#login-screen h2 { margin-bottom: 18px; color: var(--secondary-color); }
+#login-screen { background: #fff; padding: 36px 30px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, .08); border: 1px solid var(--line); }
+#login-screen input {
+    display: block; padding: 12px; margin: 10px 0; width: 300px; max-width: 80vw;
+    border-radius: 8px; border: 1px solid var(--line); font-size: 1rem;
+}
+#login-button {
+    width: 300px; max-width: 80vw; padding: 12px; margin-top: 6px;
+    background-color: var(--accent); color: #fff; border: none; border-radius: 8px;
+    font-weight: 700; font-size: 1rem; cursor: pointer; transition: filter .15s;
+}
+#login-button:hover { filter: brightness(.95); }
+
+/* ---------- Cardápio ---------- */
+#cardapio-manager {
+    background-color: var(--card); padding: 20px; border-radius: 12px;
+    border: 1px solid var(--line); box-shadow: 0 2px 8px rgba(0, 0, 0, .04); margin-top: 18px;
+}
+.product-form .form-group { margin-bottom: 15px; }
+.product-form label { display: block; font-weight: 600; margin-bottom: 5px; color: var(--secondary-color); font-size: .9rem; }
+.product-form input[type="text"],
+.product-form input[type="number"],
+.product-form select {
+    width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 1rem;
+}
+.product-form .checkbox-group { display: flex; align-items: center; }
+.product-form .checkbox-group input[type="checkbox"] { width: auto; margin-right: 10px; height: 20px; }
+#btn-salvar-produto { width: 100%; padding: 12px; background-color: var(--ok); }
+#btn-salvar-produto:hover { filter: brightness(.93); }
+
+/* ---------- Relatórios ---------- */
+.report-table { width: 100%; border-collapse: separate; border-spacing: 0 8px; margin-top: 18px; }
+.report-table th { padding: 12px; color: var(--muted); text-align: left; font-size: .8rem; text-transform: uppercase; }
+.report-table tbody tr { background-color: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, .03); transition: transform .15s; }
+.report-table tbody tr:hover { transform: scale(1.005); background-color: #f8f9fa; }
+.report-table td { padding: 14px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-size: .9rem; }
+.badge-relatorio { padding: 4px 10px; border-radius: 12px; font-size: .75rem; font-weight: 700; }
+
+.insight-card {
+    background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    padding: 16px; border-radius: 12px; flex: 1; box-shadow: 0 2px 8px rgba(0, 0, 0, .04);
+}
+
+/* ============================================================
+   Refinos finos
+   ============================================================ */
+
+/* Botões de avançar status = verde (progresso); cancelar = contorno vermelho */
+.order-actions .btn-status { background-color: var(--ok); }
+.order-actions .btn-status:hover { filter: brightness(.93); }
+.order-actions .btn-cancel {
+    background-color: #fff; color: var(--danger);
+    border: 1px solid var(--danger); filter: none;
+}
+.order-actions .btn-cancel:hover { background-color: #fdecea; filter: none; }
+
+/* Header do painel: contador e "Sair" mais leves */
+.painel-header #logout-button { background-color: #fff; color: var(--text-color); border: 1px solid var(--line); }
+.painel-header #logout-button:hover { background-color: #f1f3f5; filter: none; }
+
+/* Título de seção dos pedidos */
+#pedidos-ativos > h2,
+#cardapio-manager > h2,
+#reports-view h2 { font-size: 1.15rem; margin: 4px 0 6px; color: var(--secondary-color); }
+
+/* Caixa de itens dentro do card de pedido (sobrepõe inline antigo) */
+.order-details > div > div[style] {
+    background: #fafbfc !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 8px !important;
+}
+
+/* Foco acessível por todo o sistema */
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
+/* Rolagem mais discreta */
+* { scrollbar-width: thin; scrollbar-color: #c7ccd4 transparent; }
+
+@media (max-width: 880px) {
+    .painel-header { padding: 12px 16px; }
+    .container { padding: 16px; }
+}

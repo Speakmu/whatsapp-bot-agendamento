@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ficha Técnica / Custos | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d; --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22; --line:#e1e5ea; --blue:#2f6fed; }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:14px 24px; background:#fff; border-bottom:3px solid var(--accent); position:sticky; top:0; z-index:5; }
+        header.top h1 { font-size:1.3rem; }
+        .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px; text-decoration:none; font-size:.9rem; }
+        .btn { padding:9px 14px; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:.9rem; color:#fff; }
+        .btn-azul { background:var(--blue); } .btn-verde { background:var(--ok); } .btn-rm { background:var(--danger); padding:6px 10px; font-size:.8rem; }
+
+        .wrap { padding:16px 24px; max-width:1200px; margin:0 auto; display:grid; gap:16px; }
+        .cols { display:grid; grid-template-columns:260px 1fr; gap:16px; align-items:start; }
+        .box { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+        .box h2 { font-size:1.05rem; margin-bottom:12px; }
+        .prod-list { display:flex; flex-direction:column; gap:4px; max-height:70vh; overflow-y:auto; }
+        .prod-item { padding:10px 12px; border:1px solid var(--line); border-radius:8px; cursor:pointer; font-size:.9rem; display:flex; justify-content:space-between; gap:8px; }
+        .prod-item:hover { border-color:var(--accent); }
+        .prod-item.sel { background:#fff4ee; border-color:var(--accent); font-weight:700; }
+        .prod-item .cmv { font-size:.75rem; padding:1px 7px; border-radius:10px; }
+        .c-ok { background:#e6f9ef; color:#1e8e4f; } .c-warn { background:#fff4e5; color:#b9651b; } .c-bad { background:#fdecea; color:#c0392b; } .c-none { background:#eef0f3; color:#7f8c8d; }
+
+        .add-row { display:grid; grid-template-columns:1fr 100px 90px 96px; gap:8px; align-items:end; margin-bottom:12px; }
+        .campo label { display:block; font-size:.72rem; color:var(--muted); margin-bottom:3px; }
+        .campo select, .campo input { width:100%; padding:9px; border:1px solid var(--line); border-radius:8px; font-size:.9rem; }
+        table { width:100%; border-collapse:collapse; font-size:.9rem; }
+        th, td { text-align:left; padding:9px; border-bottom:1px solid var(--line); }
+        th { color:var(--muted); font-size:.76rem; text-transform:uppercase; }
+        td.num, th.num { text-align:right; }
+
+        .resumo { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:14px; }
+        .kpi { border:1px solid var(--line); border-radius:10px; padding:12px; text-align:center; }
+        .kpi .r { font-size:.72rem; color:var(--muted); text-transform:uppercase; }
+        .kpi .v { font-size:1.3rem; font-weight:800; margin-top:4px; }
+        .kpi.custo .v { color:var(--warn); } .kpi.margem .v { color:var(--ok); }
+        .sugestao { margin-top:14px; background:#f8f9fb; border:1px solid var(--line); border-radius:10px; padding:12px; font-size:.9rem; }
+        .sugestao input { width:80px; padding:6px; border:1px solid var(--line); border-radius:6px; }
+        .vazio { color:var(--muted); padding:12px; }
+        .periodo-bar { display:flex; gap:10px; align-items:end; flex-wrap:wrap; margin-bottom:14px; }
+        .periodo-bar .campo { flex:0 0 auto; }
+        .periodo-bar input[type=date] { padding:8px; }
+        .periodo-bar input[type=number] { width:200px; padding:8px; }
+        .abc { font-size:.75rem; font-weight:800; padding:2px 9px; border-radius:10px; }
+        .abc-A { background:#e6f9ef; color:#1e8e4f; } .abc-B { background:#fff4e5; color:#b9651b; } .abc-C { background:#eef0f3; color:#7f8c8d; }
+        .hint { font-size:.78rem; color:var(--muted); margin-top:6px; }
+        @media (max-width:820px){ .cols{ grid-template-columns:1fr; } .resumo{ grid-template-columns:1fr 1fr; } .add-row{ grid-template-columns:1fr; } }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>🧮 Ficha Técnica &amp; Custos</h1>
+        <a class="link" href="/home.html">← Início</a>
+    </header>
+
+    <div class="wrap">
+        <div class="cols">
+            <!-- Lista de produtos -->
+            <div class="box">
+                <h2>Produtos</h2>
+                <div class="prod-list" id="prod-list"></div>
+            </div>
+
+            <!-- Editor da ficha -->
+            <div class="box" id="editor" style="display:none;">
+                <h2 id="prod-titulo">Ficha técnica</h2>
+                <div class="add-row">
+                    <div class="campo"><label>Insumo</label><select id="sel-insumo"></select></div>
+                    <div class="campo"><label>Quantidade</label><input type="number" id="q-insumo" step="0.001" min="0" placeholder="0"></div>
+                    <div class="campo"><label>Unidade</label><select id="sel-unidade"></select></div>
+                    <div class="campo"><label>&nbsp;</label><button class="btn btn-azul" id="btn-add">+ Adicionar</button></div>
+                </div>
+                <div class="hint">Informe na unidade que quiser (ex.: <b>80 g</b> de mussarela comprada por <b>kg</b>) — o sistema converte automaticamente para calcular o custo.</div>
+
+                <table style="margin-top:12px;">
+                    <thead><tr><th>Insumo</th><th class="num">Qtd</th><th class="num">Custo un.</th><th class="num">Custo</th><th></th></tr></thead>
+                    <tbody id="ficha-itens"></tbody>
+                </table>
+
+                <div class="resumo">
+                    <div class="kpi"><div class="r">Preço de venda</div><div class="v" id="k-preco">R$ 0,00</div></div>
+                    <div class="kpi custo"><div class="r">Custo (CMV)</div><div class="v" id="k-custo">R$ 0,00</div></div>
+                    <div class="kpi margem"><div class="r">Margem</div><div class="v" id="k-margem">R$ 0,00</div></div>
+                    <div class="kpi"><div class="r">Food cost</div><div class="v" id="k-cmv">—</div></div>
+                </div>
+
+                <div class="sugestao">
+                    💰 <b>Sugestão de preço</b> — para um food cost alvo de
+                    <input type="number" id="markup" value="35" min="1" max="90">% →
+                    <b id="preco-sugerido">R$ 0,00</b>
+                    <span id="alerta-preco" style="margin-left:8px;font-weight:700;"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Análise do período (CMV / margem / ponto de equilíbrio) -->
+        <div class="box">
+            <h2>📊 Análise do período (vendas concluídas)</h2>
+            <div class="periodo-bar">
+                <div class="campo"><label>De</label><input type="date" id="p-ini"></div>
+                <div class="campo"><label>Até</label><input type="date" id="p-fim"></div>
+                <div class="campo"><label>Custo fixo mensal (R$)</label><input type="number" id="custo-fixo" step="0.01" min="0" placeholder="aluguel, salários, contas..."></div>
+                <div class="campo"><label>&nbsp;</label><button class="btn btn-azul" id="btn-analisar">Analisar</button></div>
+            </div>
+
+            <div class="resumo" style="grid-template-columns:repeat(5,1fr);">
+                <div class="kpi"><div class="r">Receita</div><div class="v" id="a-receita">R$ 0,00</div></div>
+                <div class="kpi custo"><div class="r">CMV (custo dos insumos)</div><div class="v" id="a-cmv">R$ 0,00</div></div>
+                <div class="kpi margem"><div class="r">Margem bruta</div><div class="v" id="a-margem">R$ 0,00</div></div>
+                <div class="kpi"><div class="r">Food cost médio</div><div class="v" id="a-fc">—</div></div>
+                <div class="kpi"><div class="r">Pedidos</div><div class="v" id="a-ped">0</div></div>
+            </div>
+
+            <div class="sugestao" id="box-equilibrio">
+                ⚖️ <b>Ponto de equilíbrio</b> — com margem de contribuição de <b id="a-mc">—</b>,
+                é preciso faturar <b id="a-pe">informe o custo fixo</b> por mês para cobrir os custos fixos.
+                <div class="hint" id="a-pe-hint" style="margin-top:6px;"></div>
+            </div>
+            <div class="hint">O CMV é estimado pelas fichas técnicas dos produtos vendidos no período. Produtos sem ficha entram na receita mas não no custo (podem subestimar o CMV).</div>
+
+            <h2 style="margin-top:20px;">🔤 Curva ABC de produtos</h2>
+            <div class="hint" style="margin-bottom:8px;">Classe <b>A</b> = itens que somam os primeiros 80% do faturamento (foco total). <b>B</b> = próximos 15%. <b>C</b> = últimos 5% (cauda).</div>
+            <table>
+                <thead><tr><th>#</th><th>Produto</th><th class="num">Vendidos</th><th class="num">Receita</th><th class="num">% acum.</th><th class="num">Margem contrib.</th><th>Classe</th></tr></thead>
+                <tbody id="tbody-abc"><tr><td colspan="7" class="vazio">Clique em “Analisar”.</td></tr></tbody>
+            </table>
+        </div>
+
+        <!-- Tabela geral -->
+        <div class="box">
+            <h2>Visão geral de custos</h2>
+            <table>
+                <thead><tr><th>Produto</th><th class="num">Preço</th><th class="num">Custo</th><th class="num">Margem</th><th class="num">Food cost</th><th>Status</th></tr></thead>
+                <tbody id="tbody-geral"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/ficha-tecnica.js"></script>
+</body>
+
+</html>

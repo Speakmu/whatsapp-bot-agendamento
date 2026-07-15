@@ -1,0 +1,7 @@
+{
+  "name": "Pizzaria ChatGPT Bot",
+  "slug": "pizzaria-chatgpt-bot",
+  "android": {
+    "package": "com.anonymous.meuappmobile"
+  }
+}

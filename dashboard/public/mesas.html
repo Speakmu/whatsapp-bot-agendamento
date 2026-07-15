@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesas & Comandas | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d;
+            --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22; --line:#e1e5ea; --blue:#2f6fed;
+        }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#fff; border-bottom:3px solid var(--accent); position:sticky; top:0; z-index:5; gap:10px; flex-wrap:wrap; }
+        header.top h1 { font-size:1.3rem; }
+        .link, .btn { border:none; border-radius:8px; cursor:pointer; font-size:.9rem; }
+        .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; text-decoration:none; }
+        .btn { padding:9px 14px; font-weight:600; color:#fff; }
+        .btn-azul { background:var(--blue); } .btn-verde { background:var(--ok); } .btn-laranja { background:var(--accent); }
+        .btn-cinza { background:#95a5a6; } .btn-vermelho { background:var(--danger); }
+
+        .wrap { padding:16px; max-width:1100px; margin:0 auto; }
+        .add-mesa { display:flex; gap:8px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+        .add-mesa input { padding:9px; border:1px solid var(--line); border-radius:8px; }
+
+        .grid-mesas { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
+        .mesa {
+            background:var(--card); border:2px solid var(--ok); border-radius:14px; padding:18px; text-align:center;
+            cursor:pointer; transition:.1s; position:relative;
+        }
+        .mesa:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.1); }
+        .mesa.ocupada { border-color:var(--warn); background:#fff8f0; }
+        .mesa .num { font-size:1.6rem; font-weight:800; }
+        .mesa .nome { font-size:.8rem; color:var(--muted); }
+        .mesa .st { margin-top:8px; font-size:.8rem; font-weight:700; }
+        .mesa.livre .st { color:var(--ok); } .mesa.ocupada .st { color:var(--warn); }
+        .mesa .tot { font-size:1.05rem; font-weight:700; color:var(--accent); margin-top:6px; }
+        .mesa .x { position:absolute; top:6px; right:8px; color:#bbb; font-size:.9rem; }
+
+        /* modal comanda */
+        .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; z-index:50; padding:14px; }
+        .modal-bg.show { display:flex; }
+        .modal { background:#fff; border-radius:14px; width:min(900px,96vw); max-height:92vh; display:flex; flex-direction:column; overflow:hidden; }
+        .modal-head { padding:14px 18px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; }
+        .modal-head h3 { font-size:1.2rem; }
+        .modal-body { display:grid; grid-template-columns:1fr 1fr; gap:0; overflow:hidden; flex:1; }
+        .lado { padding:14px; overflow-y:auto; }
+        .lado.cardapio { border-right:1px solid var(--line); }
+        #busca-card { width:100%; padding:9px; border:1px solid var(--line); border-radius:8px; margin-bottom:10px; }
+        .gridc { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:8px; }
+        .pc { border:1px solid var(--line); border-radius:8px; padding:8px; cursor:pointer; font-size:.82rem; }
+        .pc:hover { border-color:var(--accent); } .pc .p { color:var(--accent); font-weight:700; }
+        .ci { display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px dashed var(--line); font-size:.9rem; }
+        .qty { display:flex; align-items:center; gap:6px; }
+        .qty button { width:24px; height:24px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }
+        .rmci { background:none; border:none; color:var(--danger); cursor:pointer; font-size:.8rem; }
+        .resumo { padding:14px; border-top:1px solid var(--line); }
+        .tot-final { font-size:1.5rem; font-weight:800; text-align:right; margin:6px 0; }
+        .campo-inline { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+        .campo-inline select, .campo-inline input { padding:8px; border:1px solid var(--line); border-radius:8px; }
+        .acoes-final { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
+        .vazio { color:var(--muted); padding:10px 0; }
+        @media (max-width:760px){ .modal-body{ grid-template-columns:1fr; } .lado.cardapio{ border-right:none; border-bottom:1px solid var(--line); max-height:38vh; } }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>🍽️ Mesas & Comandas</h1>
+        <a class="link" href="/painel.html">← Painel</a>
+    </header>
+
+    <div class="wrap">
+        <div class="add-mesa">
+            <input id="nova-mesa-num" type="number" placeholder="Nº" style="width:90px;">
+            <input id="nova-mesa-nome" placeholder="Nome/local (opcional)">
+            <button class="btn btn-verde" id="btn-add-mesa">+ Adicionar mesa</button>
+        </div>
+        <div class="grid-mesas" id="grid-mesas"></div>
+    </div>
+
+    <!-- Modal comanda -->
+    <div class="modal-bg" id="modal-comanda">
+        <div class="modal">
+            <div class="modal-head">
+                <h3 id="cmd-titulo">Mesa</h3>
+                <button class="btn btn-cinza" id="cmd-fechar-modal">Fechar</button>
+            </div>
+            <div class="modal-body">
+                <div class="lado cardapio">
+                    <input id="busca-card" placeholder="Buscar item do cardápio...">
+                    <div class="gridc" id="grid-cardapio"></div>
+                </div>
+                <div class="lado">
+                    <h4 style="margin-bottom:8px;">Itens da comanda</h4>
+                    <div id="cmd-itens"></div>
+                </div>
+            </div>
+            <div class="resumo">
+                <div class="tot-final">Total: <span id="cmd-total">R$ 0,00</span></div>
+                <div class="campo-inline">
+                    <label>Dividir por</label>
+                    <input type="number" id="cmd-dividir" min="1" value="1" style="width:70px;">
+                    <span id="cmd-por-pessoa" style="color:var(--muted);"></span>
+                </div>
+                <div class="campo-inline">
+                    <label>Pagamento</label>
+                    <select id="cmd-pagamento">
+                        <option>Dinheiro</option><option>PIX</option><option>Cartão</option>
+                    </select>
+                </div>
+                <div class="acoes-final">
+                    <button class="btn btn-vermelho" id="cmd-cancelar">Cancelar comanda</button>
+                    <button class="btn btn-verde" id="cmd-fechar-conta">Fechar conta</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/fiscal-client.js"></script>
+    <script src="/baixa-estoque.js"></script>
+    <script src="/mesas.js"></script>
+</body>
+
+</html>

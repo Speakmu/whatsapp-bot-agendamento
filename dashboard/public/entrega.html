@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entregas | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d;
+            --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22; --line:#e1e5ea; --blue:#2f6fed;
+        }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#fff; border-bottom:3px solid var(--accent); position:sticky; top:0; z-index:5; gap:10px; flex-wrap:wrap; }
+        header.top h1 { font-size:1.3rem; }
+        .link, .btn { border:none; border-radius:8px; cursor:pointer; font-size:.9rem; }
+        .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; text-decoration:none; }
+        .btn { padding:9px 14px; font-weight:600; color:#fff; }
+        .btn-azul { background:var(--blue); } .btn-verde { background:var(--ok); } .btn-laranja { background:var(--accent); }
+        .btn-cinza { background:#95a5a6; } .btn-vermelho { background:var(--danger); }
+
+        .wrap { padding:16px; display:grid; gap:16px; max-width:1200px; margin:0 auto; }
+        .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+        .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; }
+        .kpi .rotulo { font-size:.78rem; color:var(--muted); text-transform:uppercase; }
+        .kpi .valor { font-size:1.5rem; font-weight:800; margin-top:6px; }
+
+        .cols { display:grid; grid-template-columns:1.5fr 1fr; gap:16px; align-items:start; }
+        .box { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+        .box h2 { font-size:1.05rem; margin-bottom:12px; }
+
+        .ped { border:1px solid var(--line); border-left:6px solid var(--warn); border-radius:10px; padding:12px; margin-bottom:12px; }
+        .ped.rota { border-left-color:var(--blue); }
+        .ped-top { display:flex; justify-content:space-between; align-items:baseline; }
+        .ped-id { font-weight:800; }
+        .ped-end { color:var(--txt); margin:6px 0; font-size:.95rem; }
+        .ped-meta { color:var(--muted); font-size:.85rem; margin-bottom:8px; }
+        .ped-acoes { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+        .ped-acoes select { padding:8px; border:1px solid var(--line); border-radius:8px; }
+        .maps { color:var(--blue); text-decoration:none; font-size:.85rem; border:1px solid var(--line); padding:8px 10px; border-radius:8px; }
+        .vazio { color:var(--muted); padding:14px; text-align:center; }
+
+        form.ent { display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:end; margin-bottom:12px; }
+        form.ent .campo { display:flex; flex-direction:column; }
+        form.ent label { font-size:.72rem; color:var(--muted); margin-bottom:3px; }
+        form.ent input, form.ent select { padding:8px; border:1px solid var(--line); border-radius:8px; }
+        .ent-item { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); font-size:.92rem; }
+        .ent-item .off { color:var(--muted); }
+        .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+        .dot.on { background:var(--ok); } .dot.off { background:#bbb; }
+        @media (max-width:900px){ .kpis{ grid-template-columns:1fr 1fr; } .cols{ grid-template-columns:1fr; } form.ent{ grid-template-columns:1fr; } }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>🛵 Gestão de Entregas</h1>
+        <a class="link" href="/painel.html">← Painel</a>
+    </header>
+
+    <div class="wrap">
+        <div class="kpis">
+            <div class="kpi"><div class="rotulo">Aguardando despacho</div><div class="valor" id="kpi-aguardando">0</div></div>
+            <div class="kpi"><div class="rotulo">Em rota</div><div class="valor" id="kpi-rota">0</div></div>
+            <div class="kpi"><div class="rotulo">Entregues hoje</div><div class="valor" id="kpi-hoje">0</div></div>
+            <div class="kpi"><div class="rotulo">Entregadores ativos</div><div class="valor" id="kpi-entregadores">0</div></div>
+        </div>
+
+        <div class="cols">
+            <div class="box">
+                <h2>Pedidos para entrega</h2>
+                <h3 style="font-size:.9rem;color:var(--muted);margin:6px 0;">⏳ Aguardando despacho</h3>
+                <div id="lista-aguardando"></div>
+                <h3 style="font-size:.9rem;color:var(--muted);margin:14px 0 6px;">🛵 Em rota</h3>
+                <div id="lista-rota"></div>
+            </div>
+
+            <div class="box">
+                <h2>Entregadores</h2>
+                <form class="ent" id="form-ent">
+                    <div class="campo" style="grid-column:span 2;"><label>Nome</label><input id="e-nome" placeholder="Nome do entregador" required></div>
+                    <div class="campo"><label>Telefone</label><input id="e-tel" placeholder="(00) 00000-0000"></div>
+                    <div class="campo"><label>Veículo</label>
+                        <select id="e-veiculo"><option>Moto</option><option>Carro</option><option>Bicicleta</option><option>A pé</option></select>
+                    </div>
+                    <div class="campo" style="grid-column:span 2;"><button class="btn btn-verde" type="submit">+ Adicionar entregador</button></div>
+                </form>
+                <div id="lista-entregadores"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/baixa-estoque.js"></script>
+    <script src="/entrega.js"></script>
+</body>
+
+</html>

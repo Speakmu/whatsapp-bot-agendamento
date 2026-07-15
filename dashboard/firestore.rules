@@ -1,0 +1,93 @@
+rules_version = '2';
+
+// ============================================================
+//  Regras de segurança do Firestore — Pizzaria
+//  - cardapio / pedidos / usuarios_app: acessíveis ao app do
+//    cliente (sem login) e ao painel. O bot usa Admin SDK e
+//    ignora estas regras.
+//  - Coleções administrativas (caixa, financeiro): SOMENTE
+//    usuários autenticados (equipe logada no painel).
+//
+//  Publicar: Firebase Console > Firestore Database > Regras
+//  ou via CLI: firebase deploy --only firestore:rules
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Cardápio: leitura pública; escrita só logado
+    match /cardapio/{item} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Usuários: busca e atualização de pontos
+    match /usuarios_app/{userId} {
+      allow read, create, update: if request.auth != null || true;
+    }
+
+    // Pedidos: cliente cria sem login; painel lê/atualiza
+    match /pedidos/{pedidoId} {
+      allow read, list: if true;
+      allow update: if true;
+      allow create: if true;
+    }
+
+    // ===== ADMINISTRATIVO (Caixa e Financeiro): só logado =====
+    match /caixa_sessoes/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /caixa_movimentos/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /financeiro_lancamentos/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /estoque_insumos/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /estoque_movimentos/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /entregadores/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /mesas/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /comandas/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /configuracoes/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /notas_fiscais/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /fichas_tecnicas/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /fiscal_secrets/{id} {
+      allow read, write: if false;
+    }
+
+    // ===== App do cliente (leitura pública; escrita só logado) =====
+    match /app_config/{id} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /cupons/{id} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    match /promocoes/{id} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Bloqueia qualquer outra coleção não listada
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

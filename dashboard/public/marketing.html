@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Marketing & App | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d; --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22; --line:#e1e5ea; --blue:#2f6fed; }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:14px 24px; background:#fff; border-bottom:3px solid var(--accent); position:sticky; top:0; z-index:5; }
+        header.top h1 { font-size:1.4rem; }
+        .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px; text-decoration:none; font-size:.9rem; }
+        nav.tabs { display:flex; gap:8px; padding:14px 24px 0; flex-wrap:wrap; }
+        .tab { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px 8px 0 0; cursor:pointer; font-size:.9rem; }
+        .tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+        .wrap { padding:16px 24px; max-width:1000px; }
+        .view { display:none; } .view.show { display:block; }
+
+        .box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:16px; }
+        .box h2 { font-size:1.05rem; margin-bottom:4px; } .box .sub { color:var(--muted); font-size:.85rem; margin-bottom:14px; }
+        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+        .campo { margin-bottom:12px; }
+        .campo label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:5px; font-weight:600; }
+        .campo input, .campo select, .campo textarea { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; }
+        input[type=color] { height:42px; padding:4px; }
+        .switch-row { display:flex; align-items:center; justify-content:space-between; padding:12px; background:#f8f9fb; border:1px solid var(--line); border-radius:10px; margin-bottom:12px; }
+        .toggle { position:relative; width:50px; height:28px; flex:0 0 auto; }
+        .toggle input { display:none; }
+        .toggle span { position:absolute; inset:0; background:#cbd2da; border-radius:20px; cursor:pointer; transition:.2s; }
+        .toggle span::after { content:''; position:absolute; width:22px; height:22px; background:#fff; border-radius:50%; top:3px; left:3px; transition:.2s; }
+        .toggle input:checked + span { background:var(--ok); }
+        .toggle input:checked + span::after { transform:translateX(22px); }
+        .btn { padding:10px 16px; border:none; border-radius:9px; cursor:pointer; font-weight:700; color:#fff; font-size:.92rem; }
+        .btn-salvar { background:var(--ok); } .btn-add { background:var(--blue); } .btn-rm { background:var(--danger); padding:6px 10px; font-size:.8rem; }
+        table { width:100%; border-collapse:collapse; font-size:.9rem; margin-top:10px; }
+        th, td { text-align:left; padding:9px; border-bottom:1px solid var(--line); }
+        th { color:var(--muted); font-size:.78rem; text-transform:uppercase; }
+        .badge { padding:3px 9px; border-radius:12px; font-size:.76rem; font-weight:700; }
+        .b-on { background:#e6f9ef; color:#1e8e4f; } .b-off { background:#fdecea; color:#c0392b; }
+        .preview { border:1px dashed var(--line); border-radius:12px; padding:14px; margin-top:10px; }
+        .form-inline { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; align-items:end; }
+        @media (max-width:760px){ .grid2{ grid-template-columns:1fr; } .form-inline{ grid-template-columns:1fr 1fr; } }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>📣 Marketing & App</h1>
+        <a class="link" href="/home.html">← Início</a>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab active" data-tab="aparencia">🎨 Aparência do app</button>
+        <button class="tab" data-tab="promocoes">📢 Promoções / Banner</button>
+        <button class="tab" data-tab="cupons">🎟️ Cupons</button>
+        <button class="tab" data-tab="fidelidade">⭐ Fidelidade</button>
+    </nav>
+
+    <div class="wrap">
+        <!-- APARÊNCIA -->
+        <section class="view show" id="view-aparencia">
+            <div class="box">
+                <h2>Identidade do aplicativo</h2>
+                <div class="sub">Define como o app do cliente aparece (nome, cor da marca e logo).</div>
+                <div class="grid2">
+                    <div class="campo"><label>Nome do app</label><input id="a-nome" placeholder="Ex: Pizza In"></div>
+                    <div class="campo"><label>Emoji/ícone da marca</label><input id="a-emoji" placeholder="🍕" maxlength="4"></div>
+                    <div class="campo"><label>Cor primária</label><input type="color" id="a-cor" value="#ff5200"></div>
+                    <div class="campo"><label>Cor (hex)</label><input id="a-corhex" placeholder="#ff5200"></div>
+                </div>
+                <div class="preview" id="a-preview">Pré-visualização</div>
+                <div style="margin-top:14px;"><button class="btn btn-salvar" id="a-salvar">Salvar aparência</button></div>
+            </div>
+        </section>
+
+        <!-- PROMOÇÕES -->
+        <section class="view" id="view-promocoes">
+            <div class="box">
+                <h2>Banner promocional</h2>
+                <div class="sub">Faixa exibida no topo do app.</div>
+                <div class="switch-row">
+                    <div><strong>Exibir banner</strong></div>
+                    <label class="toggle"><input type="checkbox" id="b-ativo"><span></span></label>
+                </div>
+                <div class="campo"><label>Texto do banner</label><input id="b-texto" placeholder="Ex: Pizza grande em dobro nas terças! 🍕"></div>
+                <div class="campo"><label>Cor de fundo do banner</label><input type="color" id="b-cor" value="#ff5200"></div>
+                <button class="btn btn-salvar" id="b-salvar">Salvar banner</button>
+            </div>
+            <div class="box">
+                <h2>Promoções</h2>
+                <div class="sub">Lista de promoções exibidas no app.</div>
+                <div class="form-inline">
+                    <div class="campo" style="grid-column:span 2;"><label>Título</label><input id="p-titulo" placeholder="Ex: Combo família"></div>
+                    <div class="campo" style="grid-column:span 3;"><label>Descrição</label><input id="p-desc" placeholder="2 pizzas G + refri"></div>
+                    <div class="campo"><label>&nbsp;</label><button class="btn btn-add" id="p-add">+ Adicionar</button></div>
+                </div>
+                <table><thead><tr><th>Promoção</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
+                    <tbody id="p-lista"></tbody></table>
+            </div>
+        </section>
+
+        <!-- CUPONS -->
+        <section class="view" id="view-cupons">
+            <div class="box">
+                <h2>Cupons de desconto</h2>
+                <div class="sub">Códigos que o cliente aplica no carrinho do app.</div>
+                <div class="form-inline">
+                    <div class="campo"><label>Código</label><input id="c-codigo" placeholder="PIZZA10" style="text-transform:uppercase"></div>
+                    <div class="campo"><label>Tipo</label><select id="c-tipo"><option value="percentual">% percentual</option><option value="fixo">R$ fixo</option></select></div>
+                    <div class="campo"><label>Valor</label><input type="number" id="c-valor" step="0.01" min="0" placeholder="10"></div>
+                    <div class="campo"><label>Mínimo (R$)</label><input type="number" id="c-min" step="0.01" min="0" value="0"></div>
+                    <div class="campo"><label>Validade</label><input type="date" id="c-val"></div>
+                    <div class="campo"><label>&nbsp;</label><button class="btn btn-add" id="c-add">+ Criar</button></div>
+                </div>
+                <table><thead><tr><th>Código</th><th>Desconto</th><th>Mínimo</th><th>Validade</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
+                    <tbody id="c-lista"></tbody></table>
+            </div>
+        </section>
+
+        <!-- FIDELIDADE -->
+        <section class="view" id="view-fidelidade">
+            <div class="box">
+                <h2>Programa de fidelidade</h2>
+                <div class="sub">Regras de acúmulo e resgate de pontos no app.</div>
+                <div class="switch-row">
+                    <div><strong>Ativar fidelidade</strong></div>
+                    <label class="toggle"><input type="checkbox" id="f-ativo"><span></span></label>
+                </div>
+                <div class="grid2">
+                    <div class="campo"><label>Pontos por R$ 1,00 gasto</label><input type="number" id="f-pontosreal" step="0.01" min="0" value="1"></div>
+                    <div class="campo"><label>Valor de cada ponto no resgate (R$)</label><input type="number" id="f-valorponto" step="0.01" min="0" value="0.05"></div>
+                    <div class="campo"><label>Mínimo de pontos para resgatar</label><input type="number" id="f-minresgate" min="0" value="100"></div>
+                    <div class="campo"><label>Validade dos pontos (dias, 0 = sem validade)</label><input type="number" id="f-validade" min="0" value="0"></div>
+                </div>
+                <button class="btn btn-salvar" id="f-salvar">Salvar fidelidade</button>
+            </div>
+        </section>
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/marketing.js"></script>
+</body>
+
+</html>

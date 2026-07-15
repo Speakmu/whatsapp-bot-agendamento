@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Início | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d; --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22; --line:#e1e5ea; --blue:#2f6fed; }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        .topbar { background:#fff; border-bottom:1px solid var(--line); padding:18px 24px; }
+        .topbar h1 { font-size:1.4rem; }
+        .topbar p { color:var(--muted); font-size:.9rem; margin-top:2px; }
+        .wrap { padding:22px 24px; max-width:1100px; }
+
+        .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px; }
+        .kpi { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; position:relative; overflow:hidden; }
+        .kpi .ic { position:absolute; right:14px; top:14px; font-size:1.6rem; opacity:.25; }
+        .kpi .rotulo { font-size:.78rem; color:var(--muted); text-transform:uppercase; }
+        .kpi .valor { font-size:1.8rem; font-weight:800; margin-top:8px; }
+        .kpi.vendas .valor { color:var(--ok); }
+        .kpi.alerta .valor { color:var(--danger); }
+
+        h2.sec { font-size:1rem; color:var(--muted); margin:6px 0 12px; text-transform:uppercase; letter-spacing:.04em; }
+        .atalhos { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
+        .atalho {
+            background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px;
+            text-decoration:none; color:var(--txt); display:flex; flex-direction:column; gap:6px; transition:.12s;
+        }
+        .atalho:hover { transform:translateY(-3px); box-shadow:0 6px 18px rgba(0,0,0,.08); border-color:var(--accent); }
+        .atalho .ic { font-size:1.8rem; }
+        .atalho .nome { font-weight:700; }
+        .atalho .desc { font-size:.82rem; color:var(--muted); }
+        @media (max-width:880px){ .kpis{ grid-template-columns:1fr 1fr; } }
+    </style>
+</head>
+
+<body>
+    <div class="topbar">
+        <h1 id="titulo-boas-vindas">👋 Bem-vindo ao GestorChef</h1>
+        <p id="data-hoje">—</p>
+    </div>
+
+    <div class="wrap">
+        <div id="banner-estoque" style="display:none;background:#fff4ee;border:1px solid #ffd9c4;border-left:5px solid var(--danger);border-radius:12px;padding:14px 16px;margin-bottom:18px;">
+            <strong style="color:var(--danger);">⚠️ Estoque baixo</strong>
+            <span id="banner-estoque-txt" style="font-size:.9rem;"></span>
+            <a href="/estoque.html" style="margin-left:8px;font-size:.85rem;color:var(--blue);text-decoration:none;font-weight:600;">Ver compras sugeridas →</a>
+        </div>
+
+        <div class="kpis">
+            <div class="kpi vendas"><span class="ic">💰</span><div class="rotulo">Vendas hoje</div><div class="valor" id="kpi-vendas">R$ 0,00</div></div>
+            <div class="kpi"><span class="ic">🧾</span><div class="rotulo">Pedidos ativos</div><div class="valor" id="kpi-ativos">0</div></div>
+            <div class="kpi"><span class="ic">🍽️</span><div class="rotulo">Mesas ocupadas</div><div class="valor" id="kpi-mesas">0</div></div>
+            <div class="kpi alerta"><span class="ic">📦</span><div class="rotulo">Estoque baixo</div><div class="valor" id="kpi-estoque">0</div></div>
+        </div>
+
+        <h2 class="sec">Acesso rápido</h2>
+        <div class="atalhos">
+            <a class="atalho" href="/painel.html"><span class="ic">🧾</span><span class="nome">Pedidos</span><span class="desc">Pedidos ativos em tempo real</span></a>
+            <a class="atalho" href="/kds.html"><span class="ic">👨‍🍳</span><span class="nome">Cozinha (KDS)</span><span class="desc">Tela de preparo</span></a>
+            <a class="atalho" href="/caixa.html"><span class="ic">💵</span><span class="nome">Caixa / PDV</span><span class="desc">Venda no balcão e caixa</span></a>
+            <a class="atalho" href="/mesas.html"><span class="ic">🍽️</span><span class="nome">Mesas</span><span class="desc">Comandas e mesas</span></a>
+            <a class="atalho" href="/entrega.html"><span class="ic">🛵</span><span class="nome">Entregas</span><span class="desc">Despacho e entregadores</span></a>
+            <a class="atalho" href="/estoque.html"><span class="ic">📦</span><span class="nome">Estoque</span><span class="desc">Insumos e reposição</span></a>
+            <a class="atalho" href="/financeiro.html"><span class="ic">📊</span><span class="nome">Financeiro</span><span class="desc">DRE e fluxo de caixa</span></a>
+            <a class="atalho" href="/painel.html#cardapio"><span class="ic">🍕</span><span class="nome">Cardápio</span><span class="desc">Gerenciar itens</span></a>
+        </div>
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/home.js"></script>
+</body>
+
+</html>

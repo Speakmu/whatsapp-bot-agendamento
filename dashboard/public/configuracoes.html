@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configurações | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d; --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22; --line:#e1e5ea; --blue:#2f6fed; }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:14px 24px; background:#fff; border-bottom:3px solid var(--accent); position:sticky; top:0; z-index:5; }
+        header.top h1 { font-size:1.4rem; }
+        .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px; text-decoration:none; font-size:.9rem; }
+        .wrap { padding:20px 24px; max-width:900px; display:grid; gap:18px; }
+
+        .box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; }
+        .box h2 { font-size:1.1rem; margin-bottom:4px; }
+        .box .sub { color:var(--muted); font-size:.85rem; margin-bottom:16px; }
+        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+        .campo { margin-bottom:14px; }
+        .campo label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:5px; font-weight:600; }
+        .campo input, .campo select { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; }
+        .switch-row { display:flex; align-items:center; justify-content:space-between; padding:12px; background:#f8f9fb; border:1px solid var(--line); border-radius:10px; margin-bottom:14px; }
+        .switch-row .t { font-weight:600; } .switch-row .d { font-size:.82rem; color:var(--muted); }
+        .toggle { position:relative; width:50px; height:28px; flex:0 0 auto; }
+        .toggle input { display:none; }
+        .toggle span { position:absolute; inset:0; background:#cbd2da; border-radius:20px; cursor:pointer; transition:.2s; }
+        .toggle span::after { content:''; position:absolute; width:22px; height:22px; background:#fff; border-radius:50%; top:3px; left:3px; transition:.2s; }
+        .toggle input:checked + span { background:var(--ok); }
+        .toggle input:checked + span::after { transform:translateX(22px); }
+        .btn { padding:11px 18px; border:none; border-radius:9px; cursor:pointer; font-weight:700; color:#fff; font-size:.95rem; }
+        .btn-salvar { background:var(--ok); } .btn-testar { background:var(--blue); }
+        .acoes { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+        .hint { background:#fff8e6; border:1px solid #f1c40f; color:#8a6d00; padding:10px 12px; border-radius:8px; font-size:.85rem; margin-top:6px; }
+        .badge { font-size:.75rem; padding:3px 10px; border-radius:12px; }
+        .badge.on { background:#e6f9ef; color:#1e8e4f; } .badge.off { background:#fdecea; color:#c0392b; }
+        .fiscal-fields.disabled { opacity:.5; pointer-events:none; }
+        .exib-grupos { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+        .exib-grupo h3 { font-size:.82rem; color:var(--accent); margin-bottom:8px; text-transform:uppercase; letter-spacing:.04em; }
+        .exib-item { display:flex; align-items:center; gap:9px; padding:7px 0; font-size:.93rem; cursor:pointer; border-bottom:1px solid #f0f2f5; }
+        .exib-item input { width:18px; height:18px; accent-color:var(--ok); }
+        @media (max-width:760px){ .grid2{ grid-template-columns:1fr; } .exib-grupos{ grid-template-columns:1fr; } }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>⚙️ Configurações</h1>
+        <a class="link" href="/home.html">← Início</a>
+    </header>
+
+    <div class="wrap">
+        <div class="box" style="padding:14px 20px;">
+            <div class="campo" style="margin:0;max-width:340px;">
+                <label>Seção das configurações</label>
+                <select id="secao-config">
+                    <option value="sistema">Sistema</option>
+                    <option value="fiscal">Fiscal (NFC-e)</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="painel-sistema">
+        <!-- Geral -->
+        <div class="box">
+            <h2>Estabelecimento</h2>
+            <div class="sub">Dados gerais usados nas telas e documentos.</div>
+            <div class="grid2">
+                <div class="campo"><label>Nome do estabelecimento</label><input id="g-nome" placeholder="Pizzaria Deliciosa"></div>
+                <div class="campo"><label>Telefone</label><input id="g-telefone" placeholder="(00) 0000-0000"></div>
+            </div>
+            <div class="campo"><label>Endereço</label><input id="g-endereco" placeholder="Rua, número, bairro, cidade/UF"></div>
+            <div class="acoes"><button class="btn btn-salvar" id="salvar-geral">Salvar dados gerais</button></div>
+        </div>
+
+        <!-- Exibição de módulos -->
+        <div class="box">
+            <h2>Exibição de módulos</h2>
+            <div class="sub">Escolha o que aparece no menu lateral. <strong>Início</strong> e <strong>Configurações</strong> são sempre visíveis.</div>
+            <div class="exib-grupos">
+                <div class="exib-grupo">
+                    <h3>Operação</h3>
+                    <label class="exib-item"><input type="checkbox" data-mod="pedidos" checked> Pedidos</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="kds" checked> Cozinha (KDS)</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="mesas" checked> Mesas</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="entregas" checked> Entregas</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="caixa" checked> Caixa / PDV</label>
+                </div>
+                <div class="exib-grupo">
+                    <h3>Gestão</h3>
+                    <label class="exib-item"><input type="checkbox" data-mod="bi" checked> BI / Vendas</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="financeiro" checked> Financeiro</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="notas" checked> Notas Fiscais</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="relatorios" checked> Relatórios</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="estoque" checked> Estoque</label>
+                    <label class="exib-item"><input type="checkbox" data-mod="fichas" checked> Ficha Técnica / Custos</label>
+                </div>
+                <div class="exib-grupo">
+                    <h3>Cadastros</h3>
+                    <label class="exib-item"><input type="checkbox" data-mod="cardapio" checked> Cardápio</label>
+                </div>
+                <div class="exib-grupo">
+                    <h3>Sistema</h3>
+                    <label class="exib-item"><input type="checkbox" data-mod="marketing" checked> Marketing &amp; App</label>
+                </div>
+            </div>
+            <div class="acoes" style="margin-top:16px;"><button class="btn btn-salvar" id="salvar-exibicao">Salvar exibição</button></div>
+        </div>
+        </div><!-- /painel-sistema -->
+
+        <div id="painel-fiscal" style="display:none;">
+        <!-- Fiscal -->
+        <div class="box">
+            <h2>Emissão Fiscal (NFC-e) <span class="badge off" id="fiscal-status">Desativado</span></h2>
+            <div class="sub">Integração com o serviço fiscal (emissão de NFC-e via SEFAZ).</div>
+
+            <div class="switch-row">
+                <div><div class="t">Ativar emissão fiscal</div><div class="d">Habilita a emissão de NFC-e no sistema.</div></div>
+                <label class="toggle"><input type="checkbox" id="f-ativo"><span></span></label>
+            </div>
+
+            <div class="fiscal-fields" id="fiscal-fields">
+                <div class="campo">
+                    <label>Modo de emissão</label>
+                    <select id="f-modo">
+                        <option value="manual">Manual — botão "Emitir NFC-e" no pedido/venda</option>
+                        <option value="automatico">Automático — emite ao concluir a venda</option>
+                        <option value="ambos">Ambos — automático (cartão/PIX) + botão manual</option>
+                    </select>
+                </div>
+
+                <div class="grid2">
+                    <div class="campo"><label>URL do serviço fiscal</label><input id="f-url" placeholder="https://fiscal.suaempresa.com"></div>
+                    <div class="campo"><label>Chave de API do serviço (token)</label><input id="f-apikey" placeholder="token de acesso"></div>
+                </div>
+
+                <h3 style="font-size:.95rem;margin:12px 0 6px;">Certificado digital A1</h3>
+                <div class="sub">Envie o arquivo <strong>.pfx</strong> do CNPJ e informe a <strong>senha</strong>. A senha é validada e guardada de forma cifrada no serviço fiscal. Salve a URL/API acima e clique em Testar conexão antes de enviar.</div>
+                <div class="grid2">
+                    <div class="campo"><label>Arquivo do certificado (.pfx)</label><input type="file" id="f-cert-file" accept=".pfx,.p12"></div>
+                    <div class="campo"><label>Senha do certificado</label><input type="password" id="f-cert-senha" placeholder="senha do .pfx" autocomplete="off"></div>
+                </div>
+                <div class="acoes" style="margin-bottom:6px;">
+                    <button class="btn btn-testar" id="enviar-cert">Enviar certificado</button>
+                    <span id="cert-msg" style="font-size:.88rem;"></span>
+                </div>
+
+                <h3 style="font-size:.95rem;margin:10px 0;">Dados da empresa (emitente)</h3>
+                <div class="grid2">
+                    <div class="campo"><label>Razão social</label><input id="f-razao" placeholder="Razão social do CNPJ"></div>
+                    <div class="campo"><label>Nome fantasia</label><input id="f-fantasia" placeholder="Nome fantasia"></div>
+                    <div class="campo"><label>CNPJ</label><input id="f-cnpj" placeholder="00.000.000/0000-00"></div>
+                    <div class="campo"><label>Inscrição Estadual (IE)</label><input id="f-ie" placeholder="IE"></div>
+                    <div class="campo"><label>UF</label><input id="f-uf" placeholder="SP" maxlength="2"></div>
+                    <div class="campo">
+                        <label>Regime tributário</label>
+                        <select id="f-regime">
+                            <option value="simples">Simples Nacional (CSOSN)</option>
+                            <option value="normal">Regime Normal (CST)</option>
+                        </select>
+                    </div>
+                    <div class="campo">
+                        <label>Ambiente</label>
+                        <select id="f-ambiente">
+                            <option value="homologacao">Homologação (testes)</option>
+                            <option value="producao">Produção (valor fiscal real)</option>
+                        </select>
+                    </div>
+                    <div class="campo"><label>Série da NFC-e</label><input id="f-serie" type="number" value="1" min="1"></div>
+                    <div class="campo"><label>CSC (código de segurança do contribuinte)</label><input id="f-csc" placeholder="CSC da SEFAZ"></div>
+                    <div class="campo"><label>ID do token CSC</label><input id="f-cscid" placeholder="Ex: 000001"></div>
+                </div>
+
+                <h3 style="font-size:.95rem;margin:10px 0;">Endereço do emitente</h3>
+                <div class="grid2">
+                    <div class="campo"><label>Logradouro</label><input id="f-xlgr" placeholder="Rua/Av."></div>
+                    <div class="campo"><label>Número</label><input id="f-nro" placeholder="Nº"></div>
+                    <div class="campo"><label>Complemento</label><input id="f-xcpl" placeholder="Opcional"></div>
+                    <div class="campo"><label>Bairro</label><input id="f-xbairro" placeholder="Bairro"></div>
+                    <div class="campo"><label>Município</label><input id="f-xmun" placeholder="Cidade"></div>
+                    <div class="campo"><label>Código IBGE do município (7 dígitos)</label><input id="f-cmun" placeholder="Ex: 3550308"></div>
+                    <div class="campo"><label>CEP</label><input id="f-cep" placeholder="00000-000"></div>
+                    <div class="campo"><label>Telefone</label><input id="f-fone" placeholder="(00) 0000-0000"></div>
+                </div>
+
+                <h3 style="font-size:.95rem;margin:10px 0;">URLs da NFC-e (por UF/ambiente)</h3>
+                <div class="sub">Informe as URLs do portal NFC-e da sua Secretaria da Fazenda (peça à contabilidade).</div>
+                <div class="campo"><label>URL base do QR Code</label><input id="f-qrbase" placeholder="https://www.nfce.fazenda.sp.gov.br/...ConsultaQRCode.aspx"></div>
+                <div class="campo"><label>URL de consulta por chave</label><input id="f-urlchave" placeholder="https://www.nfce.fazenda.sp.gov.br/NFCeConsultaPublica"></div>
+
+                <h3 style="font-size:.95rem;margin:10px 0;">Classificação fiscal padrão dos produtos</h3>
+                <div class="sub">Aplicada aos itens quando o produto não tiver classificação própria.</div>
+                <div class="grid2">
+                    <div class="campo"><label>NCM padrão</label><input id="f-ncm" placeholder="Ex: 21069090"></div>
+                    <div class="campo"><label>CFOP padrão</label><input id="f-cfop" placeholder="Ex: 5102"></div>
+                    <div class="campo"><label>CSOSN/CST padrão</label><input id="f-cst" placeholder="Ex: 102"></div>
+                    <div class="campo"><label>Origem da mercadoria</label>
+                        <select id="f-origem"><option value="0">0 - Nacional</option><option value="1">1 - Estrangeira (importação direta)</option><option value="2">2 - Estrangeira (mercado interno)</option></select>
+                    </div>
+                </div>
+
+                <div class="hint">⚠️ O certificado digital A1 é enviado e armazenado no serviço fiscal (não aqui), por segurança. Comece sempre em <strong>Homologação</strong> antes de emitir em Produção.</div>
+            </div>
+
+            <div class="acoes" style="margin-top:14px;">
+                <button class="btn btn-salvar" id="salvar-fiscal">Salvar configuração fiscal</button>
+                <button class="btn btn-testar" id="testar-fiscal">Testar conexão</button>
+                <span id="fiscal-msg" style="font-size:.88rem;"></span>
+            </div>
+        </div>
+        </div><!-- /painel-fiscal -->
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/configuracoes.js"></script>
+</body>
+
+</html>

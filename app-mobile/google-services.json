@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "353057562610",
+    "project_id": "salgadinhos-lileamar",
+    "storage_bucket": "salgadinhos-lileamar.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:353057562610:android:b8e0226a03c70cc8b3d56b",
+        "android_client_info": {
+          "package_name": "com.seusuporte.lileamar"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAYwM_xctXiik5l_PHJU_NS_MGzO1wc3TI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KDS — Cozinha | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #0f1115;
+            --col-bg: #171a21;
+            --card: #20242e;
+            --txt: #e8eaed;
+            --muted: #9aa0aa;
+            --ok: #2ecc71;
+            --warn: #f1c40f;
+            --late: #e74c3c;
+            --accent: #ff5200;
+        }
+        body {
+            background: var(--bg);
+            color: var(--txt);
+            font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        header.kds-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            background: #0b0d11;
+            border-bottom: 2px solid var(--accent);
+            flex: 0 0 auto;
+        }
+        header.kds-header h1 { font-size: 1.4rem; }
+        .kds-header .right { display: flex; align-items: center; gap: 16px; }
+        #relogio { font-variant-numeric: tabular-nums; font-size: 1.1rem; color: var(--muted); }
+        .kds-link, #btn-som {
+            color: var(--txt); background: #2a2f3a; border: 1px solid #3a4150;
+            padding: 8px 14px; border-radius: 8px; text-decoration: none;
+            font-size: .9rem; cursor: pointer;
+        }
+        .kds-link:hover, #btn-som:hover { background: #353c49; }
+
+        .board {
+            flex: 1 1 auto;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+            padding: 14px;
+            overflow: hidden;
+        }
+        .col {
+            background: var(--col-bg);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .col-title {
+            padding: 12px 14px;
+            font-weight: 700;
+            font-size: 1.05rem;
+            border-bottom: 1px solid #2a2f3a;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .col-title .count {
+            background: #2a2f3a; color: var(--muted);
+            border-radius: 20px; padding: 2px 10px; font-size: .85rem;
+        }
+        .col-fila .col-title { color: #8ab4ff; }
+        .col-preparo .col-title { color: var(--warn); }
+        .col-pronto .col-title { color: var(--ok); }
+        .col-body { padding: 12px; overflow-y: auto; flex: 1; }
+
+        .ticket {
+            background: var(--card);
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 12px;
+            border-left: 6px solid #3a4150;
+        }
+        .ticket.t-warn { border-left-color: var(--warn); }
+        .ticket.t-late { border-left-color: var(--late); animation: pulse 1.6s infinite; }
+        @keyframes pulse { 0%,100% { background: var(--card);} 50% { background: #2c2230; } }
+        .ticket-top {
+            display: flex; justify-content: space-between; align-items: baseline;
+            margin-bottom: 8px;
+        }
+        .ticket-id { font-weight: 800; font-size: 1.1rem; }
+        .ticket-timer { font-variant-numeric: tabular-nums; font-weight: 700; }
+        .ticket-timer.t-warn { color: var(--warn); }
+        .ticket-timer.t-late { color: var(--late); }
+        .ticket-cliente { color: var(--muted); font-size: .9rem; margin-bottom: 8px; }
+        .ticket-itens { list-style: none; }
+        .ticket-itens li {
+            padding: 6px 0; border-bottom: 1px dashed #2f3540; font-size: 1.05rem;
+        }
+        .ticket-itens li:last-child { border-bottom: none; }
+        .ticket-itens .obs { color: var(--warn); font-size: .85rem; display: block; }
+        .ticket-meta { font-size: .8rem; color: var(--muted); margin: 8px 0; }
+        .ticket-btn {
+            width: 100%; padding: 12px; border: none; border-radius: 8px;
+            font-weight: 700; font-size: 1rem; cursor: pointer; color: #fff;
+            margin-top: 6px;
+        }
+        .btn-iniciar { background: #2f6fed; }
+        .btn-pronto { background: var(--ok); color: #06310f; }
+        .btn-despachar { background: var(--accent); }
+        .ticket-btn:active { transform: scale(.98); }
+        .vazio { color: var(--muted); text-align: center; padding: 30px 10px; font-size: .9rem; }
+
+        @media (max-width: 820px) {
+            .board { grid-template-columns: 1fr; overflow-y: auto; }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="kds-header">
+        <h1>👨‍🍳 KDS — Cozinha</h1>
+        <div class="right">
+            <span id="relogio">--:--:--</span>
+            <button id="btn-som" title="Ativar/silenciar som de novos pedidos">🔔 Som: ON</button>
+            <a class="kds-link" href="/home.html">← Início</a>
+        </div>
+    </header>
+
+    <main class="board">
+        <section class="col col-fila">
+            <div class="col-title">📥 Na fila <span class="count" id="count-fila">0</span></div>
+            <div class="col-body" id="col-fila"></div>
+        </section>
+        <section class="col col-preparo">
+            <div class="col-title">🔥 Em preparo <span class="count" id="count-preparo">0</span></div>
+            <div class="col-body" id="col-preparo"></div>
+        </section>
+        <section class="col col-pronto">
+            <div class="col-title">✅ Pronto <span class="count" id="count-pronto">0</span></div>
+            <div class="col-body" id="col-pronto"></div>
+        </section>
+    </main>
+
+    <script src="/baixa-estoque.js"></script>
+    <script src="/kds.js"></script>
+</body>
+
+</html>

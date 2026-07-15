@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apresentação — GestorChef (Sistema Completo)</title>
+<style>
+  :root{ --accent:#ff5200; --txt:#1f2733; --muted:#6b7480; --line:#e6e9ee; --bg:#f6f7f9;
+         --c-canal:#2f6fed; --c-oper:#e67e22; --c-gestao:#16a085; --dark:#15181f; }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',Roboto,system-ui,sans-serif;background:var(--bg);color:var(--txt);padding:32px;}
+  .page{max-width:1180px;margin:0 auto;}
+  .head{display:flex;align-items:center;gap:16px;border-bottom:4px solid var(--accent);padding-bottom:18px;margin-bottom:24px;}
+  .logo{font-size:2.4rem;}
+  .head h1{font-size:1.9rem;}
+  .head .sub{color:var(--muted);font-size:1rem;margin-top:2px;}
+  .badge{margin-left:auto;background:var(--dark);color:#fff;padding:8px 16px;border-radius:30px;font-weight:700;font-size:.85rem;}
+
+  .layer-label{font-size:.78rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin:6px 0 10px;text-align:center;}
+  .row{display:grid;gap:14px;}
+  .row.c4{grid-template-columns:repeat(4,1fr);}
+  .row.c3{grid-template-columns:repeat(3,1fr);}
+  .row.c5{grid-template-columns:repeat(5,1fr);}
+  .node{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.04);}
+  .node .ic{font-size:1.7rem;}
+  .node .t{font-weight:800;margin-top:6px;font-size:.98rem;}
+  .node .d{color:var(--muted);font-size:.8rem;margin-top:4px;line-height:1.35;}
+  .node.canal{border-top:4px solid var(--c-canal);}
+  .node.oper{border-top:4px solid var(--c-oper);}
+  .node.gestao{border-top:4px solid var(--c-gestao);}
+
+  .seta{display:flex;justify-content:center;align-items:center;color:var(--accent);font-size:1.6rem;margin:6px 0;}
+  .hub{background:linear-gradient(135deg,var(--accent),#ff8a4d);color:#fff;border-radius:16px;padding:20px;text-align:center;box-shadow:0 8px 22px rgba(255,82,0,.3);}
+  .hub .t{font-size:1.5rem;font-weight:900;}
+  .hub .d{opacity:.95;margin-top:4px;font-size:.95rem;}
+  .hub .chips{margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
+  .hub .chip{background:rgba(255,255,255,.22);padding:4px 12px;border-radius:20px;font-size:.8rem;font-weight:600;}
+
+  .extras{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:24px;}
+  .extra{background:#fff;border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:12px;padding:14px 16px;}
+  .extra .t{font-weight:800;display:flex;gap:8px;align-items:center;}
+  .extra .d{color:var(--muted);font-size:.86rem;margin-top:4px;}
+  .foot{margin-top:30px;color:var(--muted);font-size:.85rem;text-align:center;border-top:1px solid var(--line);padding-top:16px;}
+  @media (max-width:820px){ .row.c4,.row.c3,.row.c5{grid-template-columns:1fr 1fr;} .extras{grid-template-columns:1fr;} }
+  @media print{ body{background:#fff;padding:0;} .node,.extra{box-shadow:none;} }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="logo">🍕</div>
+    <div>
+      <h1>GestorChef — Sistema Completo de Gestão</h1>
+      <div class="sub">Todos os canais de venda em um só lugar, em tempo real</div>
+    </div>
+    <div class="badge">Sistema Completo</div>
+  </div>
+
+  <!-- CAMADA 1: CANAIS -->
+  <div class="layer-label">1 · Por onde os pedidos chegam</div>
+  <div class="row c4">
+    <div class="node canal"><div class="ic">📱</div><div class="t">App do Cliente</div><div class="d">Pedidos online, marca própria</div></div>
+    <div class="node canal"><div class="ic">💬</div><div class="t">Bot WhatsApp</div><div class="d">Atendimento automático com IA</div></div>
+    <div class="node canal"><div class="ic">💵</div><div class="t">Balcão (PDV)</div><div class="d">Venda presencial / frente de caixa</div></div>
+    <div class="node canal"><div class="ic">🍽️</div><div class="t">Mesas & Comandas</div><div class="d">Atendimento no salão</div></div>
+  </div>
+
+  <div class="seta">▼ ▼ ▼ ▼</div>
+
+  <!-- NÚCLEO -->
+  <div class="hub">
+    <div class="t">GestorChef</div>
+    <div class="d">Centraliza todos os pedidos em tempo real e organiza toda a operação</div>
+    <div class="chips"><span class="chip">Tempo real</span><span class="chip">1 painel</span><span class="chip">Multicanal</span><span class="chip">Na nuvem</span></div>
+  </div>
+
+  <div class="seta">▼</div>
+
+  <!-- CAMADA 2: OPERAÇÃO -->
+  <div class="layer-label">2 · Operação do dia a dia</div>
+  <div class="row c3">
+    <div class="node oper"><div class="ic">👨‍🍳</div><div class="t">Cozinha (KDS)</div><div class="d">Tela de preparo com tempo e fila</div></div>
+    <div class="node oper"><div class="ic">🛵</div><div class="t">Entregas</div><div class="d">Despacho, entregadores e rota</div></div>
+    <div class="node oper"><div class="ic">💳</div><div class="t">Caixa</div><div class="d">Abertura, sangria e fechamento</div></div>
+  </div>
+
+  <div class="seta">▼</div>
+
+  <!-- CAMADA 3: GESTÃO -->
+  <div class="layer-label">3 · Gestão e inteligência</div>
+  <div class="row c5">
+    <div class="node gestao"><div class="ic">📈</div><div class="t">BI / Vendas</div><div class="d">Gráficos e indicadores</div></div>
+    <div class="node gestao"><div class="ic">📊</div><div class="t">Financeiro</div><div class="d">DRE e fluxo de caixa</div></div>
+    <div class="node gestao"><div class="ic">📦</div><div class="t">Estoque</div><div class="d">Insumos e reposição</div></div>
+    <div class="node gestao"><div class="ic">🧾</div><div class="t">Nota Fiscal</div><div class="d">Emissão de NFC-e</div></div>
+    <div class="node gestao"><div class="ic">📣</div><div class="t">Marketing & App</div><div class="d">Cupons, fidelidade, banner</div></div>
+  </div>
+
+  <!-- EXTRAS -->
+  <div class="extras">
+    <div class="extra"><div class="t">🤖 Atendimento inteligente</div><div class="d">Bot no WhatsApp responde, envia cardápio e registra pedidos sozinho — 24 horas por dia.</div></div>
+    <div class="extra"><div class="t">🧾 Fiscal integrado</div><div class="d">Emissão de NFC-e direto na SEFAZ, manual ou automática ao fechar a venda.</div></div>
+    <div class="extra"><div class="t">📲 App da sua marca</div><div class="d">Nome, cores, promoções e fidelidade configuráveis — sem comissão por pedido.</div></div>
+    <div class="extra"><div class="t">📊 Decisão por dados</div><div class="d">Veja horários de pico, produtos campeões, canais e ticket médio para vender mais.</div></div>
+  </div>
+
+  <div class="foot">Um sistema, todos os canais. Do pedido à nota fiscal, com gestão e marketing no mesmo lugar.</div>
+</div>
+</body>
+</html>

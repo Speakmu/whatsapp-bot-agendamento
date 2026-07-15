@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notas Fiscais | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d; --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22; --line:#e1e5ea; --blue:#2f6fed; }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:14px 24px; background:#fff; border-bottom:3px solid var(--accent); position:sticky; top:0; z-index:5; }
+        header.top h1 { font-size:1.4rem; }
+        .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px; text-decoration:none; font-size:.9rem; }
+        .wrap { padding:20px 24px; max-width:1100px; display:grid; gap:18px; }
+        .box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; }
+        .box h2 { font-size:1.1rem; margin-bottom:12px; }
+        .aviso { background:#fff8e6; border:1px solid #f1c40f; color:#8a6d00; padding:10px 12px; border-radius:8px; font-size:.88rem; margin-bottom:12px; display:none; }
+        table { width:100%; border-collapse:collapse; font-size:.9rem; }
+        th, td { text-align:left; padding:10px; border-bottom:1px solid var(--line); }
+        th { color:var(--muted); font-size:.78rem; text-transform:uppercase; }
+        td.num { text-align:right; }
+        .btn { padding:8px 13px; border:none; border-radius:8px; cursor:pointer; font-weight:600; color:#fff; font-size:.85rem; }
+        .btn-emitir { background:var(--ok); } .btn-emitir:disabled { background:#bdc3c7; cursor:not-allowed; }
+        .btn-danfe { background:var(--blue); }
+        .btn-cancelar { background:#e67e22; }
+        .btn-transmitir { background:#8e44ad; }
+        .btn-inut { background:#fff; color:var(--txt); border:1px solid var(--line); }
+        .badge { padding:3px 10px; border-radius:12px; font-size:.76rem; font-weight:700; }
+        .b-aut { background:#e6f9ef; color:#1e8e4f; } .b-rej { background:#fdecea; color:#c0392b; } .b-err { background:#fdecea; color:#c0392b; }
+        .b-can { background:#eef0f3; color:#5b6470; }
+        .b-cont { background:#f3e8fb; color:#7d3cab; }
+        .box h2 { display:inline-block; }
+        .box-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .vazio { color:var(--muted); padding:14px; }
+        .chave { font-family:monospace; font-size:.78rem; color:var(--muted); word-break:break-all; }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>🧾 Notas Fiscais (NFC-e)</h1>
+        <a class="link" href="/home.html">← Início</a>
+    </header>
+
+    <div class="wrap">
+        <div id="aviso-config" class="aviso"></div>
+
+        <div class="box">
+            <h2>Vendas concluídas — emitir NFC-e</h2>
+            <table>
+                <thead><tr><th>Pedido</th><th>Cliente</th><th>Pagamento</th><th class="num">Valor</th><th>Hora</th><th style="text-align:right">Ação</th></tr></thead>
+                <tbody id="tbody-pedidos"></tbody>
+            </table>
+        </div>
+
+        <div class="box">
+            <div class="box-head">
+                <h2>Notas emitidas</h2>
+                <button class="btn btn-inut" id="btn-inutilizar">Inutilizar numeração</button>
+            </div>
+            <table>
+                <thead><tr><th>nNF</th><th>Status</th><th>Chave</th><th class="num">Valor</th><th>Quando</th><th style="text-align:right">Ações</th></tr></thead>
+                <tbody id="tbody-notas"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/fiscal-client.js"></script>
+    <script src="/notas.js"></script>
+</body>
+
+</html>

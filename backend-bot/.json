@@ -1,0 +1,20 @@
+{
+    "cliente_1767297673240": [
+        {
+            "role": "user",
+            "content": "Ola"
+        },
+        {
+            "role": "assistant",
+            "content": "Ol\u00e1! Como posso ajud\u00e1-lo hoje?"
+        },
+        {
+            "role": "user",
+            "content": "Ol\u00e1 "
+        },
+        {
+            "role": "assistant",
+            "content": "Ol\u00e1! Como posso ajud\u00e1-lo hoje?"
+        }
+    ]
+}

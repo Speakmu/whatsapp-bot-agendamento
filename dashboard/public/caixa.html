@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caixa / PDV | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d;
+            --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --line:#e1e5ea; --blue:#2f6fed;
+        }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#fff; border-bottom:3px solid var(--accent); flex:0 0 auto; }
+        header.top h1 { font-size:1.3rem; }
+        nav.tabs { display:flex; gap:8px; }
+        .tab, .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px; cursor:pointer; text-decoration:none; font-size:.9rem; }
+        .tab.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+        .right { display:flex; align-items:center; gap:10px; }
+        #caixa-indicador { font-size:.85rem; padding:5px 10px; border-radius:20px; background:#eee; color:var(--muted); }
+        #caixa-indicador.aberto { background:#e6f9ef; color:#1e8e4f; }
+        #caixa-indicador.fechado { background:#fdecea; color:#c0392b; }
+
+        main { flex:1 1 auto; overflow:hidden; }
+
+        /* ---------- PDV ---------- */
+        #view-pdv { height:100%; display:grid; grid-template-columns: 1.6fr 1fr; gap:14px; padding:14px; }
+        .panel { background:var(--card); border-radius:12px; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--line); }
+        .panel-head { padding:12px 14px; font-weight:700; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:10px; }
+        .panel-body { padding:12px; overflow-y:auto; flex:1; }
+        #busca-produto { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; }
+        .grid-produtos { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:10px; }
+        .prod {
+            border:1px solid var(--line); border-radius:10px; padding:10px; cursor:pointer; background:#fff;
+            display:flex; flex-direction:column; justify-content:space-between; min-height:84px; transition:.1s;
+        }
+        .prod:hover { border-color:var(--accent); box-shadow:0 2px 8px rgba(255,82,0,.12); }
+        .prod:active { transform:scale(.97); }
+        .prod .nome { font-weight:600; font-size:.9rem; }
+        .prod .cat { font-size:.72rem; color:var(--muted); text-transform:uppercase; }
+        .prod .preco { color:var(--accent); font-weight:700; margin-top:6px; }
+        .prod.indisp { opacity:.45; pointer-events:none; }
+
+        /* carrinho */
+        .cart-item { display:grid; grid-template-columns:1fr auto; gap:6px; padding:8px 0; border-bottom:1px dashed var(--line); }
+        .cart-item .ci-nome { font-weight:600; font-size:.9rem; }
+        .cart-item .ci-sub { color:var(--muted); font-size:.8rem; }
+        .qty { display:flex; align-items:center; gap:8px; }
+        .qty button { width:26px; height:26px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; font-weight:700; }
+        .ci-rm { color:var(--danger); cursor:pointer; font-size:.8rem; background:none; border:none; }
+        .cart-total { font-size:1.5rem; font-weight:800; text-align:right; padding:10px 0; }
+        .pag-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
+        .pag-btn { padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; font-size:.85rem; }
+        .pag-btn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+        .check-cozinha { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--muted); margin-bottom:10px; }
+        .btn-finalizar { width:100%; padding:14px; border:none; border-radius:10px; background:var(--ok); color:#fff; font-size:1.1rem; font-weight:700; cursor:pointer; }
+        .btn-finalizar:disabled { background:#bdc3c7; cursor:not-allowed; }
+        .btn-limpar { background:none; border:none; color:var(--danger); cursor:pointer; font-size:.85rem; }
+
+        /* ---------- CAIXA ---------- */
+        #view-caixa { height:100%; overflow-y:auto; padding:14px; display:grid; grid-template-columns:1fr 1fr; gap:14px; align-content:start; }
+        .box { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+        .box h2 { font-size:1.05rem; margin-bottom:12px; }
+        .linha { display:flex; justify-content:space-between; padding:7px 0; border-bottom:1px dashed var(--line); font-size:.95rem; }
+        .linha.total { font-weight:800; font-size:1.1rem; border-bottom:none; border-top:2px solid var(--txt); margin-top:6px; padding-top:10px; }
+        .campo { margin-bottom:10px; }
+        .campo label { display:block; font-size:.85rem; color:var(--muted); margin-bottom:4px; }
+        .campo input, .campo textarea { width:100%; padding:9px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; }
+        .btn { padding:10px 14px; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:.9rem; color:#fff; }
+        .btn-azul { background:var(--blue); } .btn-verde { background:var(--ok); }
+        .btn-laranja { background:var(--accent); } .btn-vermelho { background:var(--danger); }
+        .btn-cinza { background:#95a5a6; }
+        .acoes { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+        .aviso { background:#fff8e6; border:1px solid #f1c40f; color:#8a6d00; padding:10px; border-radius:8px; font-size:.9rem; margin-bottom:10px; }
+        .hidden { display:none !important; }
+        @media (max-width:900px){ #view-pdv{ grid-template-columns:1fr; } #view-caixa{ grid-template-columns:1fr; } }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>💵 Caixa / PDV</h1>
+        <nav class="tabs">
+            <button class="tab active" id="tab-pdv">🛒 Frente de Caixa</button>
+            <button class="tab" id="tab-caixa">📦 Operação de Caixa</button>
+        </nav>
+        <div class="right">
+            <span id="caixa-indicador">Caixa: --</span>
+            <a class="link" href="/painel.html">← Painel</a>
+        </div>
+    </header>
+
+    <main>
+        <!-- ===================== PDV ===================== -->
+        <section id="view-pdv">
+            <div class="panel">
+                <div class="panel-head">
+                    <span>Cardápio</span>
+                    <input id="busca-produto" placeholder="Buscar item..." autocomplete="off">
+                </div>
+                <div class="panel-body">
+                    <div class="grid-produtos" id="grid-produtos"></div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-head">
+                    <span>Comanda</span>
+                    <button class="btn-limpar" id="btn-limpar">Limpar</button>
+                </div>
+                <div class="panel-body">
+                    <div id="cart-vazio" class="aviso" style="background:#f1f3f5;border-color:var(--line);color:var(--muted);">
+                        Toque nos itens do cardápio para montar a venda.
+                    </div>
+                    <div id="cart-itens"></div>
+                </div>
+                <div style="padding:12px; border-top:1px solid var(--line);">
+                    <div class="campo">
+                        <label>Cliente (opcional)</label>
+                        <input id="cliente-nome" placeholder="Nome do cliente">
+                    </div>
+                    <div class="cart-total">Total: <span id="cart-total">R$ 0,00</span></div>
+                    <div class="pag-grid" id="pag-grid">
+                        <button class="pag-btn active" data-pag="Dinheiro">💵 Dinheiro</button>
+                        <button class="pag-btn" data-pag="PIX">📱 PIX</button>
+                        <button class="pag-btn" data-pag="Cartão">💳 Cartão</button>
+                    </div>
+                    <label class="check-cozinha">
+                        <input type="checkbox" id="chk-cozinha"> Enviar para a cozinha (KDS) em vez de concluir
+                    </label>
+                    <button class="btn-finalizar" id="btn-finalizar" disabled>Finalizar venda</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===================== CAIXA ===================== -->
+        <section id="view-caixa" class="hidden">
+            <!-- Status / abertura -->
+            <div class="box" id="box-status">
+                <h2>Status do Caixa</h2>
+                <div id="caixa-fechado-area">
+                    <div class="aviso">O caixa está <strong>fechado</strong>. Abra o caixa para registrar vendas no balcão.</div>
+                    <div class="campo">
+                        <label>Fundo de troco (R$)</label>
+                        <input type="number" id="fundo-troco" value="0" min="0" step="0.01">
+                    </div>
+                    <button class="btn btn-verde" id="btn-abrir-caixa">Abrir caixa</button>
+                </div>
+                <div id="caixa-aberto-area" class="hidden">
+                    <div class="linha"><span>Aberto em</span><span id="info-abertura">--</span></div>
+                    <div class="linha"><span>Fundo de troco</span><span id="info-fundo">R$ 0,00</span></div>
+                    <div class="acoes">
+                        <button class="btn btn-azul" id="btn-suprimento">+ Suprimento</button>
+                        <button class="btn btn-laranja" id="btn-sangria">- Sangria</button>
+                        <button class="btn btn-vermelho" id="btn-fechar-caixa">Fechar caixa</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Resumo da sessão -->
+            <div class="box" id="box-resumo">
+                <h2>Resumo da Sessão</h2>
+                <div id="resumo-conteudo">
+                    <p style="color:var(--muted);font-size:.9rem;">Abra o caixa para ver o resumo.</p>
+                </div>
+            </div>
+
+            <!-- Movimentos -->
+            <div class="box" id="box-movimentos" style="grid-column:1 / -1;">
+                <h2>Movimentações da Sessão</h2>
+                <div id="lista-movimentos" style="font-size:.9rem;">
+                    <p style="color:var(--muted);">Sem movimentações.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/shell.js" defer></script>
+    <script src="/fiscal-client.js"></script>
+    <script src="/baixa-estoque.js"></script>
+    <script src="/caixa.js"></script>
+</body>
+
+</html>

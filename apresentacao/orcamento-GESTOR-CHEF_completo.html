@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proposta Comercial — GestorChef</title>
+<style>
+  :root{ --accent:#ff5200; --txt:#1f2733; --muted:#6b7480; --line:#e6e9ee; --bg:#fff; --ok:#2ecc71; --soft:#fff4ee; }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',Roboto,system-ui,sans-serif;color:var(--txt);background:#f1f3f6;}
+  .page{max-width:820px;margin:18px auto;background:#fff;padding:40px 44px;box-shadow:0 2px 14px rgba(0,0,0,.08);}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:4px solid var(--accent);padding-bottom:16px;margin-bottom:22px;}
+  .brand{font-size:1.7rem;font-weight:900;}
+  .brand small{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-top:2px;}
+  .meta{text-align:right;font-size:.82rem;color:var(--muted);line-height:1.6;}
+  h1.title{font-size:1.5rem;margin:6px 0 4px;}
+  .sub{color:var(--muted);font-size:.95rem;margin-bottom:22px;}
+  .parts{display:flex;gap:20px;font-size:.86rem;margin-bottom:22px;flex-wrap:wrap;}
+  .parts .b{flex:1;min-width:230px;background:#f8f9fb;border:1px solid var(--line);border-radius:10px;padding:12px 14px;}
+  .parts .b b{display:block;color:var(--accent);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
+  h2{font-size:1.05rem;margin:24px 0 10px;border-left:4px solid var(--accent);padding-left:10px;}
+  .incl{display:grid;grid-template-columns:1fr 1fr;gap:6px 18px;font-size:.9rem;}
+  .incl div{padding:4px 0;}
+  .incl .ic{color:var(--ok);font-weight:800;margin-right:6px;}
+  .anchor{background:var(--soft);border:1px solid #ffd9c4;border-radius:10px;padding:14px 16px;margin:16px 0;font-size:.92rem;}
+  .anchor b{color:var(--accent);}
+  table{width:100%;border-collapse:collapse;font-size:.9rem;margin-top:6px;}
+  th,td{padding:11px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;}
+  th{background:#fafbfc;color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.04em;}
+  .plano{font-weight:800;}
+  .rec{background:#fff7f2;}
+  .tag{display:inline-block;background:var(--accent);color:#fff;font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:20px;margin-left:6px;vertical-align:middle;}
+  .preco{font-weight:800;white-space:nowrap;}
+  ul.req{font-size:.88rem;margin:6px 0 0 18px;line-height:1.7;}
+  .cond{font-size:.84rem;color:var(--muted);line-height:1.7;margin-top:8px;}
+  .assina{display:flex;gap:40px;margin-top:40px;}
+  .assina .l{flex:1;text-align:center;}
+  .assina .linha{border-top:1.5px solid var(--txt);margin-top:46px;padding-top:6px;font-size:.85rem;}
+  .foot{margin-top:26px;border-top:1px solid var(--line);padding-top:12px;font-size:.78rem;color:var(--muted);text-align:center;}
+  .obs{font-size:.74rem;color:#9aa0aa;margin-top:6px;}
+  /* --- CORREÇÃO PARA CELULARES (Telas até 600px) --- */
+@media (max-width: 600px) {
+  .page {
+    padding: 20px 15px !important; /* Reduz o espaçamento interno para aproveitar a tela */
+    margin: 0 auto !important;
+  }
+  .head {
+    flex-direction: column; /* Coloca os dados da proposta embaixo do título */
+    align-items: flex-start !important;
+    gap: 12px;
+  }
+  .meta {
+    text-align: left !important; /* Alinha o bloco técnico à esquerda no celular */
+  }
+  .incl {
+    grid-template-columns: 1fr !important; /* Transforma os itens inclusos em uma única coluna */
+  }
+  table, thead, tbody, th, td, tr {
+    display: block; /* Transforma a tabela em blocos empilhados para não sumir na direita */
+  }
+  th {
+    display: none; /* Esconde o cabeçalho antigo da tabela */
+  }
+  tr {
+    margin-bottom: 15px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px;
+    background: #fafbfc;
+  }
+  td {
+    border: none !important;
+    padding: 6px 0 !important;
+  }
+  td.plano {
+    font-size: 1.1rem;
+    color: var(--accent);
+    border-bottom: 1.5px solid var(--line) !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 6px;
+  }
+  .preco {
+    white-space: normal !important; /* Permite que o preço quebre linha e caiba na tela */
+    background: #fff;
+    padding: 8px !important;
+    border-radius: 6px;
+    border: 1px dashed var(--accent) !important;
+    margin-top: 8px;
+  }
+  .assina {
+    flex-direction: column; /* Coloca as assinaturas uma embaixo da outra */
+    gap: 20px;
+  }
+}
+  @media print{ body{background:#fff;} .page{box-shadow:none;margin:0;max-width:none;padding:24px 30px;} @page{size:A4;margin:14mm;} }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div>
+      <div class="brand">🍕 GestorChef <small>por Seu Suporte Tec</small></div>
+    </div>
+    <div class="meta">
+      Proposta nº 001/2026<br>
+      Data: 25/06/2026<br>
+      Validade: 7 dias<br>
+      contato.seusuportetec@gmail.com
+    </div>
+  </div>
+
+  <h1 class="title">Proposta Comercial — Sistema de Gestão, App de Pedidos e bot de atendimento no WhatsApp</h1>
+  <div class="sub">Solução completa para seu negócio: app próprio exclusivo, atendimento rápido via whatsaspp, gestão e automação em um só lugar.</div>
+
+  <div class="parts">
+    <div class="b"><b>Prestador</b>Seu Suporte Tec — Murilo Augusto<br>contato.seusuportetec@gmail.com</div>
+    <div class="b"><b>Cliente</b>Salgados Lileamar<br>Endereço: Av. Monsenhor Mancini, 1036 - Vila Dalva<br> São Sebastião do Paraíso - MG</div>
+  </div>
+
+  <h2>O que está incluso</h2>
+  <div class="incl">
+    <div><span class="ic">✓</span> App de pedidos com a marca da empresa</div>
+    <div><span class="ic">✓</span> Painel de gestão (web) em tempo real</div>
+    <div><span class="ic">✓</span> Bot de atendimento no WhatsApp</div>
+    <div><span class="ic">✓</span> Cozinha (KDS) — tela de preparo</div>
+    <div><span class="ic">✓</span> Caixa / PDV e controle de caixa</div>
+    <div><span class="ic">✓</span> Mesas e comandas</div>
+    <div><span class="ic">✓</span> Entregas (entregadores e rotas)</div>
+    <div><span class="ic">✓</span> Estoque com alerta de reposição</div>
+    <div><span class="ic">✓</span> Financeiro (DRE) e fluxo de caixa</div>
+    <div><span class="ic">✓</span> BI / Relatórios de vendas</div>
+    <div><span class="ic">✓</span> Cupons, fidelidade e promoções</div>
+    <div><span class="ic">✓</span> Emissão de NFC-e (nota fiscal)</div>
+  </div>
+
+  <div class="anchor">
+    💡 <b>Seu app, exclusivo.</b> Em apps de marketplace, a comissão costuma comer de
+    <b>12% a 23%</b> de cada pedido. Com o GestorChef, a empresa tem o <b>próprio app</b>
+    e o cliente paga direto pra você.
+  </div>
+
+  <h2>Investimento</h2>
+  <table>
+    <thead><tr><th>Plano</th><th>Como funciona</th><th style="text-align:center">Valor</th></tr></thead>
+    <tbody>
+      <tr class="rec">
+        <td class="plano">Mensal</td>
+        <td>Implantação única + mensalidade fixa. Inclui hospedagem, atualizações e suporte.</td>
+        <td class="preco">Implantação R$ 2.500<br>+ R$ 459,00 / mês</td>
+      </tr>
+      <tr>
+        <td class="plano">Por pedido</td>
+        <td>Implantação única + um valor fixo por pedido feito pelo sistema (faturado mensalmente). Sem mensalidade fixa.</td>
+        <td class="preco">Implantação R$ 1.500<br>+ R$ 0,80 por pedido( até 800 pedidos ),<br>a partir de 800 pedidos R$0,40 por pedido excedente)</td>
+      </tr>
+      <tr>
+        <td class="plano">Aquisição do app e mensalidade do sistema</td>
+        <td>Pagamento único pelo aplicativo. Sistema, suporte técnico e bot de WhatsApp mediante mensalidade</td>
+        <td class="preco">R$ 5,500 à vista <br>(suporte R$ 349/mês)</td>
+      </tr>
+    </tbody>
+  </table>
+  <div class="cond">
+    • 2ª loja (rede): + R$ 249/mês (plano Mensal) ou condições a combinar nos demais planos.<br>
+    • Formas de pagamento: PIX, ou boleto. Implantação pode ser parcelada.
+  </div>
+
+  <h2>O que o cliente fornece</h2>
+  <ul class="req">
+    <li>CNPJ, logo e cardápio (itens, fotos e preços) da empresa.</li>
+    <li>Certificado digital A1 e dados fiscais (apenas se for emitir nota fiscal).</li>
+    <li>Um número de WhatsApp para o atendimento automático (bot).</li>
+  </ul>
+
+  <h2>Prazo de implantação</h2>
+  <div class="cond">Entrega e treinamento em até <b>15 a 20 dias úteis</b> após a contratação e o envio dos materiais.</div>
+
+  <div class="assina">
+    <div class="l"><div class="linha">Seu Suporte Tec — Murilo Augusto</div></div>
+    <div class="l"><div class="linha">Salgados Lileamar — Fernanda </div></div>
+  </div>
+
+  <div class="foot">
+    Seu Suporte Tec · contato.seusuportetec@gmail.com · Proposta sujeita a confirmação. Valores em reais (R$).
+    <div class="obs">Valores, datas e dados conforme a negociação.</div>
+	<div class="obs"> Os valores são baseados em um contrato de 12 meses e poderão ter reajuste anual baseado no IPCA.</div>
+	<div class="obs">O aplicativo, sistema, banco de dados, códigos-fonte e infraestrutura permanecem de propriedade da<br> Seu Suporte Tec, exceto nos planos de aquisição onde houver previsão contratual específica.</div>
+  </div>
+
+</div>
+</body>
+</html>

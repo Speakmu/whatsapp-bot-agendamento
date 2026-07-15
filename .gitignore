@@ -1,13 +1,40 @@
-# CRÍTICO: Arquivos de Segurança - NÃO PODEM IR PARA O GITHUB
-.env
-# Arquivo de credenciais do Google Sheets (Altamente recomendado NÃO subir)
-whatsapp-bot-agendamentos.json 
+# ===== Segredos (NUNCA versionar) =====
+**/.env
+*firebase-adminsdk*.json
+**/google-services.json
+!app-mobile/google-services.json
+whatsapp-bot-agendamentos.json
 
-# Ambiente Python
-__pycache__/
+# ===== Python (backend-bot) =====
+**/__pycache__/
 *.pyc
-venv/
+**/venv/
 .pytest_cache/
 
-# Logs e arquivos temporários do Render/IDE
+# ===== Node / Expo / React Native (app-mobile) =====
+**/node_modules/
+**/.expo/
+**/dist/
+**/web-build/
 *.log
+
+# ===== Android build =====
+**/android/build/
+**/android/app/build/
+**/android/.gradle/
+**/android/.cxx/
+**/android/.kotlin/
+**/android/local.properties
+
+# ===== Firebase =====
+**/.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# ===== Sobras / legado =====
+_legado_raiz_expo/
+.del_*/
+
+# ===== Editor =====
+.vscode/
+.DS_Store

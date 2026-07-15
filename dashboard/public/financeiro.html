@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financeiro | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d;
+            --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --line:#e1e5ea; --blue:#2f6fed;
+        }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; background:#fff; border-bottom:3px solid var(--accent); position:sticky; top:0; z-index:5; flex-wrap:wrap; gap:10px; }
+        header.top h1 { font-size:1.3rem; }
+        .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px; text-decoration:none; font-size:.9rem; }
+        .filtros { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+        .filtros .campo { display:flex; flex-direction:column; }
+        .filtros label { font-size:.75rem; color:var(--muted); margin-bottom:3px; }
+        .filtros input { padding:8px; border:1px solid var(--line); border-radius:8px; }
+        .btn { padding:9px 14px; border:none; border-radius:8px; cursor:pointer; font-weight:600; font-size:.9rem; color:#fff; }
+        .btn-azul { background:var(--blue); } .btn-verde { background:var(--ok); } .btn-vermelho { background:var(--danger); }
+
+        .wrap { padding:16px; display:grid; gap:16px; max-width:1200px; margin:0 auto; }
+        .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+        .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+        .kpi .rotulo { font-size:.8rem; color:var(--muted); text-transform:uppercase; }
+        .kpi .valor { font-size:1.6rem; font-weight:800; margin-top:6px; }
+        .kpi.receita .valor { color:var(--ok); }
+        .kpi.despesa .valor { color:var(--danger); }
+        .kpi.resultado.pos .valor { color:var(--ok); }
+        .kpi.resultado.neg .valor { color:var(--danger); }
+
+        .cols { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+        .box { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+        .box h2 { font-size:1.05rem; margin-bottom:12px; }
+        .linha { display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px dashed var(--line); font-size:.95rem; }
+        .linha.sub { color:var(--muted); padding-left:12px; font-size:.9rem; }
+        .linha.total { font-weight:800; font-size:1.1rem; border-top:2px solid var(--txt); border-bottom:none; margin-top:6px; padding-top:10px; }
+        .pos { color:var(--ok); } .neg { color:var(--danger); }
+
+        form.lanc { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; align-items:end; }
+        form.lanc .campo { display:flex; flex-direction:column; }
+        form.lanc label { font-size:.72rem; color:var(--muted); margin-bottom:3px; }
+        form.lanc input, form.lanc select { padding:8px; border:1px solid var(--line); border-radius:8px; font-size:.9rem; }
+        table { width:100%; border-collapse:collapse; font-size:.9rem; margin-top:6px; }
+        th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); }
+        th { color:var(--muted); font-size:.8rem; text-transform:uppercase; }
+        .tag { padding:2px 8px; border-radius:12px; font-size:.78rem; }
+        .tag.rec { background:#e6f9ef; color:#1e8e4f; } .tag.desp { background:#fdecea; color:#c0392b; }
+        .rm { color:var(--danger); cursor:pointer; background:none; border:none; }
+        canvas { max-height:260px; }
+        @media (max-width:900px){ .kpis{ grid-template-columns:1fr 1fr; } .cols{ grid-template-columns:1fr; } form.lanc{ grid-template-columns:1fr 1fr; } }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>📊 Financeiro</h1>
+        <div class="filtros">
+            <div class="campo"><label>De</label><input type="date" id="data-ini"></div>
+            <div class="campo"><label>Até</label><input type="date" id="data-fim"></div>
+            <button class="btn btn-azul" id="btn-aplicar">Aplicar</button>
+            <button class="btn btn-verde" id="btn-csv">Exportar CSV</button>
+        </div>
+        <a class="link" href="/painel.html">← Painel</a>
+    </header>
+
+    <div class="wrap">
+        <div class="kpis">
+            <div class="kpi receita"><div class="rotulo">Receita total</div><div class="valor" id="kpi-receita">R$ 0,00</div></div>
+            <div class="kpi despesa"><div class="rotulo">Despesa total</div><div class="valor" id="kpi-despesa">R$ 0,00</div></div>
+            <div class="kpi resultado" id="kpi-box-resultado"><div class="rotulo">Resultado</div><div class="valor" id="kpi-resultado">R$ 0,00</div></div>
+            <div class="kpi"><div class="rotulo">Margem</div><div class="valor" id="kpi-margem">0%</div></div>
+        </div>
+
+        <div class="cols">
+            <div class="box">
+                <h2>DRE do período</h2>
+                <div id="dre"></div>
+            </div>
+            <div class="box">
+                <h2>Receitas x Despesas</h2>
+                <canvas id="chart-rd"></canvas>
+                <h2 style="margin-top:16px;">Despesas por categoria</h2>
+                <canvas id="chart-cat"></canvas>
+            </div>
+        </div>
+
+        <div class="box">
+            <h2>Novo lançamento</h2>
+            <form class="lanc" id="form-lanc">
+                <div class="campo"><label>Tipo</label>
+                    <select id="l-tipo"><option value="DESPESA">Despesa</option><option value="RECEITA">Receita</option></select>
+                </div>
+                <div class="campo"><label>Categoria</label>
+                    <input id="l-categoria" list="cats" placeholder="Ex: Insumos" required>
+                    <datalist id="cats">
+                        <option>Insumos</option><option>Fornecedores</option><option>Salários</option>
+                        <option>Aluguel</option><option>Energia</option><option>Água</option>
+                        <option>Marketing</option><option>Manutenção</option><option>Taxas/Tarifas</option>
+                        <option>Entrega</option><option>Outros</option>
+                    </datalist>
+                </div>
+                <div class="campo" style="grid-column:span 2;"><label>Descrição</label><input id="l-descricao" placeholder="Descrição"></div>
+                <div class="campo"><label>Valor (R$)</label><input type="number" id="l-valor" step="0.01" min="0" required></div>
+                <div class="campo"><label>Data</label><input type="date" id="l-data" required></div>
+                <div class="campo"><label>Status</label>
+                    <select id="l-pago"><option value="true">Pago</option><option value="false">Em aberto</option></select>
+                </div>
+                <div class="campo"><label>&nbsp;</label><button class="btn btn-verde" type="submit">Adicionar</button></div>
+            </form>
+        </div>
+
+        <div class="box">
+            <h2>Lançamentos do período</h2>
+            <table>
+                <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Status</th><th style="text-align:right">Valor</th><th></th></tr></thead>
+                <tbody id="tbody-lanc"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/financeiro.js"></script>
+</body>
+
+</html>

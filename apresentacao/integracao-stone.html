@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Integração de Pagamentos Stone — GestorChef</title>
+<style>
+  :root{ --stone:#00a868; --stone-d:#00794c; --txt:#1f2733; --muted:#6b7480; --line:#e6e9ee; --soft:#eafaf2; --warn:#b9651b; --softw:#fff7ec; --accent:#00a868; }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',Roboto,system-ui,sans-serif;color:var(--txt);background:#f1f3f6;}
+  .page{max-width:960px;margin:18px auto;background:#fff;padding:40px 44px;box-shadow:0 2px 14px rgba(0,0,0,.08);}
+  .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:4px solid var(--stone);padding-bottom:16px;margin-bottom:20px;flex-wrap:wrap;gap:10px;}
+  .brand{font-size:1.5rem;font-weight:900;}
+  .brand small{display:block;font-size:.8rem;font-weight:600;color:var(--muted);margin-top:2px;}
+  .meta{text-align:right;font-size:.82rem;color:var(--muted);line-height:1.6;}
+  h1.title{font-size:1.35rem;margin:4px 0 4px;}
+  .sub{color:var(--muted);font-size:.95rem;margin-bottom:18px;}
+  .destaque{background:var(--soft);border:1px solid #bfe9d4;border-left:5px solid var(--stone);border-radius:10px;padding:14px 16px;margin:14px 0 22px;font-size:.92rem;}
+  .destaque b{color:var(--stone-d);}
+  h2{font-size:1.05rem;margin:26px 0 10px;border-left:4px solid var(--stone);padding-left:10px;}
+  table{width:100%;border-collapse:collapse;font-size:.86rem;margin-top:6px;}
+  th,td{padding:10px 12px;border:1px solid var(--line);text-align:left;vertical-align:top;}
+  thead th{background:var(--stone);color:#fff;font-size:.8rem;}
+  th.rot{background:#fafbfc;color:var(--muted);width:180px;font-size:.76rem;text-transform:uppercase;letter-spacing:.03em;}
+  tbody tr:nth-child(even){background:#fafbfc;}
+  .col-rec{background:#f4fcf8 !important;}
+  .tag{display:inline-block;font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:20px;margin-top:4px;}
+  .tag-ok{background:var(--stone);color:#fff;}
+  .tag-neutro{background:#eef0f3;color:#6b7480;}
+  .rates th,.rates td{font-size:.85rem;}
+  .rates td.num{text-align:right;font-variant-numeric:tabular-nums;}
+  ul{margin:6px 0 0 18px;line-height:1.6;font-size:.86rem;}
+  .aviso{font-size:.78rem;color:var(--warn);background:var(--softw);border:1px solid #ffe2bd;border-radius:8px;padding:10px 12px;margin-top:10px;}
+  .rec{background:var(--soft);border:1px solid #bfe9d4;border-radius:10px;padding:16px 18px;margin-top:22px;font-size:.9rem;}
+  .rec h3{color:var(--stone-d);margin-bottom:8px;font-size:1rem;}
+  .foot{margin-top:26px;border-top:1px solid var(--line);padding-top:12px;font-size:.76rem;color:var(--muted);}
+  @media (max-width:720px){
+    .page{padding:22px 16px;margin:0 auto;}
+    .head{flex-direction:column;align-items:flex-start;}
+    .meta{text-align:left;}
+    table, thead, tbody, th, td, tr{display:block;}
+    thead{display:none;}
+    .cmp tbody tr{border:1px solid var(--line);border-radius:8px;margin-bottom:14px;padding:6px;background:#fff;}
+    .cmp th.rot{width:auto;background:#fff;color:var(--stone-d);border:none;font-size:.8rem;padding-bottom:0;}
+    .cmp td{border:none;border-bottom:1px dashed var(--line);}
+    .cmp td::before{content:attr(data-col);display:block;font-size:.66rem;color:var(--muted);text-transform:uppercase;font-weight:700;}
+  }
+  @media print{ body{background:#fff;} .page{box-shadow:none;margin:0;max-width:none;padding:16px 18px;} @page{size:A4;margin:12mm;} }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="head">
+    <div><div class="brand">💳 Integração de Pagamentos — Stone <small>GestorChef · por Seu Suporte Tec</small></div></div>
+    <div class="meta">Documento técnico-comercial<br>Referência: taxas Stone/Pagar.me 2026<br>contato.seusuportetec@gmail.com</div>
+  </div>
+
+  <h1 class="title">Como integrar os pagamentos ao sistema</h1>
+  <div class="sub">Comparativo das formas de conectar a Stone ao GestorChef (Caixa/PDV, app e bot).</div>
+
+  <div class="destaque">
+    ✅ <b>Situação do cliente:</b> já usa <b>maquininhas Stone</b> no balcão. Isso é uma vantagem —
+    dá para <b>integrar a máquina que ele já tem</b> ao Caixa do sistema (rota <b>Connect/TEF</b>),
+    mantendo as taxas atuais dele, e usar a <b>rota online (Pagar.me)</b> só para receber pagamentos
+    dentro do app e do bot. Não precisa trocar de adquirente.
+  </div>
+
+  <h2>Comparativo das rotas de integração</h2>
+  <table class="cmp">
+    <thead>
+      <tr>
+        <th>Critério</th>
+        <th>A) Maquininha hoje<br><span style="font-weight:400">(sem integração)</span></th>
+        <th class="col-rec">B) Connect 2.0 / TEF<br><span style="font-weight:400">(integra a máquina Stone atual)</span></th>
+        <th>C) Pagar.me / API online<br><span style="font-weight:400">(Pix e cartão no app/bot)</span></th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <th class="rot">O que é</th>
+        <td data-col="A) Máquina hoje">O cliente digita o valor na maquininha manualmente a cada venda.</td>
+        <td class="col-rec" data-col="B) Connect/TEF">O Caixa envia o valor direto para a maquininha Stone; a máquina só confirma o pagamento.</td>
+        <td data-col="C) Pagar.me/API">Pagamento online (Pix, cartão, boleto) feito dentro do app/checkout, sem máquina.</td>
+      </tr>
+      <tr>
+        <th class="rot">Onde usa no GestorChef</th>
+        <td data-col="A">Balcão (nada muda no sistema).</td>
+        <td class="col-rec" data-col="B">Caixa / PDV e Mesas (venda presencial).</td>
+        <td data-col="C">App do cliente e bot de WhatsApp (venda a distância).</td>
+      </tr>
+      <tr>
+        <th class="rot">Custo por venda</th>
+        <td data-col="A">Taxas da máquina Stone (as atuais do cliente).</td>
+        <td class="col-rec" data-col="B"><b>As mesmas taxas da máquina</b> — a integração não muda a taxa, só automatiza.</td>
+        <td data-col="C">Taxa por transação do gateway (sem aluguel de máquina). Ver tabela abaixo.</td>
+      </tr>
+      <tr>
+        <th class="rot">Mensalidade / aluguel</th>
+        <td data-col="A">Conforme plano da maquininha.</td>
+        <td class="col-rec" data-col="B">Nenhuma adicional (usa a máquina existente).</td>
+        <td data-col="C">Sem mensalidade — cobra só por transação.</td>
+      </tr>
+      <tr>
+        <th class="rot">Recebimento</th>
+        <td data-col="A">Conforme contrato Stone (ex.: D+1 com antecipação).</td>
+        <td class="col-rec" data-col="B">Igual à máquina do cliente.</td>
+        <td data-col="C">Normalmente D+1 (Pix na hora / D+0).</td>
+      </tr>
+      <tr>
+        <th class="rot">Pré-requisitos</th>
+        <td data-col="A">—</td>
+        <td class="col-rec" data-col="B"><b>Programa de Parcerias Stone</b>: cadastro do software + homologação com gerente Stone.</td>
+        <td data-col="C">Conta Pagar.me/Stone; credenciais de API (sandbox liberado na hora).</td>
+      </tr>
+      <tr>
+        <th class="rot">Esforço de integração</th>
+        <td data-col="A">Zero.</td>
+        <td class="col-rec" data-col="B">Médio/alto — depende de aprovação e homologação Stone (não é auto-serviço).</td>
+        <td data-col="C">Baixo/médio — troca do gateway na função de pagamento do app (hoje Mercado Pago).</td>
+      </tr>
+      <tr>
+        <th class="rot">Vantagens</th>
+        <td data-col="A">Simples, já funciona.</td>
+        <td class="col-rec" data-col="B">Sem erro de digitação; conciliação automática; mantém a Stone e as taxas do cliente; imprime NFC-e no POS.</td>
+        <td data-col="C">Recebe sem estar no balcão; Pix/cartão no app e bot; split, one-click e recorrência.</td>
+      </tr>
+      <tr>
+        <th class="rot">Limitações</th>
+        <td data-col="A">Digitação manual; caixa não bate sozinho; sem venda a distância.</td>
+        <td class="col-rec" data-col="B">Depende de virar parceiro Stone e homologar; só serve para venda presencial.</td>
+        <td data-col="C">Taxa por transação; não substitui a maquininha no balcão.</td>
+      </tr>
+      <tr>
+        <th class="rot">Recomendado</th>
+        <td data-col="A"><span class="tag tag-neutro">Base atual</span></td>
+        <td class="col-rec" data-col="B"><span class="tag tag-ok">Ideal p/ o Caixa</span></td>
+        <td data-col="C"><span class="tag tag-ok">Ideal p/ app + bot</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Taxas de referência (Stone / Pagar.me — 2026)</h2>
+  <table class="rates">
+    <thead>
+      <tr><th>Forma de pagamento</th><th>Máquina / Connect (presencial)</th><th>Pagar.me / API (online)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Pix</td><td class="num">Conforme plano</td><td class="num">~0,99% – 1,45%</td></tr>
+      <tr><td>Cartão de débito</td><td class="num">~1,29%</td><td class="num">variável por bandeira</td></tr>
+      <tr><td>Cartão de crédito à vista</td><td class="num">~2,89%</td><td class="num">variável por bandeira</td></tr>
+      <tr><td>Crédito parcelado</td><td class="num">+ taxa por parcela</td><td class="num">até 18x (taxa por parcela)</td></tr>
+      <tr><td>Antecipação de recebíveis</td><td class="num">~0,68% – 1,15% a.m.</td><td class="num">~0,68% – 1,15% a.m.</td></tr>
+    </tbody>
+  </table>
+  <div class="aviso">
+    ⚠️ Valores de referência (tabelas públicas Stone/Pagar.me 2026). As taxas <b>reais</b> saem no
+    contrato do cliente e variam conforme volume de vendas, bandeira, forma de captura e negociação.
+    Como o cliente já é Stone, as taxas presenciais dele <b>já estão definidas</b> — confirme no app/extrato Stone.
+  </div>
+
+  <div class="rec">
+    <h3>Recomendação</h3>
+    <p style="margin-bottom:8px;">Como o cliente <b>já opera com Stone</b>, o caminho de melhor custo-benefício é:</p>
+    <ul>
+      <li><b>Balcão/Caixa →</b> integrar via <b>Connect 2.0/TEF</b> a maquininha Stone que ele já tem. Mantém as taxas atuais, elimina digitação e faz o caixa fechar sozinho. Requer entrar no Programa de Parcerias Stone.</li>
+      <li><b>App e bot →</b> pagamento online por <b>Pix</b> (menor taxa) via <b>Pagar.me</b> (mesmo grupo Stone) ou manter o <b>Mercado Pago</b> já integrado. Vale comparar as duas propostas lado a lado antes de decidir — a diferença costuma ser pequena; pesam também prazo de recebimento e suporte.</li>
+    </ul>
+    <p style="margin-top:8px;">Ordem sugerida: começar pela <b>rota online</b> (rápida, já há base pronta no app) e, em paralelo, iniciar o cadastro de parceiro Stone para o <b>Connect/TEF</b> do Caixa, que depende de homologação e leva mais tempo.</p>
+  </div>
+
+  <div class="foot">
+    Seu Suporte Tec · contato.seusuportetec@gmail.com — Documento de referência; taxas sujeitas ao contrato Stone do cliente.<br>
+    Fontes: stone.com.br/tipos-de-negocio/ecommerce · online.stone.com.br · ajuda.stone.com.br/connect-20 · pagar.me · docs.stone.com.br (Tabela de Tarifas 2026).
+  </div>
+
+</div>
+</body>
+</html>

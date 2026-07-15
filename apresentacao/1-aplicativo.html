@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Apresentação — Aplicativo do Cliente</title>
+<style>
+  :root{ --accent:#ff5200; --accent2:#ff7a33; --txt:#1f2733; --muted:#6b7480; --line:#e6e9ee; --bg:#f6f7f9; --ok:#2ecc71; --blue:#2f6fed; }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',Roboto,system-ui,sans-serif;background:var(--bg);color:var(--txt);padding:32px;}
+  .page{max-width:1100px;margin:0 auto;}
+  .head{display:flex;align-items:center;gap:16px;border-bottom:4px solid var(--accent);padding-bottom:18px;margin-bottom:8px;}
+  .logo{font-size:2.4rem;}
+  .head h1{font-size:1.9rem;}
+  .head .sub{color:var(--muted);font-size:1rem;margin-top:2px;}
+  .badge{margin-left:auto;background:var(--accent);color:#fff;padding:8px 16px;border-radius:30px;font-weight:700;font-size:.85rem;}
+  h2.sec{margin:30px 0 16px;font-size:1.05rem;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;}
+
+  /* Fluxo vertical numerado */
+  .flow{display:flex;flex-direction:column;gap:0;}
+  .step{display:flex;gap:18px;align-items:stretch;}
+  .step .num{flex:0 0 46px;display:flex;flex-direction:column;align-items:center;}
+  .step .bola{width:46px;height:46px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.1rem;box-shadow:0 3px 8px rgba(255,82,0,.3);}
+  .step .linha{flex:1;width:3px;background:linear-gradient(var(--accent2),var(--line));margin:4px 0;}
+  .step:last-child .linha{display:none;}
+  .card{flex:1;background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px 20px;margin-bottom:18px;box-shadow:0 2px 10px rgba(0,0,0,.04);}
+  .card .t{font-weight:800;font-size:1.1rem;display:flex;align-items:center;gap:10px;}
+  .card .t .ic{font-size:1.4rem;}
+  .card .d{color:var(--muted);margin-top:6px;font-size:.96rem;line-height:1.5;}
+  .tags{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;}
+  .tag{background:#fff4ee;color:var(--accent);border:1px solid #ffd9c4;padding:3px 11px;border-radius:20px;font-size:.78rem;font-weight:600;}
+
+  .destaques{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:6px;}
+  .dest{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center;}
+  .dest .ic{font-size:1.8rem;}
+  .dest .t{font-weight:700;margin-top:6px;font-size:.95rem;}
+  .dest .d{color:var(--muted);font-size:.82rem;margin-top:4px;}
+  .foot{margin-top:34px;color:var(--muted);font-size:.85rem;text-align:center;border-top:1px solid var(--line);padding-top:16px;}
+  @media (max-width:760px){ .destaques{grid-template-columns:1fr 1fr;} }
+  @media print{ body{background:#fff;padding:0;} .card,.dest{box-shadow:none;} }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="head">
+    <div class="logo">📱</div>
+    <div>
+      <h1>Aplicativo de Pedidos</h1>
+      <div class="sub">A jornada do cliente — do cardápio ao pedido, em poucos toques</div>
+    </div>
+    <div class="badge">App do Cliente</div>
+  </div>
+
+  <h2 class="sec">Como o cliente usa</h2>
+  <div class="flow">
+
+    <div class="step">
+      <div class="num"><div class="bola">1</div><div class="linha"></div></div>
+      <div class="card">
+        <div class="t"><span class="ic">🔑</span> Acesso rápido</div>
+        <div class="d">O cliente entra com o CPF (login) ou faz um cadastro simples (nome, WhatsApp, CPF). Sem senhas complicadas.</div>
+        <div class="tags"><span class="tag">Login por CPF</span><span class="tag">Cadastro em 1 minuto</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num"><div class="bola">2</div><div class="linha"></div></div>
+      <div class="card">
+        <div class="t"><span class="ic">🍕</span> Cardápio digital</div>
+        <div class="d">Vê os destaques, busca itens, fotos e preços atualizados em tempo real. Um banner promocional aparece quando há campanha ativa.</div>
+        <div class="tags"><span class="tag">Busca instantânea</span><span class="tag">Banner de promoção</span><span class="tag">Marca personalizada</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num"><div class="bola">3</div><div class="linha"></div></div>
+      <div class="card">
+        <div class="t"><span class="ic">🛍️</span> Monta a sacola</div>
+        <div class="d">Adiciona itens com um toque, ajusta o pedido e confere o total atualizado automaticamente.</div>
+        <div class="tags"><span class="tag">Carrinho em tempo real</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num"><div class="bola">4</div><div class="linha"></div></div>
+      <div class="card">
+        <div class="t"><span class="ic">🎟️</span> Cupom e fidelidade</div>
+        <div class="d">Aplica um cupom de desconto e/ou usa os pontos de fidelidade como desconto direto no total. Quanto mais compra, mais economiza.</div>
+        <div class="tags"><span class="tag">Cupom de desconto</span><span class="tag">Resgate de pontos</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num"><div class="bola">5</div><div class="linha"></div></div>
+      <div class="card">
+        <div class="t"><span class="ic">💳</span> Pagamento integrado</div>
+        <div class="d">Escolhe <b>PIX</b> (código na hora), <b>Cartão</b> (pagamento no app) ou <b>pagar na entrega</b>. Rápido e seguro.</div>
+        <div class="tags"><span class="tag">PIX</span><span class="tag">Cartão</span><span class="tag">Na entrega</span></div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="num"><div class="bola">6</div><div class="linha"></div></div>
+      <div class="card">
+        <div class="t"><span class="ic">📦</span> Acompanha o pedido</div>
+        <div class="d">Vê o status do pedido (em preparo, pronto, saiu para entrega) e recebe os pontos de fidelidade ao concluir a compra.</div>
+        <div class="tags"><span class="tag">Status em tempo real</span><span class="tag">Ganha pontos</span></div>
+      </div>
+    </div>
+
+  </div>
+
+  <h2 class="sec">Por que o cliente ama</h2>
+  <div class="destaques">
+    <div class="dest"><div class="ic">⚡</div><div class="t">Rápido</div><div class="d">Pedido em poucos toques</div></div>
+    <div class="dest"><div class="ic">⭐</div><div class="t">Fidelidade</div><div class="d">Acumula e resgata pontos</div></div>
+    <div class="dest"><div class="ic">🎟️</div><div class="t">Descontos</div><div class="d">Cupons e promoções</div></div>
+    <div class="dest"><div class="ic">🎨</div><div class="t">Sua marca</div><div class="d">Cores e nome do seu negócio</div></div>
+  </div>
+
+  <div class="foot">Aplicativo próprio da sua marca — sem comissões por pedido. Os pedidos chegam direto no seu painel.</div>
+</div>
+</body>
+</html>
