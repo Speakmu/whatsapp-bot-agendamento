@@ -81,6 +81,8 @@
             },
             csc: cfg.csc, cscId: cfg.cscId,
             qrBaseUrl: cfg.qrBaseUrl, urlChave: cfg.urlChave,
+            aliquotaAproxTributos: Number(cfg.aliquotaAproxTributos) || 0,
+            ibptToken: cfg.ibptToken || undefined,
             payment: { tPag: mapTPag(pedido.forma_pagamento), vPag: Number(pedido.valor_total) || 0 },
             items: itensDoPedido(pedido, cfg),
             recipient: pedido.cpf_cliente ? { cpf: pedido.cpf_cliente, xNome: pedido.nome_cliente } : undefined
@@ -123,6 +125,76 @@
             throw new Error(`NFC-e não autorizada (${registro.cStat || '-'}): ${registro.motivo || 'erro desconhecido'}`);
         }
         return { id: ref.id, ...registro };
+    }
+
+    // ---------- Prévia de layout do cupom (sem emitir/transmitir) ----------
+    // Recebe a aba já aberta (window.open síncrono no clique) para não ser
+    // bloqueada pelo navegador — abrir depois de vários await perde o
+    // "gesto do usuário" e o Chrome/Firefox bloqueiam a aba sem avisar.
+    async function visualizarCupom(janela) {
+        const cfg = await getConfig();
+        validarConfig({ ...cfg, ativo: true });
+
+        const payload = {
+            ambiente: cfg.ambiente || 'homologacao',
+            serie: cfg.serie || 1,
+            nNF: (cfg.seqNNF || 0) + 1,
+            seed: `previa-${Date.now()}`,
+            emitter: {
+                cnpj: cfg.cnpj, ie: cfg.ie || 'ISENTO', xNome: cfg.razao || cfg.fantasia || 'Emitente',
+                xFant: cfg.fantasia, xLgr: cfg.xLgr, nro: cfg.nro, xCpl: cfg.xCpl,
+                xBairro: cfg.xBairro, cMun: cfg.cMun, xMun: cfg.xMun, uf: cfg.uf,
+                cep: cfg.cep, fone: cfg.fone, crt: cfg.regime === 'normal' ? '3' : '1'
+            },
+            csc: cfg.csc, cscId: cfg.cscId,
+            qrBaseUrl: cfg.qrBaseUrl, urlChave: cfg.urlChave,
+            aliquotaAproxTributos: Number(cfg.aliquotaAproxTributos) || 0,
+            ibptToken: cfg.ibptToken || undefined,
+            payment: { tPag: '01', vPag: 25 },
+            items: [{
+                xProd: 'Produto de exemplo', ncm: cfg.ncm || '21069090', cfop: cfg.cfop || '5102',
+                csosn: cfg.cst || '102', origem: cfg.origem || '0', uCom: 'UN', qCom: 1, vUnCom: 25
+            }]
+        };
+
+        let resp;
+        try {
+            resp = await fetch(`${cfg.url}/fiscal/nfce/preview`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { 'Authorization': `Bearer ${cfg.apiKey}` } : {}) },
+                body: JSON.stringify(payload)
+            });
+        } catch (err) { throw new Error('Falha ao contatar o serviço fiscal: ' + err.message); }
+
+        if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            throw new Error(data.error || `Falha ao gerar prévia (${resp.status}).`);
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        if (janela && !janela.closed) janela.location.href = url;
+        else window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
+
+    // ---------- Pré-aquecimento do cache de tributos IBPT (em segundo plano) ----------
+    async function prewarmTributosIbpt(ncms) {
+        const cfg = await getConfig();
+        if (!cfg.url) throw new Error('Informe a URL do serviço fiscal em Configurações.');
+        if (!cfg.ibptToken) throw new Error('Configure o Token IBPT em Config fiscal primeiro.');
+
+        const resp = await fetch(`${cfg.url}/fiscal/ibpt/prewarm`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { 'Authorization': `Bearer ${cfg.apiKey}` } : {}) },
+            body: JSON.stringify({
+                uf: cfg.uf, cnpj: cfg.cnpj, token: cfg.ibptToken,
+                itens: ncms.map(ncm => ({ ncm }))
+            })
+        }).catch(err => { throw new Error('Falha ao contatar o serviço fiscal: ' + err.message); });
+
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || `Falha ao iniciar atualização (${resp.status}).`);
+        return data;
     }
 
     // ---------- Transmissão de NFC-e emitida em contingência ----------
@@ -235,5 +307,41 @@
         return data;
     }
 
-    window.FiscalClient = { getConfig, emitir, cancelar, inutilizar, transmitirContingencia };
+    async function sincronizarDfe() {
+        const cfg = await getConfig();
+        validarConfig({ ...cfg, ativo: true });
+        if (!cfg.cnpj) throw new Error('CNPJ da empresa ausente em Configuracoes > Fiscal.');
+        if (!cfg.uf) throw new Error('UF da empresa ausente em Configuracoes > Fiscal.');
+
+        const resp = await fetch(`${cfg.url}/fiscal/dfe/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { 'Authorization': `Bearer ${cfg.apiKey}` } : {}) },
+            body: JSON.stringify({
+                ambiente: cfg.ambiente,
+                uf: cfg.uf,
+                cnpj: cfg.cnpj,
+                ultNSU: cfg.dfeUltNSU || '0'
+            })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || data.motivo || `Falha ao sincronizar DFe (${resp.status}).`);
+
+        const batch = db().batch();
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        (data.documentos || []).forEach(doc => {
+            const id = doc.chave || doc.nsu;
+            if (!id) return;
+            const ref = db().collection('dfe_documentos').doc(String(id));
+            batch.set(ref, { ...doc, atualizado_em: now, criado_em: now }, { merge: true });
+        });
+        batch.set(db().collection('configuracoes').doc('fiscal'), {
+            dfeUltNSU: data.ultNSU || cfg.dfeUltNSU || '0',
+            dfeMaxNSU: data.maxNSU || cfg.dfeMaxNSU || '0',
+            dfeSincronizadoEm: now
+        }, { merge: true });
+        await batch.commit();
+        return data;
+    }
+
+    window.FiscalClient = { getConfig, emitir, cancelar, inutilizar, transmitirContingencia, sincronizarDfe, visualizarCupom, prewarmTributosIbpt };
 })();

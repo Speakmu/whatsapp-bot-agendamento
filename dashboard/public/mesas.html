@@ -29,23 +29,43 @@
         .btn-azul { background:var(--blue); } .btn-verde { background:var(--ok); } .btn-laranja { background:var(--accent); }
         .btn-cinza { background:#95a5a6; } .btn-vermelho { background:var(--danger); }
 
-        .wrap { padding:16px; max-width:1100px; margin:0 auto; }
-        .add-mesa { display:flex; gap:8px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
-        .add-mesa input { padding:9px; border:1px solid var(--line); border-radius:8px; }
+        .wrap { padding:18px 24px 28px; max-width:1180px; margin:0 auto; }
+        .page-intro { display:flex; justify-content:space-between; align-items:flex-end; gap:14px; margin-bottom:16px; flex-wrap:wrap; }
+        .page-intro h2 { font-size:1.05rem; margin-bottom:4px; }
+        .page-intro p { color:var(--muted); font-size:.9rem; }
+        .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; box-shadow:0 1px 2px rgba(15,23,42,.04); }
+        .kpis { display:grid; grid-template-columns:repeat(4,minmax(140px,1fr)); gap:12px; margin-bottom:16px; }
+        .kpi { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; min-height:86px; }
+        .kpi .rotulo { color:var(--muted); font-size:.75rem; text-transform:uppercase; }
+        .kpi .valor { font-size:1.55rem; font-weight:800; margin-top:8px; }
+        .kpi.ok .valor { color:var(--ok); }
+        .kpi.warn .valor { color:var(--warn); }
+        .kpi.money .valor { color:var(--accent); }
+        .toolbar { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+        .toolbar input, .add-mesa input { padding:10px 12px; border:1px solid var(--line); border-radius:8px; min-height:40px; }
+        .toolbar input { min-width:min(360px,100%); }
+        .legend { display:flex; gap:10px; color:var(--muted); font-size:.85rem; flex-wrap:wrap; }
+        .dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; }
+        .dot.free { background:var(--ok); } .dot.busy { background:var(--warn); }
+        .add-mesa { display:grid; grid-template-columns:90px minmax(180px,1fr) auto; gap:8px; align-items:end; margin-top:10px; }
+        .config-title { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-top:18px; }
+        .config-title h3 { font-size:1rem; }
+        .config-title p { color:var(--muted); font-size:.85rem; margin-top:2px; }
 
-        .grid-mesas { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:14px; }
+        .grid-mesas { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:14px; }
         .mesa {
-            background:var(--card); border:2px solid var(--ok); border-radius:14px; padding:18px; text-align:center;
-            cursor:pointer; transition:.1s; position:relative;
+            background:var(--card); border:1px solid var(--line); border-left:5px solid var(--ok); border-radius:12px; padding:16px; text-align:left;
+            cursor:pointer; transition:.1s; position:relative; min-height:142px; display:flex; flex-direction:column; gap:8px;
         }
         .mesa:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.1); }
-        .mesa.ocupada { border-color:var(--warn); background:#fff8f0; }
-        .mesa .num { font-size:1.6rem; font-weight:800; }
+        .mesa.ocupada { border-left-color:var(--warn); background:#fffaf5; }
+        .mesa .num { font-size:1.35rem; font-weight:800; }
         .mesa .nome { font-size:.8rem; color:var(--muted); }
-        .mesa .st { margin-top:8px; font-size:.8rem; font-weight:700; }
+        .mesa .st { margin-top:auto; font-size:.78rem; font-weight:800; text-transform:uppercase; }
         .mesa.livre .st { color:var(--ok); } .mesa.ocupada .st { color:var(--warn); }
-        .mesa .tot { font-size:1.05rem; font-weight:700; color:var(--accent); margin-top:6px; }
-        .mesa .x { position:absolute; top:6px; right:8px; color:#bbb; font-size:.9rem; }
+        .mesa .tot { font-size:1.2rem; font-weight:800; color:var(--accent); }
+        .mesa .hint { color:var(--muted); font-size:.82rem; }
+        .mesa .x { position:absolute; top:8px; right:10px; color:#9aa5b1; font-size:.9rem; }
 
         /* modal comanda */
         .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; z-index:50; padding:14px; }
@@ -70,25 +90,65 @@
         .campo-inline select, .campo-inline input { padding:8px; border:1px solid var(--line); border-radius:8px; }
         .acoes-final { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
         .vazio { color:var(--muted); padding:10px 0; }
-        @media (max-width:760px){ .modal-body{ grid-template-columns:1fr; } .lado.cardapio{ border-right:none; border-bottom:1px solid var(--line); max-height:38vh; } }
+        @media (max-width:760px){
+            header.top { align-items:flex-start; }
+            .wrap { padding:14px; }
+            .kpis { grid-template-columns:1fr 1fr; }
+            .add-mesa { grid-template-columns:1fr; }
+            .toolbar input { min-width:100%; }
+            .modal-body{ grid-template-columns:1fr; }
+            .lado.cardapio{ border-right:none; border-bottom:1px solid var(--line); max-height:38vh; }
+        }
     </style>
 </head>
 
 <body>
     <header class="top">
         <h1>🍽️ Mesas & Comandas</h1>
-        <a class="link" href="/painel.html">← Painel</a>
+        <a class="link" href="/home.html">← Início</a>
     </header>
 
     <div class="wrap">
-        <div class="add-mesa">
-            <input id="nova-mesa-num" type="number" placeholder="Nº" style="width:90px;">
-            <input id="nova-mesa-nome" placeholder="Nome/local (opcional)">
-            <button class="btn btn-verde" id="btn-add-mesa">+ Adicionar mesa</button>
+        <div class="page-intro">
+            <div>
+                <h2>Operação do salão</h2>
+                <p>Abra comandas, adicione itens e envie o fechamento para o caixa.</p>
+            </div>
+            <button class="btn btn-verde" id="btn-foco-add">+ Configurar mesa</button>
         </div>
-        <div class="grid-mesas" id="grid-mesas"></div>
-    </div>
 
+        <div class="kpis">
+            <div class="kpi"><div class="rotulo">Total de mesas</div><div class="valor" id="mesa-kpi-total">0</div></div>
+            <div class="kpi ok"><div class="rotulo">Livres</div><div class="valor" id="mesa-kpi-livres">0</div></div>
+            <div class="kpi warn"><div class="rotulo">Ocupadas</div><div class="valor" id="mesa-kpi-ocupadas">0</div></div>
+            <div class="kpi money"><div class="rotulo">Em aberto</div><div class="valor" id="mesa-kpi-total-aberto">R$ 0,00</div></div>
+        </div>
+
+        <section class="panel">
+            <div class="toolbar">
+                <input id="busca-mesas" placeholder="Buscar mesa, número ou local...">
+                <div class="legend">
+                    <span><span class="dot free"></span>Livre</span>
+                    <span><span class="dot busy"></span>Comanda aberta</span>
+                </div>
+            </div>
+            <div class="grid-mesas" id="grid-mesas"></div>
+        </section>
+
+        <section class="panel" id="config-mesas" style="margin-top:16px;">
+            <div class="config-title">
+                <div>
+                    <h3>Configuração de mesas</h3>
+                    <p>Use esta área apenas para criar pontos de atendimento: mesa, balcão ou área externa.</p>
+                </div>
+            </div>
+            <div class="add-mesa">
+                <input id="nova-mesa-num" type="number" placeholder="Nº">
+                <input id="nova-mesa-nome" placeholder="Nome/local (opcional)">
+                <button class="btn btn-verde" id="btn-add-mesa">+ Adicionar mesa</button>
+            </div>
+        </section>
+    </div>
     <!-- Modal comanda -->
     <div class="modal-bg" id="modal-comanda">
         <div class="modal">
@@ -108,20 +168,10 @@
             </div>
             <div class="resumo">
                 <div class="tot-final">Total: <span id="cmd-total">R$ 0,00</span></div>
-                <div class="campo-inline">
-                    <label>Dividir por</label>
-                    <input type="number" id="cmd-dividir" min="1" value="1" style="width:70px;">
-                    <span id="cmd-por-pessoa" style="color:var(--muted);"></span>
-                </div>
-                <div class="campo-inline">
-                    <label>Pagamento</label>
-                    <select id="cmd-pagamento">
-                        <option>Dinheiro</option><option>PIX</option><option>Cartão</option>
-                    </select>
-                </div>
                 <div class="acoes-final">
                     <button class="btn btn-vermelho" id="cmd-cancelar">Cancelar comanda</button>
-                    <button class="btn btn-verde" id="cmd-fechar-conta">Fechar conta</button>
+                    <button class="btn btn-azul" id="cmd-imprimir">Imprimir comanda</button>
+                    <button class="btn btn-verde" id="cmd-enviar-caixa">Enviar para o caixa</button>
                 </div>
             </div>
         </div>
@@ -134,3 +184,4 @@
 </body>
 
 </html>
+

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Início | GestorChef</title>
+    <title>Inicio | GestorChef</title>
     <link rel="preconnect" href="https://www.gstatic.com">
 
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
@@ -16,65 +16,171 @@
     <link rel="stylesheet" href="/shell.css">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        :root { --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d; --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22; --line:#e1e5ea; --blue:#2f6fed; }
+        :root {
+            --bg:#f4f6f9; --card:#fff; --txt:#1d344c; --muted:#738391;
+            --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22;
+            --line:#dfe5eb; --blue:#2f6fed; --soft:#f8fafc;
+        }
         body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
-        .topbar { background:#fff; border-bottom:1px solid var(--line); padding:18px 24px; }
-        .topbar h1 { font-size:1.4rem; }
-        .topbar p { color:var(--muted); font-size:.9rem; margin-top:2px; }
-        .wrap { padding:22px 24px; max-width:1100px; }
+        .topbar { background:#fff; border-bottom:3px solid var(--accent); padding:18px 24px; }
+        .topbar h1 { font-size:1.35rem; line-height:1.25; }
+        .topbar p { color:var(--muted); font-size:.9rem; margin-top:4px; }
+        .wrap { padding:22px 24px 34px; max-width:1540px; }
 
-        .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:22px; }
-        .kpi { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; position:relative; overflow:hidden; }
-        .kpi .ic { position:absolute; right:14px; top:14px; font-size:1.6rem; opacity:.25; }
-        .kpi .rotulo { font-size:.78rem; color:var(--muted); text-transform:uppercase; }
-        .kpi .valor { font-size:1.8rem; font-weight:800; margin-top:8px; }
+        .banner {
+            display:none; background:#fff4ee; border:1px solid #ffd9c4; border-left:5px solid var(--danger);
+            border-radius:8px; padding:14px 16px; margin-bottom:18px;
+        }
+        .banner strong { color:var(--danger); }
+        .banner span { font-size:.9rem; }
+        .banner a { margin-left:8px; font-size:.85rem; color:var(--blue); text-decoration:none; font-weight:700; }
+
+        .kpis { display:grid; grid-template-columns:repeat(3,minmax(150px,1fr)); gap:14px; margin-bottom:18px; }
+        .kpi { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; position:relative; min-height:94px; }
+        .kpi .ic { position:absolute; right:14px; top:14px; font-size:1.45rem; opacity:.22; }
+        .kpi .rotulo { font-size:.74rem; color:var(--muted); text-transform:uppercase; }
+        .kpi .valor { font-size:1.65rem; font-weight:800; margin-top:9px; }
+        .kpi .sub { color:var(--muted); font-size:.78rem; margin-top:2px; }
         .kpi.vendas .valor { color:var(--ok); }
         .kpi.alerta .valor { color:var(--danger); }
+        .kpi.caixa-aberto .valor { color:#179957; font-size:1.25rem; }
+        .kpi.caixa-fechado .valor { color:var(--danger); font-size:1.25rem; }
 
-        h2.sec { font-size:1rem; color:var(--muted); margin:6px 0 12px; text-transform:uppercase; letter-spacing:.04em; }
-        .atalhos { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:14px; }
-        .atalho {
-            background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px;
-            text-decoration:none; color:var(--txt); display:flex; flex-direction:column; gap:6px; transition:.12s;
+        .chart-grid { display:grid; grid-template-columns:1.1fr 1.4fr .9fr; gap:16px; align-items:stretch; margin-bottom:16px; }
+        .dashboard-grid { display:grid; grid-template-columns:minmax(420px,.95fr) minmax(520px,1.05fr); gap:16px; align-items:start; }
+        .panel { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+        .panel-head { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:15px 16px; border-bottom:1px solid var(--line); }
+        .panel-head h2 { font-size:1rem; }
+        .panel-head a, .panel-head span { color:var(--muted); font-size:.82rem; text-decoration:none; font-weight:700; }
+        .panel-body { padding:14px 16px; }
+
+        .pending-list, .orders-list, .rank-list, .bar-list { display:flex; flex-direction:column; gap:10px; }
+        .pending {
+            display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:10px; align-items:center;
+            padding:12px; border:1px solid var(--line); border-left:4px solid var(--blue); border-radius:8px; background:var(--soft);
         }
-        .atalho:hover { transform:translateY(-3px); box-shadow:0 6px 18px rgba(0,0,0,.08); border-color:var(--accent); }
-        .atalho .ic { font-size:1.8rem; }
-        .atalho .nome { font-weight:700; }
-        .atalho .desc { font-size:.82rem; color:var(--muted); }
-        @media (max-width:880px){ .kpis{ grid-template-columns:1fr 1fr; } }
+        .pending.warn { border-left-color:var(--warn); }
+        .pending.danger { border-left-color:var(--danger); }
+        .pending.ok { border-left-color:var(--ok); }
+        .pending .pi { font-size:1.25rem; }
+        .pending strong { display:block; font-size:.92rem; }
+        .pending small { color:var(--muted); }
+        .pending a { color:var(--blue); text-decoration:none; font-weight:800; font-size:.85rem; white-space:nowrap; }
+
+        .order-row, .rank-row {
+            display:grid; grid-template-columns:70px minmax(0,1fr) auto; gap:12px; align-items:center;
+            padding:11px 0; border-bottom:1px solid #edf1f5;
+        }
+        .order-row:last-child, .rank-row:last-child { border-bottom:0; }
+        .order-time { color:var(--muted); font-size:.82rem; }
+        .order-title, .rank-title { font-weight:800; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .order-sub, .rank-sub { color:var(--muted); font-size:.78rem; margin-top:2px; }
+        .order-total, .rank-total { font-weight:900; color:var(--txt); white-space:nowrap; }
+        .badge { display:inline-flex; margin-top:5px; padding:4px 8px; border-radius:999px; font-size:.72rem; font-weight:800; background:#eef3f8; color:#516170; }
+
+        .chart-body { min-height:250px; display:flex; flex-direction:column; justify-content:center; }
+        .donut-wrap { display:grid; grid-template-columns:156px minmax(0,1fr); gap:18px; align-items:center; }
+        .donut {
+            width:156px; height:156px; border-radius:50%;
+            background:conic-gradient(var(--ok) 0deg, var(--ok) 0deg, #edf1f5 0deg 360deg);
+            display:grid; place-items:center; position:relative;
+        }
+        .donut::after { content:""; width:104px; height:104px; border-radius:50%; background:#fff; position:absolute; }
+        .donut-center { position:relative; z-index:1; text-align:center; }
+        .donut-center strong { display:block; font-size:1.6rem; line-height:1; }
+        .donut-center span { color:var(--muted); font-size:.76rem; }
+        .legend { display:flex; flex-direction:column; gap:9px; }
+        .legend-row { display:grid; grid-template-columns:12px minmax(0,1fr) auto; gap:9px; align-items:center; color:var(--muted); font-size:.86rem; }
+        .dot { width:10px; height:10px; border-radius:50%; background:var(--blue); }
+        .dot.ok { background:var(--ok); } .dot.warn { background:var(--warn); } .dot.danger { background:var(--danger); }
+
+        .bar-item { display:grid; gap:6px; }
+        .bar-top { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:.9rem; }
+        .bar-top strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .bar-track { height:12px; background:#edf2f7; border-radius:999px; overflow:hidden; }
+        .bar-fill { height:100%; min-width:4px; border-radius:999px; background:linear-gradient(90deg,var(--accent),#f39c12); }
+        .bar-sub { color:var(--muted); font-size:.76rem; }
+
+        .meters { display:grid; gap:14px; }
+        .meter-card { padding:12px; border:1px solid var(--line); border-radius:8px; background:#f8fafc; }
+        .meter-top { display:flex; justify-content:space-between; gap:10px; font-weight:800; margin-bottom:8px; }
+        .meter-track { height:16px; background:#e9eef4; border-radius:999px; overflow:hidden; }
+        .meter-fill { height:100%; border-radius:999px; background:var(--ok); }
+        .meter-fill.warn { background:var(--warn); }
+        .meter-fill.danger { background:var(--danger); }
+        .meter-note { margin-top:7px; color:var(--muted); font-size:.78rem; }
+
+        .lower-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
+        .empty { color:var(--muted); background:#f8fafc; border:1px dashed #cfd8e3; border-radius:8px; padding:16px; text-align:center; }
+
+        @media (max-width:1280px) {
+            .kpis { grid-template-columns:repeat(3,minmax(150px,1fr)); }
+            .chart-grid { grid-template-columns:1fr 1fr; }
+            .chart-grid .panel:last-child { grid-column:1 / -1; }
+            .dashboard-grid, .lower-grid { grid-template-columns:1fr; }
+        }
+        @media (max-width:700px) {
+            .topbar { padding:16px 14px 14px 76px; min-height:92px; }
+            .topbar h1 { font-size:1.15rem; }
+            .wrap { padding:16px 12px 28px; }
+            .kpis { grid-template-columns:1fr 1fr; gap:10px; }
+            .kpi { min-height:84px; padding:13px; }
+            .kpi .valor { font-size:1.35rem; }
+            .chart-grid, .dashboard-grid { grid-template-columns:1fr; gap:12px; }
+            .chart-grid .panel:last-child { grid-column:auto; }
+            .donut-wrap { grid-template-columns:1fr; justify-items:center; }
+            .panel-head, .panel-body { padding-left:12px; padding-right:12px; }
+            .pending { grid-template-columns:28px minmax(0,1fr); }
+            .pending a { grid-column:2; }
+            .order-row, .rank-row { grid-template-columns:58px minmax(0,1fr); }
+            .order-total, .rank-total { grid-column:2; }
+        }
     </style>
 </head>
 
 <body>
     <div class="topbar">
-        <h1 id="titulo-boas-vindas">👋 Bem-vindo ao GestorChef</h1>
-        <p id="data-hoje">—</p>
+        <h1 id="titulo-boas-vindas">&#128075; Bem-vindo ao GestorChef</h1>
+        <p id="data-hoje">-</p>
     </div>
 
     <div class="wrap">
-        <div id="banner-estoque" style="display:none;background:#fff4ee;border:1px solid #ffd9c4;border-left:5px solid var(--danger);border-radius:12px;padding:14px 16px;margin-bottom:18px;">
-            <strong style="color:var(--danger);">⚠️ Estoque baixo</strong>
-            <span id="banner-estoque-txt" style="font-size:.9rem;"></span>
-            <a href="/estoque.html" style="margin-left:8px;font-size:.85rem;color:var(--blue);text-decoration:none;font-weight:600;">Ver compras sugeridas →</a>
+        <div id="banner-estoque" class="banner">
+            <strong>&#9888; Estoque baixo</strong>
+            <span id="banner-estoque-txt"></span>
+            <a href="/estoque.html">Ver reposicao</a>
         </div>
 
         <div class="kpis">
-            <div class="kpi vendas"><span class="ic">💰</span><div class="rotulo">Vendas hoje</div><div class="valor" id="kpi-vendas">R$ 0,00</div></div>
-            <div class="kpi"><span class="ic">🧾</span><div class="rotulo">Pedidos ativos</div><div class="valor" id="kpi-ativos">0</div></div>
-            <div class="kpi"><span class="ic">🍽️</span><div class="rotulo">Mesas ocupadas</div><div class="valor" id="kpi-mesas">0</div></div>
-            <div class="kpi alerta"><span class="ic">📦</span><div class="rotulo">Estoque baixo</div><div class="valor" id="kpi-estoque">0</div></div>
+            <div class="kpi"><span class="ic">&#127869;</span><div class="rotulo">Mesas ocupadas</div><div class="valor" id="kpi-mesas">0/0</div><div class="sub" id="kpi-comandas">0 comandas no caixa</div></div>
+            <div class="kpi alerta"><span class="ic">&#128230;</span><div class="rotulo">Estoque baixo</div><div class="valor" id="kpi-estoque">0</div><div class="sub">itens para repor</div></div>
+            <div class="kpi caixa-fechado" id="kpi-caixa-card"><span class="ic">&#128181;</span><div class="rotulo">Caixa</div><div class="valor" id="kpi-caixa">FECHADO</div><div class="sub" id="kpi-caixa-sub">Abra para vender</div></div>
         </div>
 
-        <h2 class="sec">Acesso rápido</h2>
-        <div class="atalhos">
-            <a class="atalho" href="/painel.html"><span class="ic">🧾</span><span class="nome">Pedidos</span><span class="desc">Pedidos ativos em tempo real</span></a>
-            <a class="atalho" href="/kds.html"><span class="ic">👨‍🍳</span><span class="nome">Cozinha (KDS)</span><span class="desc">Tela de preparo</span></a>
-            <a class="atalho" href="/caixa.html"><span class="ic">💵</span><span class="nome">Caixa / PDV</span><span class="desc">Venda no balcão e caixa</span></a>
-            <a class="atalho" href="/mesas.html"><span class="ic">🍽️</span><span class="nome">Mesas</span><span class="desc">Comandas e mesas</span></a>
-            <a class="atalho" href="/entrega.html"><span class="ic">🛵</span><span class="nome">Entregas</span><span class="desc">Despacho e entregadores</span></a>
-            <a class="atalho" href="/estoque.html"><span class="ic">📦</span><span class="nome">Estoque</span><span class="desc">Insumos e reposição</span></a>
-            <a class="atalho" href="/financeiro.html"><span class="ic">📊</span><span class="nome">Financeiro</span><span class="desc">DRE e fluxo de caixa</span></a>
-            <a class="atalho" href="/painel.html#cardapio"><span class="ic">🍕</span><span class="nome">Cardápio</span><span class="desc">Gerenciar itens</span></a>
+        <div class="dashboard-grid">
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Ocupacao e caixa</h2>
+                    <span>Agora</span>
+                </div>
+                <div class="panel-body">
+                    <div id="resumo-operacao" class="meters chart-body">
+                        <div class="empty">Carregando resumo...</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Pendencias agora</h2>
+                    <span id="pendencias-total">0 alertas</span>
+                </div>
+                <div class="panel-body">
+                    <div id="pendencias-lista" class="pending-list">
+                        <div class="empty">Carregando operacao...</div>
+                    </div>
+                </div>
+            </section>
         </div>
     </div>
 

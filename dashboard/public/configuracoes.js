@@ -1,101 +1,76 @@
-// ============================================================
-//  CONFIGURAÇÕES — gerais + fiscal (NFC-e)
-//  Firestore:
-//    configuracoes/sistema  { nome, telefone, endereco }
-//    configuracoes/fiscal   { ativo, modo, url, apiKey, razao, fantasia,
-//                             cnpj, ie, uf, regime, ambiente, serie,
-//                             csc, cscId, ncm, cfop, cst, origem }
-// ============================================================
-
+// Configuracoes gerais e exibicao de modulos.
 document.addEventListener('DOMContentLoaded', () => {
     const firebaseConfig = window.__FIREBASE_CONFIG__;
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+
     const db = firebase.firestore();
     const auth = firebase.auth();
     const $ = (id) => document.getElementById(id);
 
     const DOC_GERAL = db.collection('configuracoes').doc('sistema');
-    const DOC_FISCAL = db.collection('configuracoes').doc('fiscal');
     const DOC_EXIB = db.collection('configuracoes').doc('exibicao');
-
-    const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'notas', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing'];
+    const DOC_BOT = db.collection('configuracoes').doc('bot');
+    const COL_USUARIOS = db.collection('usuarios_admin');
+    const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
+    const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'configuracoes'];
+    const NOMES_MODULOS = {
+        pedidos: 'Pedidos',
+        kds: 'Cozinha (KDS)',
+        mesas: 'Mesas & Comandas',
+        entregas: 'Entregas',
+        caixa: 'Caixa / PDV',
+        bi: 'BI / Vendas',
+        financeiro: 'Financeiro',
+        fiscal: 'Fiscal',
+        relatorios: 'Relatorios',
+        estoque: 'Estoque',
+        fichas: 'Ficha Tecnica / Custos',
+        cardapio: 'Cardapio',
+        marketing: 'Marketing & App',
+        configuracoes: 'Configuracoes'
+    };
+    let usuarioAtual = null;
+    let editandoEmail = null;
+    const BOT_DEFAULTS = {
+        ativo: true,
+        nome_atendente: 'Sofia',
+        nome_empresa: 'Lileamar Salgados',
+        chave_pix: 'abc1231234567',
+        mensagem_inicial: 'Ola! Como posso ajudar?',
+        mensagem_inativo: 'No momento o atendimento automatico esta pausado. Em breve nossa equipe responde por aqui.',
+        mensagem_pronto: 'Oi {nome_cliente}! Seu pedido esta pronto!',
+        mensagem_retirada: 'Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!',
+        mensagem_erro: 'Desculpe, tive um probleminha aqui. Pode repetir?',
+        instrucoes_extras: ''
+    };
 
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
+        usuarioAtual = user;
         carregar();
         $('salvar-geral').addEventListener('click', salvarGeral);
-        $('salvar-fiscal').addEventListener('click', salvarFiscal);
-        $('testar-fiscal').addEventListener('click', testarConexao);
-        $('f-ativo').addEventListener('change', refletirAtivo);
+        $('salvar-bot').addEventListener('click', salvarBot);
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
-        $('secao-config').addEventListener('change', trocarSecao);
-        $('enviar-cert').addEventListener('click', enviarCertificado);
+        $('salvar-usuario').addEventListener('click', salvarUsuario);
+        $('novo-usuario').addEventListener('click', limparUsuarioForm);
+        if (!isAdmin(user.email)) {
+            $('usuarios-admin-box').style.display = 'none';
+        } else {
+            carregarUsuarios();
+        }
     });
 
-    async function enviarCertificado() {
-        const url = $('f-url').value.trim().replace(/\/$/, '');
-        const apiKey = $('f-apikey').value.trim();
-        const msg = $('cert-msg');
-        const file = $('f-cert-file').files[0];
-        const senha = $('f-cert-senha').value;
-        if (!url) { msg.textContent = 'Salve a URL do serviço fiscal primeiro.'; msg.style.color = '#c0392b'; return; }
-        if (!file) { msg.textContent = 'Selecione o arquivo .pfx.'; msg.style.color = '#c0392b'; return; }
-        if (!senha) { msg.textContent = 'Informe a senha do certificado.'; msg.style.color = '#c0392b'; return; }
-        msg.textContent = 'Enviando...'; msg.style.color = '#7f8c8d';
-        try {
-            const fd = new FormData();
-            fd.append('certificado', file);
-            fd.append('password', senha);
-            const resp = await fetch(`${url}/fiscal/certificado`, {
-                method: 'POST',
-                headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {},
-                body: fd
-            });
-            const data = await resp.json().catch(() => ({}));
-            if (resp.ok && data.ok) {
-                msg.textContent = `✅ ${data.message || 'Certificado enviado.'}`; msg.style.color = '#1e8e4f';
-                $('f-cert-file').value = '';
-                $('f-cert-senha').value = '';
-            } else {
-                msg.textContent = '❌ ' + (data.error || `Falha (${resp.status}).`); msg.style.color = '#c0392b';
-            }
-        } catch (err) {
-            msg.textContent = '❌ Não foi possível enviar (verifique URL/CORS/serviço no ar).'; msg.style.color = '#c0392b';
-        }
+    function chk(mod) {
+        return document.querySelector(`input[data-mod="${mod}"]`);
     }
-
-    function trocarSecao() {
-        const s = $('secao-config').value;
-        $('painel-sistema').style.display = s === 'sistema' ? '' : 'none';
-        $('painel-fiscal').style.display = s === 'fiscal' ? '' : 'none';
+    function userChk(mod) {
+        return document.querySelector(`input[data-user-mod="${mod}"]`);
     }
-
-    function chk(mod) { return document.querySelector(`input[data-mod="${mod}"]`); }
-
-    async function carregarExibicao() {
-        try {
-            const snap = await DOC_EXIB.get();
-            const cfg = snap.exists ? (snap.data() || {}) : {};
-            MODULOS.forEach(m => { const c = chk(m); if (c) c.checked = cfg[m] !== false; }); // padrão: visível
-        } catch (e) { console.warn('exibicao:', e.message); }
+    function docIdEmail(email) {
+        return String(email || '').trim().toLowerCase();
     }
-
-    async function salvarExibicao() {
-        const cfg = {};
-        MODULOS.forEach(m => { const c = chk(m); cfg[m] = c ? c.checked : true; });
-        try {
-            await DOC_EXIB.set(cfg, { merge: true });
-            if (window.GestorChefShell) window.GestorChefShell.aplicarExibicao(cfg); // atualiza o menu na hora
-            flash('Exibição salva ✓');
-        } catch (err) { alert('Erro ao salvar exibição: ' + err.message); }
-    }
-
-    function refletirAtivo() {
-        const on = $('f-ativo').checked;
-        $('fiscal-fields').classList.toggle('disabled', !on);
-        const badge = $('fiscal-status');
-        badge.textContent = on ? 'Ativado' : 'Desativado';
-        badge.className = 'badge ' + (on ? 'on' : 'off');
+    function isAdmin(email) {
+        return docIdEmail(email) === ADMIN_EMAIL;
     }
 
     async function carregar() {
@@ -107,41 +82,43 @@ document.addEventListener('DOMContentLoaded', () => {
                 $('g-telefone').value = d.telefone || '';
                 $('g-endereco').value = d.endereco || '';
             }
-            const f = await DOC_FISCAL.get();
-            if (f.exists) {
-                const d = f.data();
-                $('f-ativo').checked = !!d.ativo;
-                $('f-modo').value = d.modo || 'manual';
-                $('f-url').value = d.url || '';
-                $('f-apikey').value = d.apiKey || '';
-                $('f-razao').value = d.razao || '';
-                $('f-fantasia').value = d.fantasia || '';
-                $('f-cnpj').value = d.cnpj || '';
-                $('f-ie').value = d.ie || '';
-                $('f-uf').value = d.uf || '';
-                $('f-regime').value = d.regime || 'simples';
-                $('f-ambiente').value = d.ambiente || 'homologacao';
-                $('f-serie').value = d.serie || 1;
-                $('f-csc').value = d.csc || '';
-                $('f-cscid').value = d.cscId || '';
-                $('f-ncm').value = d.ncm || '';
-                $('f-cfop').value = d.cfop || '';
-                $('f-cst').value = d.cst || '';
-                $('f-origem').value = d.origem || '0';
-                $('f-xlgr').value = d.xLgr || '';
-                $('f-nro').value = d.nro || '';
-                $('f-xcpl').value = d.xCpl || '';
-                $('f-xbairro').value = d.xBairro || '';
-                $('f-xmun').value = d.xMun || '';
-                $('f-cmun').value = d.cMun || '';
-                $('f-cep').value = d.cep || '';
-                $('f-fone').value = d.fone || '';
-                $('f-qrbase').value = d.qrBaseUrl || '';
-                $('f-urlchave').value = d.urlChave || '';
-            }
-            refletirAtivo();
             await carregarExibicao();
-        } catch (err) { alert('Erro ao carregar configurações: ' + err.message); }
+            await carregarBot();
+        } catch (err) {
+            alert('Erro ao carregar configuracoes: ' + err.message);
+        }
+    }
+
+    async function carregarBot() {
+        try {
+            const snap = await DOC_BOT.get();
+            const d = { ...BOT_DEFAULTS, ...(snap.exists ? (snap.data() || {}) : {}) };
+            $('bot-ativo').checked = d.ativo !== false;
+            $('bot-nome-atendente').value = d.nome_atendente || '';
+            $('bot-nome-empresa').value = d.nome_empresa || '';
+            $('bot-chave-pix').value = d.chave_pix || '';
+            $('bot-mensagem-inicial').value = d.mensagem_inicial || '';
+            $('bot-mensagem-inativo').value = d.mensagem_inativo || '';
+            $('bot-mensagem-pronto').value = d.mensagem_pronto || '';
+            $('bot-mensagem-retirada').value = d.mensagem_retirada || '';
+            $('bot-mensagem-erro').value = d.mensagem_erro || '';
+            $('bot-instrucoes-extras').value = d.instrucoes_extras || '';
+        } catch (err) {
+            console.warn('bot:', err.message);
+        }
+    }
+
+    async function carregarExibicao() {
+        try {
+            const snap = await DOC_EXIB.get();
+            const cfg = snap.exists ? (snap.data() || {}) : {};
+            MODULOS.forEach(m => {
+                const c = chk(m);
+                if (c) c.checked = cfg[m] !== false;
+            });
+        } catch (err) {
+            console.warn('exibicao:', err.message);
+        }
     }
 
     async function salvarGeral() {
@@ -152,61 +129,212 @@ document.addEventListener('DOMContentLoaded', () => {
                 endereco: $('g-endereco').value.trim()
             }, { merge: true });
             flash('Dados gerais salvos.');
-        } catch (err) { alert('Erro: ' + err.message); }
-    }
-
-    async function salvarFiscal() {
-        try {
-            await DOC_FISCAL.set({
-                ativo: $('f-ativo').checked,
-                modo: $('f-modo').value,
-                url: $('f-url').value.trim().replace(/\/$/, ''),
-                apiKey: $('f-apikey').value.trim(),
-                razao: $('f-razao').value.trim(),
-                fantasia: $('f-fantasia').value.trim(),
-                cnpj: $('f-cnpj').value.trim(),
-                ie: $('f-ie').value.trim(),
-                uf: $('f-uf').value.trim().toUpperCase(),
-                regime: $('f-regime').value,
-                ambiente: $('f-ambiente').value,
-                serie: parseInt($('f-serie').value) || 1,
-                csc: $('f-csc').value.trim(),
-                cscId: $('f-cscid').value.trim(),
-                ncm: $('f-ncm').value.trim(),
-                cfop: $('f-cfop').value.trim(),
-                cst: $('f-cst').value.trim(),
-                origem: $('f-origem').value,
-                xLgr: $('f-xlgr').value.trim(),
-                nro: $('f-nro').value.trim(),
-                xCpl: $('f-xcpl').value.trim(),
-                xBairro: $('f-xbairro').value.trim(),
-                xMun: $('f-xmun').value.trim(),
-                cMun: $('f-cmun').value.trim(),
-                cep: $('f-cep').value.trim(),
-                fone: $('f-fone').value.trim(),
-                qrBaseUrl: $('f-qrbase').value.trim().replace(/\/$/, ''),
-                urlChave: $('f-urlchave').value.trim().replace(/\/$/, '')
-            }, { merge: true });
-            flash('Configuração fiscal salva.');
-        } catch (err) { alert('Erro ao salvar: ' + err.message); }
-    }
-
-    async function testarConexao() {
-        const url = $('f-url').value.trim().replace(/\/$/, '');
-        const apiKey = $('f-apikey').value.trim();
-        const msg = $('fiscal-msg');
-        if (!url) { msg.textContent = 'Informe a URL do serviço fiscal.'; msg.style.color = '#c0392b'; return; }
-        msg.textContent = 'Testando...'; msg.style.color = '#7f8c8d';
-        try {
-            const resp = await fetch(`${url}/fiscal/health`, {
-                headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}
-            });
-            if (resp.ok) { msg.textContent = '✅ Conexão OK com o serviço fiscal.'; msg.style.color = '#1e8e4f'; }
-            else { msg.textContent = `⚠️ Serviço respondeu ${resp.status}.`; msg.style.color = '#e67e22'; }
         } catch (err) {
-            msg.textContent = '❌ Não foi possível conectar (verifique URL/CORS/serviço no ar).';
-            msg.style.color = '#c0392b';
+            alert('Erro: ' + err.message);
         }
+    }
+
+    async function salvarBot() {
+        const payload = {
+            ativo: $('bot-ativo').checked,
+            nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,
+            nome_empresa: $('bot-nome-empresa').value.trim() || BOT_DEFAULTS.nome_empresa,
+            chave_pix: $('bot-chave-pix').value.trim(),
+            mensagem_inicial: $('bot-mensagem-inicial').value.trim() || BOT_DEFAULTS.mensagem_inicial,
+            mensagem_inativo: $('bot-mensagem-inativo').value.trim() || BOT_DEFAULTS.mensagem_inativo,
+            mensagem_pronto: $('bot-mensagem-pronto').value.trim() || BOT_DEFAULTS.mensagem_pronto,
+            mensagem_retirada: $('bot-mensagem-retirada').value.trim() || BOT_DEFAULTS.mensagem_retirada,
+            mensagem_erro: $('bot-mensagem-erro').value.trim() || BOT_DEFAULTS.mensagem_erro,
+            instrucoes_extras: $('bot-instrucoes-extras').value.trim(),
+            atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        try {
+            await DOC_BOT.set(payload, { merge: true });
+            flash('Configuracoes do bot salvas.');
+        } catch (err) {
+            alert('Erro ao salvar bot: ' + err.message);
+        }
+    }
+
+    async function salvarExibicao() {
+        const cfg = {};
+        MODULOS.forEach(m => {
+            const c = chk(m);
+            cfg[m] = c ? c.checked : true;
+        });
+        try {
+            await DOC_EXIB.set(cfg, { merge: true });
+            if (window.GestorChefShell) window.GestorChefShell.aplicarExibicao(cfg);
+            if (window.parent && window.parent !== window && window.parent.GestorChefShell) {
+                window.parent.GestorChefShell.aplicarExibicao(cfg);
+            }
+            if (window.parent && window.parent !== window && window.parent.GestorChefAdminShell) {
+                await window.parent.GestorChefAdminShell.recarregarAcesso();
+            }
+            flash('Exibicao salva.');
+        } catch (err) {
+            alert('Erro ao salvar exibicao: ' + err.message);
+        }
+    }
+
+    function permissoesDoForm() {
+        const permissoes = {};
+        MODULOS.forEach(m => {
+            const c = userChk(m);
+            permissoes[m] = c ? c.checked : false;
+        });
+        return permissoes;
+    }
+
+    function aplicarPermissoesNoForm(permissoes, admin) {
+        MODULOS.forEach(m => {
+            const c = userChk(m);
+            if (!c) return;
+            c.checked = admin ? true : !!(permissoes && permissoes[m]);
+            c.disabled = !!admin;
+        });
+    }
+
+    function limparUsuarioForm() {
+        editandoEmail = null;
+        $('u-nome').value = '';
+        $('u-email').value = '';
+        $('u-email').disabled = false;
+        aplicarPermissoesNoForm(Object.fromEntries(MODULOS.map(m => [m, m !== 'configuracoes'])), false);
+    }
+
+    async function garantirAdmin() {
+        const ref = COL_USUARIOS.doc(ADMIN_EMAIL);
+        const snap = await ref.get();
+        const permissoes = Object.fromEntries(MODULOS.map(m => [m, true]));
+        const base = {
+            email: ADMIN_EMAIL,
+            nome: 'Administrador',
+            admin: true,
+            ativo: true,
+            permissoes,
+            atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await ref.set(snap.exists ? base : { ...base, criado_em: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    }
+
+    async function carregarUsuarios() {
+        const lista = $('usuarios-lista');
+        lista.innerHTML = '<div class="muted-box">Carregando usuarios...</div>';
+        try {
+            await garantirAdmin();
+            const snap = await COL_USUARIOS.orderBy('email').get();
+            const usuarios = [];
+            snap.forEach(doc => usuarios.push({ id: doc.id, ...doc.data() }));
+            renderUsuarios(usuarios);
+        } catch (err) {
+            lista.innerHTML = `<div class="muted-box">Erro ao carregar usuarios: ${escapeHtml(err.message)}</div>`;
+        }
+    }
+
+    function renderUsuarios(usuarios) {
+        const lista = $('usuarios-lista');
+        if (!usuarios.length) {
+            lista.innerHTML = '<div class="muted-box">Nenhum usuario cadastrado.</div>';
+            return;
+        }
+        lista.innerHTML = usuarios.map(u => {
+            const permissoes = u.admin ? MODULOS : MODULOS.filter(m => u.permissoes && u.permissoes[m]);
+            const mods = permissoes.length
+                ? permissoes.map(m => `<span>${escapeHtml(NOMES_MODULOS[m] || m)}</span>`).join('')
+                : '<span>Nenhum modulo</span>';
+            const badge = u.admin ? '<span class="usuario-badge admin">ADMIN</span>' : '<span class="usuario-badge">Usuario</span>';
+            const remove = u.admin ? '' : `<button class="btn btn-vermelho" data-del-user="${escapeHtml(u.email)}">Remover</button>`;
+            const avisoAdmin = u.admin ? '<div class="usuario-meta">Admin principal: somente este login pode editar usuarios e permissoes.</div>' : '';
+            return `<div class="usuario-card">
+                <div class="usuario-top">
+                    <div>
+                        <div class="usuario-email">${escapeHtml(u.email || u.id)}</div>
+                        <div class="usuario-meta">${escapeHtml(u.nome || 'Sem nome')} ${u.ativo === false ? '- inativo' : ''}</div>
+                        ${avisoAdmin}
+                    </div>
+                    ${badge}
+                </div>
+                <div class="usuario-modulos">${mods}</div>
+                <div class="usuario-actions">
+                    <button class="btn btn-azul" data-edit-user="${escapeHtml(u.email)}">Editar acesso</button>
+                    ${remove}
+                </div>
+            </div>`;
+        }).join('');
+        lista.querySelectorAll('[data-edit-user]').forEach(btn => btn.addEventListener('click', () => editarUsuario(btn.dataset.editUser)));
+        lista.querySelectorAll('[data-del-user]').forEach(btn => btn.addEventListener('click', () => removerUsuario(btn.dataset.delUser)));
+    }
+
+    async function salvarUsuario() {
+        if (!isAdmin(usuarioAtual && usuarioAtual.email)) {
+            alert('Apenas o administrador pode gerenciar usuarios.');
+            return;
+        }
+        const email = docIdEmail($('u-email').value);
+        const nome = $('u-nome').value.trim();
+        if (!email || !email.includes('@')) {
+            alert('Informe um e-mail valido.');
+            return;
+        }
+        const admin = isAdmin(email);
+        const permissoes = admin ? Object.fromEntries(MODULOS.map(m => [m, true])) : permissoesDoForm();
+        try {
+            const ref = COL_USUARIOS.doc(email);
+            const snap = await ref.get();
+            await ref.set({
+                email,
+                nome: nome || email,
+                admin,
+                ativo: true,
+                permissoes,
+                atualizado_em: firebase.firestore.FieldValue.serverTimestamp(),
+                ...(snap.exists ? {} : { criado_em: firebase.firestore.FieldValue.serverTimestamp() })
+            }, { merge: true });
+            flash('Usuario salvo.');
+            limparUsuarioForm();
+            carregarUsuarios();
+        } catch (err) {
+            alert('Erro ao salvar usuario: ' + err.message);
+        }
+    }
+
+    async function editarUsuario(email) {
+        try {
+            const id = docIdEmail(email);
+            const snap = await COL_USUARIOS.doc(id).get();
+            if (!snap.exists) return;
+            const u = snap.data();
+            editandoEmail = id;
+            $('u-nome').value = u.nome || '';
+            $('u-email').value = u.email || id;
+            $('u-email').disabled = true;
+            aplicarPermissoesNoForm(u.permissoes || {}, !!u.admin);
+            $('usuarios-admin-box').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } catch (err) {
+            alert('Erro ao editar usuario: ' + err.message);
+        }
+    }
+
+    async function removerUsuario(email) {
+        const id = docIdEmail(email);
+        if (isAdmin(id)) {
+            alert('O admin principal nao pode ser removido.');
+            return;
+        }
+        if (!confirm(`Remover acesso de ${id}?`)) return;
+        try {
+            await COL_USUARIOS.doc(id).delete();
+            if (editandoEmail === id) limparUsuarioForm();
+            carregarUsuarios();
+            flash('Usuario removido.');
+        } catch (err) {
+            alert('Erro ao remover usuario: ' + err.message);
+        }
+    }
+
+    function escapeHtml(s) {
+        return String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     }
 
     function flash(t) {

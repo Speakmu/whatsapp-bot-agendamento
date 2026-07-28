@@ -10,6 +10,7 @@
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-storage.js"></script>
     <script src="/firebase-config.js"></script>
     <script src="/emu.js"></script>
 
@@ -62,6 +63,7 @@
 
     <nav class="tabs">
         <button class="tab active" data-tab="aparencia">🎨 Aparência do app</button>
+        <button class="tab" data-tab="destaques">🏆 Destaques</button>
         <button class="tab" data-tab="promocoes">📢 Promoções / Banner</button>
         <button class="tab" data-tab="cupons">🎟️ Cupons</button>
         <button class="tab" data-tab="fidelidade">⭐ Fidelidade</button>
@@ -73,15 +75,161 @@
             <div class="box">
                 <h2>Identidade do aplicativo</h2>
                 <div class="sub">Define como o app do cliente aparece (nome, cor da marca e logo).</div>
+
                 <div class="grid2">
-                    <div class="campo"><label>Nome do app</label><input id="a-nome" placeholder="Ex: Pizza In"></div>
-                    <div class="campo"><label>Emoji/ícone da marca</label><input id="a-emoji" placeholder="🍕" maxlength="4"></div>
-                    <div class="campo"><label>Cor primária</label><input type="color" id="a-cor" value="#ff5200"></div>
-                    <div class="campo"><label>Cor (hex)</label><input id="a-corhex" placeholder="#ff5200"></div>
+                    <div class="campo"><label>Cor primária</label>
+                        <div style="display:flex; gap:10px;">
+                            <input type="color" id="a-cor" value="#ff5200" style="width:60px;">
+                            <input id="a-corhex" placeholder="#ff5200" style="flex:1;">
+                        </div>
+                    </div>
+                    <div class="campo"><label>Cor secundária (fundo da vitrine)</label>
+                        <div style="display:flex; gap:10px;">
+                            <input type="color" id="a-cor2" value="#ffffff" style="width:60px;">
+                            <input id="a-corhex2" placeholder="#ffffff" style="flex:1;">
+                        </div>
+                    </div>
                 </div>
+
+                <div class="campo"><label>Como exibir a marca</label>
+                    <select id="a-tipo">
+                        <option value="texto">Nome formatado (texto)</option>
+                        <option value="logo">Logotipo (imagem)</option>
+                    </select>
+                </div>
+
+                <div id="a-bloco-texto">
+                    <div class="grid2">
+                        <div class="campo"><label>Nome do app</label><input id="a-nome" placeholder="Ex: Pizza In"></div>
+                        <div class="campo"><label>Estilo da fonte</label>
+                            <select id="a-fonte">
+                                <option value="italico">Itálico elegante</option>
+                                <option value="classico">Serif clássico</option>
+                                <option value="moderno">Sans-serif moderno</option>
+                                <option value="condensado">Condensado</option>
+                            </select>
+                        </div>
+                        <div class="campo"><label>Tamanho</label>
+                            <select id="a-tamanho">
+                                <option value="pequeno">Pequeno</option>
+                                <option value="medio">Médio</option>
+                                <option value="grande">Grande</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="a-bloco-logo" style="display:none;">
+                    <div class="campo"><label>Arquivo do logotipo</label>
+                        <input type="file" id="a-logo-file" accept="image/*">
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <img id="a-logo-preview" src="" style="display:none; max-height:70px; max-width:220px; border:1px solid var(--line); border-radius:8px; padding:4px; background:#fff;">
+                        <button type="button" class="btn btn-rm" id="a-logo-remover" style="display:none;">Remover logotipo</button>
+                    </div>
+                </div>
+
                 <div class="preview" id="a-preview">Pré-visualização</div>
                 <div style="margin-top:14px;"><button class="btn btn-salvar" id="a-salvar">Salvar aparência</button></div>
             </div>
+
+            <div class="box">
+                <h2>🧩 Layout da vitrine</h2>
+                <div class="sub">Como os cards de produto aparecem no app (lista de resultados e destaques).</div>
+                <div class="grid2">
+                    <div class="campo"><label>Itens por linha</label>
+                        <select id="v-colunas">
+                            <option value="1">1 (lista)</option>
+                            <option value="2">2</option>
+                            <option value="3">3</option>
+                            <option value="4">4</option>
+                        </select>
+                    </div>
+                    <div class="campo"><label>Tamanho das imagens</label>
+                        <select id="v-imagem">
+                            <option value="pequena">Pequena</option>
+                            <option value="media">Média</option>
+                            <option value="grande">Grande</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="preview" id="v-preview" style="background:#f4f6f9;"></div>
+                <div style="margin-top:14px;"><button class="btn btn-salvar" id="v-salvar">Salvar layout da vitrine</button></div>
+            </div>
+        </section>
+
+        <!-- DESTAQUES -->
+        <section class="view" id="view-destaques">
+            <div class="box">
+                <h2>🖼️ Destaque principal (banner)</h2>
+                <div class="sub">Primeiro bloco da vitrine: uma imagem única, ajustada à largura da tela do app. Para evitar cortes, use uma imagem retangular horizontal (recomendado ~2:1, ex.: 1000×500px) com o texto/foco centralizado — as bordas podem ser levemente cortadas nas laterais.</div>
+                <div class="campo"><label>Imagem do banner</label>
+                    <input type="file" id="hero-file" accept="image/*">
+                    <small style="display:block; color:var(--muted); font-size:.78rem; margin-top:5px;">
+                        Resolução ideal: ~1000×500px (proporção 2:1, horizontal) — evita cortes nas laterais.
+                    </small>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <img id="hero-preview" src="" style="display:none; max-height:100px; max-width:100%; border:1px solid var(--line); border-radius:8px; padding:4px; background:#fff;">
+                    <button type="button" class="btn btn-rm" id="hero-remover" style="display:none;">Remover banner</button>
+                </div>
+            </div>
+
+            <div class="box" data-grupo="topo">
+                <h2>🥇 Destaque — Topo</h2>
+                <div class="sub">Primeira vitrine exibida no app, antes do cardápio completo.</div>
+                <div class="grid2">
+                    <div class="campo"><label>Título da seção</label><input class="d-titulo" placeholder="Ex: Mais pedidos"></div>
+                    <div class="campo"><label>Cor</label>
+                        <div style="display:flex; gap:10px;">
+                            <input type="color" class="d-cor" value="#e74c3c" style="width:60px;">
+                            <input class="d-corhex" placeholder="#e74c3c" style="flex:1;">
+                        </div>
+                    </div>
+                </div>
+                <div class="campo" style="max-width:220px;"><label>Limite de produtos</label><input type="number" class="d-limite" min="1" max="20" value="6"></div>
+                <div class="campo"><label>Buscar produto para adicionar</label><input class="d-busca" placeholder="Filtrar por nome..."></div>
+                <div class="sub d-contador">0/6 selecionados</div>
+                <div class="d-lista-produtos" style="max-height:260px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px;"></div>
+            </div>
+
+            <div class="box" data-grupo="meio">
+                <h2>🥈 Destaque — Meio</h2>
+                <div class="sub">Segunda vitrine, exibida logo abaixo da de Topo.</div>
+                <div class="grid2">
+                    <div class="campo"><label>Título da seção</label><input class="d-titulo" placeholder="Ex: Promoções"></div>
+                    <div class="campo"><label>Cor</label>
+                        <div style="display:flex; gap:10px;">
+                            <input type="color" class="d-cor" value="#f39c12" style="width:60px;">
+                            <input class="d-corhex" placeholder="#f39c12" style="flex:1;">
+                        </div>
+                    </div>
+                </div>
+                <div class="campo" style="max-width:220px;"><label>Limite de produtos</label><input type="number" class="d-limite" min="1" max="20" value="6"></div>
+                <div class="campo"><label>Buscar produto para adicionar</label><input class="d-busca" placeholder="Filtrar por nome..."></div>
+                <div class="sub d-contador">0/6 selecionados</div>
+                <div class="d-lista-produtos" style="max-height:260px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px;"></div>
+            </div>
+
+            <div class="box" data-grupo="fundo">
+                <h2>🥉 Destaque — Fundo</h2>
+                <div class="sub">Terceira vitrine, exibida por último, antes do cardápio completo.</div>
+                <div class="grid2">
+                    <div class="campo"><label>Título da seção</label><input class="d-titulo" placeholder="Ex: Novidades"></div>
+                    <div class="campo"><label>Cor</label>
+                        <div style="display:flex; gap:10px;">
+                            <input type="color" class="d-cor" value="#2ecc71" style="width:60px;">
+                            <input class="d-corhex" placeholder="#2ecc71" style="flex:1;">
+                        </div>
+                    </div>
+                </div>
+                <div class="campo" style="max-width:220px;"><label>Limite de produtos</label><input type="number" class="d-limite" min="1" max="20" value="6"></div>
+                <div class="campo"><label>Buscar produto para adicionar</label><input class="d-busca" placeholder="Filtrar por nome..."></div>
+                <div class="sub d-contador">0/6 selecionados</div>
+                <div class="d-lista-produtos" style="max-height:260px; overflow-y:auto; border:1px solid var(--line); border-radius:8px; padding:6px;"></div>
+            </div>
+
+            <button class="btn btn-salvar" id="d-salvar">Salvar destaques</button>
         </section>
 
         <!-- PROMOÇÕES -->

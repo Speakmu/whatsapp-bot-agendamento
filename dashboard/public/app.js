@@ -26,13 +26,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const db = firebase.firestore();
     const auth = firebase.auth();
 
-    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION)
+    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL)
         .catch((error) => {
             console.error("Erro de persistência:", error);
         });
     const COLECAO_PEDIDOS = "pedidos";
     const COLECAO_CARDAPIO = "cardapio";
     const ngrokUrl = "https://leann-southbound-vito.ngrok-free.dev"; //URL do ngrok
+    const STATUS_ATIVOS_PEDIDOS = ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"];
+    const STATUS_NAO_FATURA = new Set(["CANCELADO", "AGUARDANDO_PAGAMENTO", "AGUARDANDO_PIX"]);
+    const moneyBR = (v) => "R$ " + (Number(v) || 0).toFixed(2).replace('.', ',');
 
     // --- ELEMENTOS DO PAINEL E CARDÁPIO ---
     const logoutButton = document.getElementById('logout-button');
@@ -59,20 +62,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const statFaturamento = document.getElementById('stat-faturamento');
     const statQtdPedidos = document.getElementById('stat-qtd-pedidos');
     const filterRanking = document.getElementById('filter-ranking');
+    let viewSwitchingReady = false;
+    let dataListenersStarted = false;
+    let productFormReady = false;
+
+    setupViewSwitching();
 
 
     // --- VERIFICAÇÃO DE LOGIN E INICIALIZAÇÃO ---
     auth.onAuthStateChanged((user) => {
         if (user) {
-            startOrderListener();
-            startMenuListener();
-            setupViewSwitching();
-            setupProductForm();
+            if (!dataListenersStarted) {
+                dataListenersStarted = true;
+                startOrderListener();
+                startOrdersTodayDashboard();
+                startMenuListener();
+            }
+            if (!productFormReady) {
+                productFormReady = true;
+                setupProductForm();
+            }
         } else {
             window.location.href = '/login.html';
         }
     });
     // Função para carregar e exibir o cardápio
+    const selectedMenuIds = new Set();
+    let currentMenuView = [];
+
     function startMenuListener() {
         const menuContainer = document.getElementById('menu-list-container');
         const searchInput = document.getElementById('search-menu');
@@ -82,6 +99,9 @@ document.addEventListener('DOMContentLoaded', () => {
             snapshot.forEach(doc => {
                 menuItems.push({ id: doc.id, ...doc.data() });
             });
+            // Remove da seleção itens que não existem mais
+            const idsAtuais = new Set(menuItems.map(i => i.id));
+            [...selectedMenuIds].forEach(id => { if (!idsAtuais.has(id)) selectedMenuIds.delete(id); });
             renderMenu(menuItems);
         });
 
@@ -96,44 +116,116 @@ document.addEventListener('DOMContentLoaded', () => {
             );
             renderMenu(filtrados);
         });
+
+        setupBulkToolbar();
     }
+
+    function setupBulkToolbar() {
+        const selectAll = document.getElementById('menu-select-all');
+        const btnAtivar = document.getElementById('btn-bulk-ativar');
+        const btnPausar = document.getElementById('btn-bulk-pausar');
+        if (!selectAll || selectAll.dataset.bound) return;
+        selectAll.dataset.bound = "1";
+
+        selectAll.addEventListener('change', () => {
+            currentMenuView.forEach(item => {
+                if (selectAll.checked) selectedMenuIds.add(item.id);
+                else selectedMenuIds.delete(item.id);
+            });
+            renderMenu(currentMenuView);
+        });
+
+        btnAtivar.addEventListener('click', () => aplicarDisponibilidadeEmMassa(true));
+        btnPausar.addEventListener('click', () => aplicarDisponibilidadeEmMassa(false));
+    }
+
+    async function aplicarDisponibilidadeEmMassa(disponivel) {
+        if (selectedMenuIds.size === 0) return;
+        const btnAtivar = document.getElementById('btn-bulk-ativar');
+        const btnPausar = document.getElementById('btn-bulk-pausar');
+        btnAtivar.disabled = true;
+        btnPausar.disabled = true;
+        try {
+            const batch = db.batch();
+            selectedMenuIds.forEach(id => {
+                batch.update(db.collection(COLECAO_CARDAPIO).doc(id), {
+                    disponivel: disponivel,
+                    ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            });
+            await batch.commit();
+            selectedMenuIds.clear();
+            // O onSnapshot atualiza a lista automaticamente
+        } catch (e) {
+            console.error("Erro ao atualizar disponibilidade em massa:", e);
+            alert("Erro ao atualizar os itens selecionados.");
+        }
+    }
+
+    function atualizarToolbarSelecao() {
+        const selectAll = document.getElementById('menu-select-all');
+        const countLabel = document.getElementById('menu-selected-count');
+        const btnAtivar = document.getElementById('btn-bulk-ativar');
+        const btnPausar = document.getElementById('btn-bulk-pausar');
+        if (!selectAll) return;
+
+        const count = selectedMenuIds.size;
+        countLabel.textContent = `${count} selecionado(s)`;
+        btnAtivar.disabled = count === 0;
+        btnPausar.disabled = count === 0;
+
+        const visibleIds = currentMenuView.map(i => i.id);
+        const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedMenuIds.has(id));
+        selectAll.checked = allSelected;
+        selectAll.indeterminate = !allSelected && visibleIds.some(id => selectedMenuIds.has(id));
+    }
+
+    window.toggleSelecionadoMenu = function (id, checked) {
+        if (checked) selectedMenuIds.add(id);
+        else selectedMenuIds.delete(id);
+        atualizarToolbarSelecao();
+    };
 
     // 3. Função para desenhar os cards na tela
     function renderMenu(itens) {
         const container = document.getElementById('menu-list-container');
         container.innerHTML = "";
+        currentMenuView = itens;
 
         itens.forEach(item => {
             const card = document.createElement('div');
-            card.className = "card-pedido";
-            card.style.borderLeft = item.disponivel ? "5px solid #2ecc71" : "5px solid #e74c3c";
-            card.style.padding = "0";
-            card.style.overflow = "hidden";
+            card.className = `menu-item-card ${item.disponivel ? 'is-available' : 'is-paused'}`;
 
             // Define a imagem ou um placeholder cinza caso não tenha foto
             const imgTag = item.imagem_url
-                ? `<img src="${item.imagem_url}" style="width: 100%; height: 120px; object-fit: cover;">`
-                : `<div style="width: 100%; height: 120px; background: #eee; display: flex; align-items: center; justify-content: center; color: #ccc;">Sem foto</div>`;
+                ? `<img class="menu-item-img" src="${item.imagem_url}" alt="${item.nome_exibicao || 'Produto'}">`
+                : `<div class="menu-item-img menu-item-empty">Sem foto</div>`;
+
+            const isChecked = selectedMenuIds.has(item.id);
 
             card.innerHTML = `
-        ${imgTag}
-        <div style="padding: 15px;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                <div>
-                    <strong style="font-size: 1.1em;">${item.nome_exibicao}</strong><br>
-                    <small style="color: #666; text-transform: uppercase;">${item.categoria.replace('_', ' ')}</small>
+        <div class="menu-item-media">${imgTag}</div>
+        <div class="menu-item-body">
+            <div class="menu-item-head">
+                <div style="display:flex; align-items:flex-start; gap:8px;">
+                    <input type="checkbox" onchange="window.toggleSelecionadoMenu('${item.id}', this.checked)"
+                        ${isChecked ? 'checked' : ''} style="margin-top:4px;">
+                    <div>
+                        <strong class="menu-item-name">${item.nome_exibicao}</strong>
+                        <small class="menu-item-category">${item.categoria.replace('_', ' ')}</small>
+                    </div>
                 </div>
-                <span style="font-weight: bold; color: #27ae60;">R$ ${item.preco.toFixed(2)}</span>
+                <span class="menu-item-price">R$ ${item.preco.toFixed(2)}</span>
             </div>
-            <p style="margin: 10px 0; font-size: 0.9em; color: #444;">${item.ingredientes}</p>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 4px;">
+            <p class="menu-item-desc">${item.ingredientes || 'Sem descricao cadastrada.'}</p>
+            <div class="menu-item-tags">
                 <small style="background:#eef2f7;border:1px solid #d9e1ea;border-radius:999px;padding:3px 8px;">NCM: ${item.ncm || 'padrão'}</small>
                 <small style="background:#eef2f7;border:1px solid #d9e1ea;border-radius:999px;padding:3px 8px;">CFOP: ${item.cfop || 'padrão'}</small>
                 <small style="background:#eef2f7;border:1px solid #d9e1ea;border-radius:999px;padding:3px 8px;">CSOSN/CST: ${item.csosn || item.cst || 'padrão'}</small>
                 <small style="background:#eef2f7;border:1px solid #d9e1ea;border-radius:999px;padding:3px 8px;">Origem: ${item.origem || 'padrão'}</small>
             </div>
-            <div style="display: flex; gap: 8px; margin-top: 10px;">
-                <button onclick="prepararEdicao('${item.id}')" class="btn-status" style="background: #3498db; padding: 5px 10px; font-size: 0.8em;">Editar</button>
+            <div class="menu-item-actions">
+                <button onclick="prepararEdicao('${item.id}')" class="btn-status btn-edit">Editar</button>
                 
                 <button onclick="window.toggleDisponibilidade('${item.id}', ${item.disponivel})" 
                     class="btn-status" 
@@ -141,12 +233,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${item.disponivel ? 'Pausar' : 'Ativar'}
                 </button>
                 
-                <button onclick="deletarItem('${item.id}')" class="btn-status" style="background: #e74c3c; padding: 5px 10px; font-size: 0.8em;">Excluir</button>
+                <button onclick="deletarItem('${item.id}')" class="btn-status btn-delete">Excluir</button>
             </div>
         </div>
     `;
             container.appendChild(card);
         });
+
+        atualizarToolbarSelecao();
     }
 
     // 4. Função para carregar dados no formulário para editar
@@ -169,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('product-origem').value = item.origem || '';
 
         // Atualiza o visual do formulário para modo edição
-        document.getElementById('form-title').innerText = "📝 Editar Item";
+        document.getElementById('form-title').innerText = "Editar Item";
         const btnSubmit = document.getElementById('btn-submit-product');
         btnSubmit.innerText = "Atualizar Item";
         btnSubmit.style.background = "#3498db";
@@ -198,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (editingIdInput) editingIdInput.value = "";
 
         // 3. Volta os textos originais dos botões e títulos
-        document.getElementById('form-title').innerText = "✏️ Cadastrar Novo Item";
+        document.getElementById('form-title').innerText = "Cadastrar Novo Item";
         const btnSubmit = document.getElementById('btn-submit-product');
         btnSubmit.innerText = "Salvar Item";
         btnSubmit.style.background = "#27ae60";
@@ -323,7 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // 4. Volta o visual do formulário para o modo "Cadastrar"
-        if (formTitle) formTitle.innerText = "🆕 Cadastrar Novo Item";
+        if (formTitle) formTitle.innerText = "Cadastrar Novo Item";
         if (btnSubmit) {
             btnSubmit.innerText = "Cadastrar Item";
             btnSubmit.style.background = "#e74c3c"; // Cor original (vermelha)
@@ -448,11 +542,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             tr.innerHTML = `
-            <td><small>${p.hora_pedido?.toDate().toLocaleString('pt-BR')}</small></td>
+            <td><small>${p.hora_pedido?.toDate().toLocaleString('pt-BR') || '---'}</small></td>
             <td><strong>${p.nome_cliente || 'Cliente'}</strong></td>
-            <td style="color: #666; font-size: 0.9em;">${itensLista}</td>
-            <td style="font-weight: bold;">R$ ${Number(p.valor_total).toFixed(2)}</td>
-            <td><span class="badge-${p.status}">${p.status}</span></td>
+            <td class="report-items">${itensLista}</td>
+            <td class="report-total">R$ ${Number(p.valor_total || 0).toFixed(2)}</td>
+            <td><span class="report-status badge-${p.status}">${p.status || '-'}</span></td>
         `;
             tableBody.appendChild(tr);
         });
@@ -483,6 +577,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function setupViewSwitching() {
+        if (viewSwitchingReady) {
+            mostrarView(viewFromHash());
+            return;
+        }
+        viewSwitchingReady = true;
         // botões internos (se ainda existirem)
         if (btnPedidos) btnPedidos.addEventListener('click', () => mostrarView('pedidos'));
         if (btnCardapio) btnCardapio.addEventListener('click', () => mostrarView('cardapio'));
@@ -624,11 +723,89 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 4. FUNÇÕES DO PAINEL DE PEDIDOS ---
 
+    function canalPedido(pedido) {
+        const origem = String(pedido.origem || pedido.canal || pedido.source || '').trim().toUpperCase();
+        if (origem === 'APP') return 'app';
+        if (['BOT', 'WHATSAPP', 'WPP'].includes(origem)) return 'bot';
+        if (['BALCAO', 'MESA', 'SISTEMA', 'PDV'].includes(origem)) return 'sistema';
+        if (pedido.wa_id || pedido.telefone_cliente || String(pedido.usuario_id || '').startsWith('wa_')) return 'bot';
+        if (String(pedido.usuario_id || '').startsWith('cliente_')) return 'app';
+        return 'sistema';
+    }
+
+    function pct(valor, total) {
+        if (!total) return 0;
+        return Math.max(0, Math.min(100, Math.round((valor / total) * 100)));
+    }
+
+    function setText(id, text) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    }
+
+    function setBar(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.style.width = `${value}%`;
+    }
+
+    function startOrdersTodayDashboard() {
+        const dateEl = document.getElementById('orders-today-date');
+        if (!dateEl) return;
+
+        const inicio = new Date();
+        inicio.setHours(0, 0, 0, 0);
+        dateEl.textContent = inicio.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+        db.collection(COLECAO_PEDIDOS)
+            .where("hora_pedido", ">=", inicio)
+            .onSnapshot(snapshot => {
+                const canais = {
+                    app: { qtd: 0, total: 0 },
+                    bot: { qtd: 0, total: 0 },
+                    sistema: { qtd: 0, total: 0 }
+                };
+                let totalPedidos = 0;
+                let faturamento = 0;
+                let pedidosAtivos = 0;
+                let vendasFaturadas = 0;
+
+                snapshot.forEach(doc => {
+                    const pedido = doc.data() || {};
+                    if (pedido.status === 'CANCELADO') return;
+
+                    totalPedidos++;
+                    if (STATUS_ATIVOS_PEDIDOS.includes(pedido.status)) pedidosAtivos++;
+
+                    const canal = canalPedido(pedido);
+                    canais[canal].qtd++;
+
+                    if (!STATUS_NAO_FATURA.has(pedido.status)) {
+                        const valor = Number(pedido.valor_total) || 0;
+                        faturamento += valor;
+                        canais[canal].total += valor;
+                        vendasFaturadas++;
+                    }
+                });
+
+                const maiorQtd = Math.max(canais.app.qtd, canais.bot.qtd, canais.sistema.qtd, 1);
+                setText('orders-today-total', String(totalPedidos));
+                setText('orders-today-revenue', moneyBR(faturamento));
+                setText('orders-today-active', String(pedidosAtivos));
+                setText('orders-today-ticket', moneyBR(vendasFaturadas ? faturamento / vendasFaturadas : 0));
+
+                [['app', 'channel-app'], ['bot', 'channel-bot'], ['sistema', 'channel-sistema']].forEach(([key, prefix]) => {
+                    setText(`${prefix}-count`, String(canais[key].qtd));
+                    setText(`${prefix}-value`, moneyBR(canais[key].total));
+                    setBar(`${prefix}-bar`, pct(canais[key].qtd, maiorQtd));
+                });
+            }, error => console.warn("Pedidos de hoje:", error.message));
+    }
+
     function startOrderListener() {//mostra os pedidos em tempo real
         if (!ordersList) return;
 
         db.collection(COLECAO_PEDIDOS)
-            .where("status", "in", ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"])
+            .where("status", "in", STATUS_ATIVOS_PEDIDOS)
             .orderBy("status", "asc")
             .orderBy("hora_pedido", "desc")
             .onSnapshot(snapshot => {
