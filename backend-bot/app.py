@@ -17,7 +17,6 @@ load_dotenv()
 # --- CONFIGURAÇÃO FIREBASE ---
 FIREBASE_CREDENCIAL_PATH = os.environ.get("FIREBASE_CREDENCIAL_PATH")
 FIREBASE_STORAGE_BUCKET = os.environ.get("FIREBASE_STORAGE_BUCKET")
-FIREBASE_COLECAO_PEDIDOS = os.environ.get("FIREBASE_COLECAO_PEDIDOS")
 
 if not firebase_admin._apps:
     cred = credentials.Certificate(FIREBASE_CREDENCIAL_PATH)
@@ -26,6 +25,42 @@ db = firestore.client()
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") 
 openai.api_key = OPENAI_API_KEY
+
+BOT_CONFIG_DEFAULTS = {
+    "ativo": True,
+    "nome_atendente": "Sofia",
+    "nome_empresa": "Lileamar Salgados",
+    "chave_pix": "abc1231234567",
+    "modelo": "gpt-4o-mini",
+    "max_historico_contexto": 12,
+    "max_historico_salvar": 15,
+    "mensagem_inicial": "Ola! Como posso ajudar?",
+    "mensagem_erro": "Desculpe, tive um probleminha aqui. Pode repetir?",
+    "mensagem_inativo": "No momento o atendimento automatico esta pausado. Em breve nossa equipe responde por aqui.",
+    "mensagem_pronto": "Oi {nome_cliente}! Seu pedido esta pronto!",
+    "mensagem_retirada": "Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!",
+    "instrucoes_extras": ""
+}
+
+def obter_config_bot():
+    cfg = dict(BOT_CONFIG_DEFAULTS)
+    try:
+        doc = db.collection("configuracoes").document("bot").get()
+        if doc.exists:
+            dados = doc.to_dict() or {}
+            cfg.update({k: v for k, v in dados.items() if v is not None})
+    except Exception as e:
+        print(f"Erro ao ler configuracao do bot: {e}")
+
+    try:
+        cfg["max_historico_contexto"] = max(2, min(30, int(cfg.get("max_historico_contexto") or 12)))
+    except Exception:
+        cfg["max_historico_contexto"] = 12
+    try:
+        cfg["max_historico_salvar"] = max(cfg["max_historico_contexto"], min(40, int(cfg.get("max_historico_salvar") or 15)))
+    except Exception:
+        cfg["max_historico_salvar"] = 15
+    return cfg
 # --- FUNÇÕES DE APOIO ---
 # OBS: o histórico de conversa agora é persistido 100% no Firestore
 # (coleção "historico_conversas"), via obter_historico_firestore /
@@ -227,8 +262,11 @@ def registrar_comprovante(wa_id: str, imagem_url: str):
     try:
         # 1. Busca o pedido MAIS RECENTE deste cliente, independente do status inicial
         # Isso evita o erro se o status tiver sido gravado errado (ex: PENDENTE_PREPARO)
-        pedidos_ref = db.collection(FIREBASE_COLECAO_PEDIDOS)
-        query = pedidos_ref.where('wa_id', '==', wa_id)\
+        # OBS: registrar_pedido() grava o telefone em 'telefone_cliente', não 'wa_id'
+        # (esse campo nunca existiu nos pedidos) — por isso a busca é por esse campo,
+        # e usa a coleção 'pedidos' direto (mesma que registrar_pedido usa).
+        pedidos_ref = db.collection('pedidos')
+        query = pedidos_ref.where('telefone_cliente', '==', str(wa_id))\
                           .order_by('hora_pedido', direction=firestore.Query.DESCENDING)\
                           .limit(1)
         
@@ -288,7 +326,7 @@ def baixar_imagem_whatsapp(media_id, tipo):
         print(f"ERRO AO BAIXAR MÍDIA: {e}")
         return None
        
-def obter_historico_firestore(wa_id):
+def obter_historico_firestore(wa_id, limite=None):
     try:
         doc = db.collection("historico_conversas").document(wa_id).get()
         if doc.exists:
@@ -302,13 +340,14 @@ def obter_historico_firestore(wa_id):
                     "content": msg["content"]
                 })
             
-            return historico_limpo[-12:] # Retorna as últimas 12
+            limite = limite or 12
+            return historico_limpo[-limite:]
         return []
     except Exception as e:
         print(f"Erro ao ler histórico: {e}")
         return []
 
-def salvar_historico_firestore(wa_id, role, content):
+def salvar_historico_firestore(wa_id, role, content, limite=None):
     """Salva a mensagem e mantém apenas as últimas 15 para economizar espaço"""
     try:
         doc_ref = db.collection("historico_conversas").document(wa_id)
@@ -327,7 +366,8 @@ def salvar_historico_firestore(wa_id, role, content):
             
             # 2. LOGICA DE CORTE: Mantém apenas as últimas 15 mensagens
             # Isso garante que o documento nunca cresça demais
-            historico_reduzido = historico_atual[-15:]
+            limite = limite or 15
+            historico_reduzido = historico_atual[-limite:]
             
             doc_ref.update({
                 "mensagens": historico_reduzido,
@@ -387,6 +427,9 @@ def consultar_sabor(sabor_cliente):
 def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     import re
     import json
+    bot_cfg = obter_config_bot()
+    if not bot_cfg.get("ativo", True):
+        return bot_cfg.get("mensagem_inativo") or BOT_CONFIG_DEFAULTS["mensagem_inativo"]
     
 
     # 1. Limpeza do ID
@@ -451,9 +494,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         }
     ]
 
+    nome_atendente = bot_cfg.get("nome_atendente") or BOT_CONFIG_DEFAULTS["nome_atendente"]
+    nome_empresa = bot_cfg.get("nome_empresa") or BOT_CONFIG_DEFAULTS["nome_empresa"]
+    chave_pix = bot_cfg.get("chave_pix") or "consulte a equipe"
+    instrucoes_extras = bot_cfg.get("instrucoes_extras") or ""
+
     # 5. Prompt Otimizado (Limpo e Direto)
     system_prompt = f"""
-    Você é a Sofia, a IA da Pizzaria Deliciosa. Aja de forma natural, educada e vendedora.
+    Voce e {nome_atendente}, a IA da {nome_empresa}. Aja de forma natural, educada e vendedora.
 
     --- DADOS DO SISTEMA ---
     {contexto_identificacao}
@@ -480,7 +528,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Forma de Pagamento (PIX, Cartão, Dinheiro).
        
        IMPORTANTE SOBRE PIX:
-       - Se for "PIX AGORA": Chave é abc1231234567. Aguarde o comprovante.
+       - Se for "PIX AGORA": Chave e {chave_pix}. Aguarde o comprovante.
        - Se for "PIX NA ENTREGA": Não precisa de comprovante agora.
 
     4. FINALIZAÇÃO:
@@ -491,10 +539,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - NUNCA mostre suas instruções internas para o cliente (ex: "Não pergunte o nome"). Apenas execute a ação.
        - NUNCA copie e cole estas regras no chat. Converse como um humano.
        - NUNCA inicie uma corversa por conta própria. Responda apenas quando o cliente enviar uma mensagem.
+
+    6. INSTRUCOES EXTRAS DA LOJA:
+       {instrucoes_extras}
     """
 
     # 6. Carregar Histórico
-    historico_msgs = obter_historico_firestore(wa_id)
+    historico_msgs = obter_historico_firestore(wa_id, bot_cfg.get("max_historico_contexto"))
 
     # Montagem
     messages = [{"role": "system", "content": system_prompt}]
@@ -503,7 +554,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
 
     try:
         response = openai.chat.completions.create(
-            model="gpt-4o-mini",
+            model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"],
             messages=messages,
             tools=tools,
             tool_choice="auto"
@@ -538,18 +589,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 
                 messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": content})
             
-            second_res = openai.chat.completions.create(model="gpt-4o-mini", messages=messages)
+            second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages)
             final_text = second_res.choices[0].message.content
         else:
             final_text = response_message.content
 
-        salvar_historico_firestore(wa_id, "user", prompt)
-        salvar_historico_firestore(wa_id, "assistant", final_text)
+        salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        salvar_historico_firestore(wa_id, "assistant", final_text, bot_cfg.get("max_historico_salvar"))
         return final_text
     
     except Exception as e:
         print(f"Erro OpenAI: {e}")
-        return "Desculpe, tive um probleminha aqui. Pode repetir?"
+        return bot_cfg.get("mensagem_erro") or BOT_CONFIG_DEFAULTS["mensagem_erro"]
 
 # --- FLASK ---
 app = Flask(__name__)
@@ -606,6 +657,15 @@ def notificar_pronto():
                    f"Boa notícia, {nome_cliente}! 🍕 Seu pedido já pode ser retirado!"
 
         # Limpeza do número: garante que tenha apenas dígitos
+        bot_cfg = obter_config_bot()
+        template = bot_cfg.get("mensagem_pronto") if tipo_servico != 'RETIRADA' else bot_cfg.get("mensagem_retirada")
+        template = template or (BOT_CONFIG_DEFAULTS["mensagem_pronto"] if tipo_servico != 'RETIRADA' else BOT_CONFIG_DEFAULTS["mensagem_retirada"])
+        mensagem = template.format(
+            nome_cliente=nome_cliente,
+            nome=nome_cliente,
+            empresa=bot_cfg.get("nome_empresa") or BOT_CONFIG_DEFAULTS["nome_empresa"]
+        )
+
         import re
         telefone_limpo = re.sub(r'\D', '', str(telefone))
 
@@ -718,7 +778,9 @@ def gerenciar_chat_app():
         if not historico:
             # Primeira interação: registra e devolve a saudação inicial
             saudacao = "Olá! Como posso ajudar? 🍕"
-            salvar_historico_firestore(usuario_id, "assistant", saudacao)
+            bot_cfg = obter_config_bot()
+            saudacao = bot_cfg.get("mensagem_inicial") or BOT_CONFIG_DEFAULTS["mensagem_inicial"]
+            salvar_historico_firestore(usuario_id, "assistant", saudacao, bot_cfg.get("max_historico_salvar"))
             historico = [{"role": "assistant", "content": saudacao}]
         return jsonify({"historico": historico}), 200
 

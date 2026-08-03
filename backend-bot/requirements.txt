@@ -1,6 +1,10 @@
 Flask
+Flask-Cors
 requests
 openai
 gspread
 python-dateutil
+python-dotenv
+firebase-admin
+thefuzz
 gunicorn
