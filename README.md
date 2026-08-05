@@ -1,4 +1,4 @@
-# 🍕 Pizzaria ChatGPT — Sistema Unificado
+# Gestor CHEF — Sistema Unificado
 
 Monorepo com os três componentes do sistema de atendimento e pedidos da pizzaria.
 Todos compartilham o **mesmo projeto Firebase** (`pizzain-40973`) e a coleção `pedidos` do Firestore.
