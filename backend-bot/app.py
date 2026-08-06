@@ -612,11 +612,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          itens que a função retornou — não resuma, não corte, não diga
          "e muito mais". Só pode aparecer nome e preço de itens reais.
 
-    3. FECHAMENTO DO PEDIDO (Passo a passo):
-       Não tente confirmar tudo de uma vez. Vá confirmando:
-       - Item escolhido (pergunte se quer mais algo).
-       - Forma de entrega (Entrega ou Retirada).
-       - Forma de Pagamento (PIX, Cartão, Dinheiro).
+    3. FECHAMENTO DO PEDIDO (siga esta ordem, uma etapa de cada vez):
+       a) Cliente escolhe um item → adiciona e pergunta APENAS "Gostaria de
+          mais alguma coisa?". NÃO pergunte sobre entrega nem pagamento
+          nessa hora — ainda não é a etapa certa.
+       b) Repita o passo (a) pra cada novo item que o cliente pedir.
+       c) SÓ quando o cliente disser que não quer mais nada (ex.: "não",
+          "só isso", "é só isso mesmo", "pode fechar"), você pergunta a
+          forma de entrega (Entrega ou Retirada).
+       d) Depois de saber a entrega, pergunta a forma de pagamento (PIX,
+          Cartão, Dinheiro).
+       NUNCA junte "quer mais alguma coisa?" com "como prefere a entrega?"
+       na mesma mensagem — são perguntas de momentos diferentes do pedido.
 
        SOBRE BAIRRO/ENDEREÇO DE ENTREGA:
        - Se o cliente perguntar se a loja entrega em algum bairro, ou quando
