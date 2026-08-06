@@ -451,6 +451,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     if not bot_cfg.get("ativo", True):
         return bot_cfg.get("mensagem_inativo") or BOT_CONFIG_DEFAULTS["mensagem_inativo"]
 
+    # Primeiro contato deste cliente (sem histórico ainda): manda a saudação
+    # configurada em vez de chamar a IA. Se ele já tiver perguntado algo
+    # junto com o "oi", essa pergunta fica salva no histórico e é respondida
+    # normalmente na mensagem seguinte dele.
+    if not obter_historico_firestore(id_usuario, limite=1):
+        saudacao = bot_cfg.get("mensagem_inicial") or BOT_CONFIG_DEFAULTS["mensagem_inicial"]
+        salvar_historico_firestore(id_usuario, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        salvar_historico_firestore(id_usuario, "assistant", saudacao, bot_cfg.get("max_historico_salvar"))
+        return saudacao
+
     nome_cliente = None
     
     # 2. Busca no Firestore
@@ -667,11 +677,7 @@ def notificar_pronto():
         if not telefone:
             return jsonify({"erro": "Número de telefone (wa_id) não fornecido"}), 400
 
-        # Montagem da mensagem
-        mensagem = f"Oi {nome_cliente}! 🍕 Seu pedido está pronto!" if tipo_servico != 'RETIRADA' else \
-                   f"Boa notícia, {nome_cliente}! 🍕 Seu pedido já pode ser retirado!"
-
-        # Limpeza do número: garante que tenha apenas dígitos
+        # Montagem da mensagem a partir do template configurado
         bot_cfg = obter_config_bot()
         template = bot_cfg.get("mensagem_pronto") if tipo_servico != 'RETIRADA' else bot_cfg.get("mensagem_retirada")
         template = template or (BOT_CONFIG_DEFAULTS["mensagem_pronto"] if tipo_servico != 'RETIRADA' else BOT_CONFIG_DEFAULTS["mensagem_retirada"])
