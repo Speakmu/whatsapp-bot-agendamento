@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configura&ccedil;&otilde;es do Bot | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <link rel="stylesheet" href="/shell.css">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        :root { --bg:#f4f6f9; --card:#fff; --txt:#2c3e50; --muted:#7f8c8d; --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --line:#e1e5ea; }
+        body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
+        header.top { display:flex; align-items:center; justify-content:space-between; padding:14px 24px; background:#fff; border-bottom:3px solid var(--accent); position:sticky; top:0; z-index:5; }
+        header.top h1 { font-size:1.4rem; }
+        .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px; text-decoration:none; font-size:.9rem; }
+        .wrap { padding:20px 24px; max-width:900px; display:grid; gap:18px; }
+        .box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; }
+        .box h2 { font-size:1.1rem; margin-bottom:4px; }
+        .box .sub { color:var(--muted); font-size:.85rem; margin-bottom:16px; }
+        .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+        .campo { margin-bottom:14px; }
+        .campo label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:5px; font-weight:600; }
+        .campo input, .campo select, .campo textarea { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; font-family:inherit; background:#fff; }
+        .campo textarea { min-height:86px; resize:vertical; line-height:1.35; }
+        .campo small { display:block; color:var(--muted); margin-top:5px; font-size:.78rem; }
+        .check-line { display:flex; align-items:center; gap:9px; padding:10px 0; font-weight:700; }
+        .check-line input { width:18px; height:18px; accent-color:var(--ok); }
+        .btn { padding:11px 18px; border:none; border-radius:9px; cursor:pointer; font-weight:700; color:#fff; font-size:.95rem; }
+        .btn-salvar { background:var(--ok); }
+        .acoes { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+        @media (max-width:760px){ .grid2{ grid-template-columns:1fr; } }
+    </style>
+</head>
+
+<body>
+    <header class="top">
+        <h1>&#129302; Configura&ccedil;&otilde;es do Bot</h1>
+        <a class="link" href="/bot-chat.html">Atendimento &rarr;</a>
+    </header>
+
+    <div class="wrap">
+        <div class="box">
+            <h2>Bot / WhatsApp</h2>
+            <div class="sub">Configura&ccedil;&otilde;es comerciais do atendimento autom&aacute;tico. Dados t&eacute;cnicos e chaves sens&iacute;veis ficam protegidos fora da tela.</div>
+            <label class="check-line"><input id="bot-ativo" type="checkbox" checked> Atendimento autom&aacute;tico ativo</label>
+            <div class="grid2">
+                <div class="campo"><label>Nome da IA</label><input id="bot-nome-atendente" placeholder="Sofia"></div>
+                <div class="campo"><label>Nome da empresa no bot</label><input id="bot-nome-empresa" placeholder="Lileamar Salgados"></div>
+                <div class="campo"><label>Chave PIX informada pelo bot</label><input id="bot-chave-pix" placeholder="Chave PIX"></div>
+            </div>
+            <div class="campo"><label>Mensagem inicial</label><input id="bot-mensagem-inicial" placeholder="Ol&aacute;! Como posso ajudar?"></div>
+            <div class="campo"><label>Mensagem quando o bot estiver pausado</label><input id="bot-mensagem-inativo" placeholder="Atendimento autom&aacute;tico pausado."></div>
+            <div class="grid2">
+                <div class="campo"><label>Mensagem de pedido pronto</label><input id="bot-mensagem-pronto" placeholder="Oi {nome_cliente}! Seu pedido est&aacute; pronto!"></div>
+                <div class="campo"><label>Mensagem de retirada</label><input id="bot-mensagem-retirada" placeholder="Boa not&iacute;cia, {nome_cliente}! Seu pedido j&aacute; pode ser retirado!"></div>
+            </div>
+            <div class="campo">
+                <label>Instru&ccedil;&otilde;es extras para a IA</label>
+                <textarea id="bot-instrucoes-extras" placeholder="Ex: Seja breve, ofere&ccedil;a retirada quando o tempo de entrega estiver alto, informe taxa de entrega conforme bairro..."></textarea>
+                <small>Use este campo para regras comerciais. N&atilde;o coloque senhas, tokens ou chaves privadas.</small>
+            </div>
+            <div class="campo"><label>Mensagem de erro</label><input id="bot-mensagem-erro" placeholder="Desculpe, tive um probleminha aqui. Pode repetir?"></div>
+            <div class="acoes"><button class="btn btn-salvar" id="salvar-bot">Salvar configura&ccedil;&otilde;es do bot</button></div>
+        </div>
+    </div>
+
+    <script src="/shell.js" defer></script>
+    <script src="/bot-config.js"></script>
+</body>
+
+</html>

@@ -9,10 +9,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const DOC_GERAL = db.collection('configuracoes').doc('sistema');
     const DOC_EXIB = db.collection('configuracoes').doc('exibicao');
-    const DOC_BOT = db.collection('configuracoes').doc('bot');
+    const DOC_PAGAMENTOS = db.collection('configuracoes').doc('pagamentos');
     const COL_USUARIOS = db.collection('usuarios_admin');
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
-    const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'configuracoes'];
+    const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'configuracoes'];
     const NOMES_MODULOS = {
         pedidos: 'Pedidos',
         kds: 'Cozinha (KDS)',
@@ -27,29 +27,18 @@ document.addEventListener('DOMContentLoaded', () => {
         fichas: 'Ficha Tecnica / Custos',
         cardapio: 'Cardapio',
         marketing: 'Marketing & App',
+        bot: 'Bot',
         configuracoes: 'Configuracoes'
     };
     let usuarioAtual = null;
     let editandoEmail = null;
-    const BOT_DEFAULTS = {
-        ativo: true,
-        nome_atendente: 'Sofia',
-        nome_empresa: 'Lileamar Salgados',
-        chave_pix: 'abc1231234567',
-        mensagem_inicial: 'Ola! Como posso ajudar?',
-        mensagem_inativo: 'No momento o atendimento automatico esta pausado. Em breve nossa equipe responde por aqui.',
-        mensagem_pronto: 'Oi {nome_cliente}! Seu pedido esta pronto!',
-        mensagem_retirada: 'Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!',
-        mensagem_erro: 'Desculpe, tive um probleminha aqui. Pode repetir?',
-        instrucoes_extras: ''
-    };
 
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
         usuarioAtual = user;
         carregar();
         $('salvar-geral').addEventListener('click', salvarGeral);
-        $('salvar-bot').addEventListener('click', salvarBot);
+        $('salvar-pagamentos').addEventListener('click', salvarPagamentos);
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
         $('salvar-usuario').addEventListener('click', salvarUsuario);
         $('novo-usuario').addEventListener('click', limparUsuarioForm);
@@ -83,28 +72,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 $('g-endereco').value = d.endereco || '';
             }
             await carregarExibicao();
-            await carregarBot();
+            await carregarPagamentos();
         } catch (err) {
             alert('Erro ao carregar configuracoes: ' + err.message);
         }
     }
 
-    async function carregarBot() {
+    async function carregarPagamentos() {
         try {
-            const snap = await DOC_BOT.get();
-            const d = { ...BOT_DEFAULTS, ...(snap.exists ? (snap.data() || {}) : {}) };
-            $('bot-ativo').checked = d.ativo !== false;
-            $('bot-nome-atendente').value = d.nome_atendente || '';
-            $('bot-nome-empresa').value = d.nome_empresa || '';
-            $('bot-chave-pix').value = d.chave_pix || '';
-            $('bot-mensagem-inicial').value = d.mensagem_inicial || '';
-            $('bot-mensagem-inativo').value = d.mensagem_inativo || '';
-            $('bot-mensagem-pronto').value = d.mensagem_pronto || '';
-            $('bot-mensagem-retirada').value = d.mensagem_retirada || '';
-            $('bot-mensagem-erro').value = d.mensagem_erro || '';
-            $('bot-instrucoes-extras').value = d.instrucoes_extras || '';
+            const snap = await DOC_PAGAMENTOS.get();
+            const d = snap.exists ? (snap.data() || {}) : {};
+            $('pag-point-device').value = d.pointDeviceId || '';
         } catch (err) {
-            console.warn('bot:', err.message);
+            console.warn('pagamentos:', err.message);
+        }
+    }
+
+    async function salvarPagamentos() {
+        try {
+            await DOC_PAGAMENTOS.set({
+                pointDeviceId: $('pag-point-device').value.trim(),
+                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            flash('Configuracoes de pagamento salvas.');
+        } catch (err) {
+            alert('Erro ao salvar pagamentos: ' + err.message);
         }
     }
 
@@ -131,28 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
             flash('Dados gerais salvos.');
         } catch (err) {
             alert('Erro: ' + err.message);
-        }
-    }
-
-    async function salvarBot() {
-        const payload = {
-            ativo: $('bot-ativo').checked,
-            nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,
-            nome_empresa: $('bot-nome-empresa').value.trim() || BOT_DEFAULTS.nome_empresa,
-            chave_pix: $('bot-chave-pix').value.trim(),
-            mensagem_inicial: $('bot-mensagem-inicial').value.trim() || BOT_DEFAULTS.mensagem_inicial,
-            mensagem_inativo: $('bot-mensagem-inativo').value.trim() || BOT_DEFAULTS.mensagem_inativo,
-            mensagem_pronto: $('bot-mensagem-pronto').value.trim() || BOT_DEFAULTS.mensagem_pronto,
-            mensagem_retirada: $('bot-mensagem-retirada').value.trim() || BOT_DEFAULTS.mensagem_retirada,
-            mensagem_erro: $('bot-mensagem-erro').value.trim() || BOT_DEFAULTS.mensagem_erro,
-            instrucoes_extras: $('bot-instrucoes-extras').value.trim(),
-            atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        try {
-            await DOC_BOT.set(payload, { merge: true });
-            flash('Configuracoes do bot salvas.');
-        } catch (err) {
-            alert('Erro ao salvar bot: ' + err.message);
         }
     }
 

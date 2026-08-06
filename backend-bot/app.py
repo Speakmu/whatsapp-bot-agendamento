@@ -423,19 +423,35 @@ def consultar_sabor(sabor_cliente):
     print(f"DEBUG: Nenhuma pizza parecida com '{sabor_cliente}' foi encontrada.")
     return {"status": "indisponivel"}
     
+def is_modo_manual(wa_id):
+    """Conversa assumida manualmente por um atendente no painel: bot não responde."""
+    try:
+        doc = db.collection("historico_conversas").document(wa_id).get()
+        return doc.exists and doc.to_dict().get("modo_manual") is True
+    except Exception as e:
+        print(f"Erro ao checar modo manual: {e}")
+        return False
+
 # --- LÓGICA AGENTE OPENAI ---
 def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     import re
     import json
-    bot_cfg = obter_config_bot()
-    if not bot_cfg.get("ativo", True):
-        return bot_cfg.get("mensagem_inativo") or BOT_CONFIG_DEFAULTS["mensagem_inativo"]
-    
 
     # 1. Limpeza do ID
     id_usuario = str(wa_id).split('@')[0]
-    id_usuario = re.sub(r'\D', '', id_usuario) 
-    
+    id_usuario = re.sub(r'\D', '', id_usuario)
+
+    bot_cfg = obter_config_bot()
+
+    # Conversa assumida manualmente pelo atendente: só registra a mensagem
+    # do cliente no histórico (pro painel exibir) e não responde.
+    if is_modo_manual(id_usuario):
+        salvar_historico_firestore(id_usuario, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        return None
+
+    if not bot_cfg.get("ativo", True):
+        return bot_cfg.get("mensagem_inativo") or BOT_CONFIG_DEFAULTS["mensagem_inativo"]
+
     nome_cliente = None
     
     # 2. Busca no Firestore
@@ -733,7 +749,8 @@ def webhook():
                             if 'text' in message:
                                 text = message['text']['body']
                                 ai_response = get_openai_response(text, from_number, "WPP")
-                                send_message(from_number, ai_response)
+                                if ai_response:
+                                    send_message(from_number, ai_response)
                                 return "EVENT_RECEIVED", 200
 
                             elif 'image' in message or 'document' in message:
@@ -799,6 +816,23 @@ def gerenciar_chat_app():
         print(f"DEBUG APP: ID={usuario_id} | ORIGEM={origem} | MSG={mensagem}")
         
         # 3. POR FIM chama a função
-        ai_response = get_openai_response(mensagem, usuario_id, origem) 
+        ai_response = get_openai_response(mensagem, usuario_id, origem)
         return jsonify({"resposta": ai_response}), 200
+
+
+@app.route('/painel/enviar_mensagem', methods=['POST'])
+def painel_enviar_mensagem():
+    """Atendente responde manualmente pelo painel: envia via WhatsApp,
+    registra no histórico e assume o controle manual da conversa."""
+    data = request.json or {}
+    wa_id = re.sub(r'\D', '', str(data.get('wa_id') or ''))
+    mensagem = str(data.get('mensagem') or '').strip()
+
+    if not wa_id or not mensagem:
+        return jsonify({"error": "wa_id e mensagem são obrigatórios"}), 400
+
+    send_message(wa_id, mensagem)
+    salvar_historico_firestore(wa_id, "assistant", mensagem)
+    db.collection("historico_conversas").document(wa_id).set({"modo_manual": True}, merge=True)
+    return jsonify({"ok": True}), 200
 

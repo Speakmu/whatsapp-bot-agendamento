@@ -12,7 +12,7 @@
     const arquivoAtual = (location.pathname.split('/').pop() || 'home.html').toLowerCase();
     const isAdminShell = arquivoAtual === 'admin.html';
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
-    const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'configuracoes'];
+    const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'configuracoes'];
 
     if (!isAdminShell) {
         const page = location.pathname + location.search + location.hash;
@@ -50,6 +50,12 @@
             ]
         },
         {
+            grupo: "Bot",
+            itens: [
+                { label: "Atendimento", icon: "&#128172;", href: "/bot-chat.html", key: "bot" }
+            ]
+        },
+        {
             grupo: "Sistema",
             itens: [
                 { label: "Marketing & App", icon: "&#128227;", href: "/marketing.html", key: "marketing" },
@@ -70,6 +76,8 @@
         'estoque.html': ['estoque'],
         'ficha-tecnica.html': ['fichas'],
         'marketing.html': ['marketing'],
+        'bot-chat.html': ['bot'],
+        'bot-config.html': ['bot'],
         'configuracoes.html': ['configuracoes']
     };
 

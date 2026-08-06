@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const COL_PEDIDOS = "pedidos";
     const COL_ENTREGADORES = "entregadores";
-    const BOT_BASE_URL = "https://leann-southbound-vito.ngrok-free.dev";
+    const BOT_BASE_URL = "https://whatsapp-bot-agendamento.onrender.com";
 
     const $ = (id) => document.getElementById(id);
     const escapeHtml = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c =>

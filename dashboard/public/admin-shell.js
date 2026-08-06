@@ -4,10 +4,11 @@
         'home.html', 'painel.html', 'kds.html', 'mesas.html', 'entrega.html',
         'caixa.html', 'bi.html', 'financeiro.html', 'fiscal.html',
         'estoque.html', 'ficha-tecnica.html', 'marketing.html',
+        'bot-chat.html', 'bot-config.html',
         'configuracoes.html'
     ]);
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
-    const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'configuracoes'];
+    const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'configuracoes'];
     const PAGE_KEYS = {
         'painel.html': function (page) {
             const hash = (String(page || '').split('#')[1] || '').toLowerCase();
@@ -25,6 +26,8 @@
         'estoque.html': ['estoque'],
         'ficha-tecnica.html': ['fichas'],
         'marketing.html': ['marketing'],
+        'bot-chat.html': ['bot'],
+        'bot-config.html': ['bot'],
         'configuracoes.html': ['configuracoes']
     };
     let acessoEfetivo = null;
@@ -58,8 +61,19 @@
 
     async function carregarAcesso(user) {
         const db = firebase.firestore();
-        const globalSnap = await db.collection('configuracoes').doc('exibicao').get();
-        const globalCfg = globalSnap.exists ? (globalSnap.data() || {}) : {};
+
+        // Offline sem cache local (ex.: primeiro acesso já sem internet), a
+        // consulta ao Firestore rejeita. Sem cache, a única coisa segura a
+        // fazer é liberar geral para o admin (dono do sistema) e negar para
+        // os demais — nunca deixar a config "sumida" travar o admin de fora.
+        let globalCfg = {};
+        try {
+            const globalSnap = await db.collection('configuracoes').doc('exibicao').get();
+            globalCfg = globalSnap.exists ? (globalSnap.data() || {}) : {};
+        } catch (e) {
+            console.warn('Config de exibição indisponível (offline sem cache):', e);
+        }
+
         if (isAdmin(user && user.email)) {
             const admin = {};
             MODULE_KEYS.forEach(k => admin[k] = globalCfg[k] !== false);
@@ -68,15 +82,20 @@
         }
         const email = normalizarEmail(user && user.email);
         if (!email) return {};
-        const userSnap = await db.collection('usuarios_admin').doc(email).get();
-        if (!userSnap.exists) return {};
-        const data = userSnap.data() || {};
-        if (data.ativo === false) return {};
-        const perms = data.permissoes || {};
-        const final = {};
-        MODULE_KEYS.forEach(k => final[k] = perms[k] === true && globalCfg[k] !== false);
-        if (data.admin) final.configuracoes = true;
-        return final;
+        try {
+            const userSnap = await db.collection('usuarios_admin').doc(email).get();
+            if (!userSnap.exists) return {};
+            const data = userSnap.data() || {};
+            if (data.ativo === false) return {};
+            const perms = data.permissoes || {};
+            const final = {};
+            MODULE_KEYS.forEach(k => final[k] = perms[k] === true && globalCfg[k] !== false);
+            if (data.admin) final.configuracoes = true;
+            return final;
+        } catch (e) {
+            console.warn('Permissões indisponíveis (offline sem cache):', e);
+            return {};
+        }
     }
 
     function keysDaPagina(page) {
@@ -275,6 +294,17 @@
                 firebase.initializeApp(window.__FIREBASE_CONFIG__);
             }
             firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+            // Sem isso, a config de exibição e as permissões só existem em
+            // memória: reabrir o admin.html offline (sem ter passado por
+            // carregarAcesso antes nesta sessão) rejeita a consulta e derruba
+            // o menu inteiro (só sobra o "Início", que não tem data-key).
+            firebase.firestore().enablePersistence({ synchronizeTabs: true }).catch(err => {
+                if (err.code === 'failed-precondition') {
+                    console.warn('Persistência offline: já ativa em outra aba deste navegador.');
+                } else if (err.code === 'unimplemented') {
+                    console.warn('Persistência offline: navegador sem suporte (IndexedDB).');
+                }
+            });
             firebase.auth().onAuthStateChanged(async user => {
                 if (!user) { window.location.href = '/login.html'; return; }
                 try {

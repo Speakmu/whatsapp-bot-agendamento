@@ -76,27 +76,10 @@
         </div>
 
         <div class="box">
-            <h2>Bot / WhatsApp</h2>
-            <div class="sub">Configura&ccedil;&otilde;es comerciais do atendimento autom&aacute;tico. Dados t&eacute;cnicos e chaves sens&iacute;veis ficam protegidos fora da tela.</div>
-            <label class="check-line"><input id="bot-ativo" type="checkbox" checked> Atendimento autom&aacute;tico ativo</label>
-            <div class="grid2">
-                <div class="campo"><label>Nome da IA</label><input id="bot-nome-atendente" placeholder="Sofia"></div>
-                <div class="campo"><label>Nome da empresa no bot</label><input id="bot-nome-empresa" placeholder="Lileamar Salgados"></div>
-                <div class="campo"><label>Chave PIX informada pelo bot</label><input id="bot-chave-pix" placeholder="Chave PIX"></div>
-            </div>
-            <div class="campo"><label>Mensagem inicial</label><input id="bot-mensagem-inicial" placeholder="Ol&aacute;! Como posso ajudar?"></div>
-            <div class="campo"><label>Mensagem quando o bot estiver pausado</label><input id="bot-mensagem-inativo" placeholder="Atendimento autom&aacute;tico pausado."></div>
-            <div class="grid2">
-                <div class="campo"><label>Mensagem de pedido pronto</label><input id="bot-mensagem-pronto" placeholder="Oi {nome_cliente}! Seu pedido est&aacute; pronto!"></div>
-                <div class="campo"><label>Mensagem de retirada</label><input id="bot-mensagem-retirada" placeholder="Boa not&iacute;cia, {nome_cliente}! Seu pedido j&aacute; pode ser retirado!"></div>
-            </div>
-            <div class="campo">
-                <label>Instru&ccedil;&otilde;es extras para a IA</label>
-                <textarea id="bot-instrucoes-extras" placeholder="Ex: Seja breve, ofere&ccedil;a retirada quando o tempo de entrega estiver alto, informe taxa de entrega conforme bairro..."></textarea>
-                <small>Use este campo para regras comerciais. N&atilde;o coloque senhas, tokens ou chaves privadas.</small>
-            </div>
-            <div class="campo"><label>Mensagem de erro</label><input id="bot-mensagem-erro" placeholder="Desculpe, tive um probleminha aqui. Pode repetir?"></div>
-            <div class="acoes"><button class="btn btn-salvar" id="salvar-bot">Salvar configura&ccedil;&otilde;es do bot</button></div>
+            <h2>Pagamentos (Cart&atilde;o na maquininha)</h2>
+            <div class="sub">Integra&ccedil;&atilde;o com a maquininha Point (Mercado Pago) para cobran&ccedil;a autom&aacute;tica no Caixa. O token de acesso j&aacute; &eacute; usado pelo app do cliente e fica protegido no servidor &mdash; aqui s&oacute; o identificador do terminal.</div>
+            <div class="campo"><label>ID do terminal Point (device_id)</label><input id="pag-point-device" placeholder="PAX_A910__XXXXXXXXXXXXXXX"></div>
+            <div class="acoes"><button class="btn btn-salvar" id="salvar-pagamentos">Salvar configura&ccedil;&otilde;es de pagamento</button></div>
         </div>
 
         <div class="box">
@@ -123,6 +106,10 @@
                 <div class="exib-grupo">
                     <h3>Cadastros</h3>
                     <label class="exib-item"><input type="checkbox" data-mod="cardapio" checked> Card&aacute;pio</label>
+                </div>
+                <div class="exib-grupo">
+                    <h3>Bot</h3>
+                    <label class="exib-item"><input type="checkbox" data-mod="bot" checked> Bot (atendimento e config.)</label>
                 </div>
                 <div class="exib-grupo">
                     <h3>Sistema</h3>
@@ -168,6 +155,10 @@
                 <div class="exib-grupo">
                     <h3>Cadastros</h3>
                     <label class="exib-item"><input type="checkbox" data-user-mod="cardapio" checked> Card&aacute;pio</label>
+                </div>
+                <div class="exib-grupo">
+                    <h3>Bot</h3>
+                    <label class="exib-item"><input type="checkbox" data-user-mod="bot" checked> Bot (atendimento e config.)</label>
                 </div>
                 <div class="exib-grupo">
                     <h3>Sistema</h3>

@@ -55,17 +55,52 @@
         }];
     }
 
+    // Escolhe o par de URLs (QR Code / consulta por chave) certo pro ambiente
+    // selecionado, para nao precisar trocar manualmente ao migrar homologacao <-> producao.
+    function urlsPorAmbiente(cfg) {
+        const prod = cfg.ambiente === 'producao';
+        return {
+            qrBaseUrl: prod ? cfg.qrBaseUrlProd : cfg.qrBaseUrlHom,
+            urlChave: prod ? cfg.urlChaveProd : cfg.urlChaveHom,
+        };
+    }
+
     function validarConfig(cfg) {
         const faltando = [];
         if (!cfg.ativo) throw new Error('Emissão fiscal está desativada em Configurações.');
-        ['url', 'cnpj', 'csc', 'cscId', 'uf', 'cMun', 'xLgr', 'nro', 'xBairro', 'xMun', 'cep', 'qrBaseUrl']
+        const { qrBaseUrl } = urlsPorAmbiente(cfg);
+        ['url', 'cnpj', 'csc', 'cscId', 'uf', 'cMun', 'xLgr', 'nro', 'xBairro', 'xMun', 'cep']
             .forEach(k => { if (!cfg[k]) faltando.push(k); });
+        if (!qrBaseUrl) faltando.push(cfg.ambiente === 'producao' ? 'qrBaseUrlProd' : 'qrBaseUrlHom');
         if (faltando.length) throw new Error('Configuração fiscal incompleta: ' + faltando.join(', '));
     }
 
+    // Status que indicam uma nota já "ativa" para o pedido (em andamento ou
+    // concluída) — não é para pedir um número novo nem chamar o serviço de
+    // novo enquanto uma dessas existir, senão duplica a nota fiscal da venda.
+    const STATUS_NOTA_ATIVA = ['PROCESSANDO', 'ERRO_REDE', 'CONTINGENCIA', 'AUTORIZADA'];
+
+    // Emite em segundo plano: grava um registro "PROCESSANDO" na hora (só Firestore,
+    // rápido) e devolve o controle ao caixa imediatamente. A comunicação com a SEFAZ
+    // (que pode levar até ~30s) continua rodando por trás e atualiza o MESMO
+    // documento quando terminar — a tela reage sozinha via listener do Firestore,
+    // sem o operador ficar esperando parado.
     async function emitir(pedidoId, pedido) {
         const cfg = await getConfig();
         validarConfig(cfg);
+
+        // Já existe uma nota em andamento/concluída para este pedido (ex.: uma
+        // tentativa anterior ficou em ERRO_REDE por falta de internet) — não
+        // pede outro número nem cria outro documento, só devolve o que já existe.
+        // Filtra o status no cliente (não no "where") para não depender de um
+        // índice composto — a query em si é só por pedido_id.
+        const existentes = await db().collection('notas_fiscais')
+            .where('pedido_id', '==', pedidoId).get();
+        const ativa = existentes.docs.find(doc => STATUS_NOTA_ATIVA.includes(doc.data().status));
+        if (ativa) {
+            const d = ativa.data();
+            return { id: ativa.id, status: d.status, nNF: d.nNF, serie: d.serie };
+        }
 
         const nNF = await proximoNumero();
         const payload = {
@@ -80,51 +115,206 @@
                 cep: cfg.cep, fone: cfg.fone, crt: cfg.regime === 'normal' ? '3' : '1'
             },
             csc: cfg.csc, cscId: cfg.cscId,
-            qrBaseUrl: cfg.qrBaseUrl, urlChave: cfg.urlChave,
+            ...urlsPorAmbiente(cfg),
             aliquotaAproxTributos: Number(cfg.aliquotaAproxTributos) || 0,
             ibptToken: cfg.ibptToken || undefined,
+            // Venda pelo app/delivery: indPres=4 (NT 2020.006), com indIntermed=0
+            // (canal proprio, sem marketplace de terceiro). Balcao/mesa: presencial normal.
+            indPres: pedido.origem === 'APP' ? '4' : '1',
+            indIntermed: pedido.origem === 'APP' ? '0' : undefined,
             payment: { tPag: mapTPag(pedido.forma_pagamento), vPag: Number(pedido.valor_total) || 0 },
             items: itensDoPedido(pedido, cfg),
             recipient: pedido.cpf_cliente ? { cpf: pedido.cpf_cliente, xNome: pedido.nome_cliente } : undefined
         };
 
+        const ref = await db().collection('notas_fiscais').add({
+            pedido_id: pedidoId,
+            nNF, serie: payload.serie,
+            status: 'PROCESSANDO',
+            valor: payload.payment.vPag,
+            cliente: pedido.nome_cliente || null,
+            ambiente: payload.ambiente,
+            criado_em: firebase.firestore.FieldValue.serverTimestamp(),
+            // Guardado desde a criação (não só quando dá erro): se a aba fechar
+            // ou recarregar antes da resposta chegar, resgatarNotasTravadas()
+            // usa isso pra reenviar exatamente esta tentativa depois.
+            payload_pendente: payload
+        });
+
+        // Não faz "await" abaixo — roda em segundo plano e atualiza o registro
+        // quando a SEFAZ (ou a contingência) responder.
+        continuarEmissaoEmSegundoPlano(ref, cfg, payload);
+
+        return { id: ref.id, status: 'PROCESSANDO', nNF, serie: payload.serie };
+    }
+
+    // Tempo máximo esperando o serviço fiscal responder antes de desistir e
+    // cair no caminho de retry (ERRO_REDE). Sem isso, uma requisição que trava
+    // (rede "engasgada", sem erro explícito) nunca solta a nota do PROCESSANDO.
+    const TIMEOUT_EMISSAO_MS = 45000;
+
+    async function continuarEmissaoEmSegundoPlano(ref, cfg, payload) {
         let resp, data;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_EMISSAO_MS);
         try {
             resp = await fetch(`${cfg.url}/fiscal/nfce/avulsa`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { 'Authorization': `Bearer ${cfg.apiKey}` } : {}) },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: controller.signal
             });
             data = await resp.json();
         } catch (err) {
-            throw new Error('Falha ao contatar o serviço fiscal: ' + err.message);
+            // Falha de REDE (nem chegou a falar com o serviço fiscal, ou a
+            // requisição travou e foi abortada pelo timeout acima) — diferente
+            // de uma rejeição da SEFAZ. Guarda o payload para o retry automático
+            // reenviar exatamente a mesma tentativa (mesmo nNF/seed) quando a
+            // conexão voltar, em vez de pedir um número novo e duplicar a nota.
+            const motivo = err.name === 'AbortError'
+                ? `Serviço fiscal não respondeu em ${TIMEOUT_EMISSAO_MS / 1000}s.`
+                : 'Falha ao contatar o serviço fiscal: ' + err.message;
+            await ref.update({ status: 'ERRO_REDE', motivo, payload_pendente: payload });
+            return;
+        } finally {
+            clearTimeout(timeoutId);
         }
 
-        // grava registro da nota (sempre, mesmo se rejeitada, para auditoria)
         const emContingencia = data.status === 'CONTINGENCIA';
-        const registro = {
-            pedido_id: pedidoId,
-            nNF, serie: payload.serie,
+        await ref.update({
             status: data.status || (resp.ok ? 'AUTORIZADA' : 'ERRO'),
             chave: data.chave || null,
             protocolo: data.protocolo || null,
             cStat: data.cStat || null,
             motivo: data.motivo || data.error || null,
-            valor: payload.payment.vPag,
             danfeBase64: data.danfeBase64 || null,
-            ambiente: payload.ambiente,
+            // XML assinado enviado (ou tentado) — sempre grava, mesmo em rejeicao,
+            // para dar pra baixar e depurar o motivo da rejeicao.
+            xml: data.xml || null,
+            // Histórico permanente de como a nota nasceu — nunca é sobrescrito depois
+            // (diferente de "contingencia", que indica só se ainda esta pendente de transmissao).
+            formaEmissao: emContingencia ? 'CONTINGENCIA' : 'NORMAL',
             contingencia: !!data.contingencia,
             // guarda o XML assinado apenas na contingência (para transmitir depois)
             xmlAssinado: emContingencia ? (data.xml || null) : null,
-            criado_em: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        const ref = await db().collection('notas_fiscais').add(registro);
+            payload_pendente: firebase.firestore.FieldValue.delete()
+        });
+    }
 
-        // AUTORIZADA e CONTINGÊNCIA são desfechos válidos da venda; só rejeição/erro dão exceção
-        if (registro.status !== 'AUTORIZADA' && registro.status !== 'CONTINGENCIA') {
-            throw new Error(`NFC-e não autorizada (${registro.cStat || '-'}): ${registro.motivo || 'erro desconhecido'}`);
+    // ---------- Emissão automática (chamada pelo PDV/mesas ao concluir uma venda) ----------
+    // Centraliza a checagem de configuração + o que fazer quando falha, para não
+    // duplicar essa lógica em cada tela. IMPORTANTE: emitir() pede um número
+    // sequencial via transação do Firestore (proximoNumero) — transações NÃO
+    // funcionam offline (o Firestore não garante um número único sem confirmar
+    // com o servidor). Ou seja, uma venda feita sem internet nunca chega a criar
+    // o registro da nota. Por isso, se a emissão falhar aqui, marcamos o PEDIDO
+    // (escrita simples, funciona offline) como pendente, para o retry automático
+    // tentar de novo quando a conexão voltar.
+    async function emitirAutomatico(pedidoId, pedido) {
+        // Venda em dinheiro nunca emite sozinha (só PIX/Cartão). Quem quiser
+        // uma NFC-e de uma venda em dinheiro emite manualmente na tela Fiscal.
+        if (String(pedido.forma_pagamento || '').trim().toLowerCase() === 'dinheiro') return null;
+        let cfg;
+        try { cfg = await getConfig(); } catch { return null; }
+        if (!cfg || !cfg.ativo) return null;
+        if (!['automatico', 'ambos'].includes(cfg.modo)) return null;
+        try {
+            const nota = await emitir(pedidoId, pedido);
+            db().collection('pedidos').doc(pedidoId)
+                .set({ nfce_pendente: firebase.firestore.FieldValue.delete() }, { merge: true }).catch(() => {});
+            return nota;
+        } catch (err) {
+            db().collection('pedidos').doc(pedidoId).set({ nfce_pendente: true }, { merge: true }).catch(() => {});
+            throw err;
         }
-        return { id: ref.id, ...registro };
+    }
+
+    // Reemite automaticamente as vendas que ficaram marcadas como pendentes
+    // (emissão automática falhou, provavelmente por falta de conexão no momento
+    // da venda). Só mexe em pedidos que ainda não têm nota ativa — emitir() já
+    // faz essa checagem internamente.
+    async function retentarEmissoesAutomaticasPendentes() {
+        const cfg = await getConfig().catch(() => null);
+        if (!cfg || !cfg.ativo || !['automatico', 'ambos'].includes(cfg.modo)) return;
+        const pendentes = await db().collection('pedidos').where('nfce_pendente', '==', true).get();
+        for (const doc of pendentes.docs) {
+            const pedido = doc.data();
+            if (String(pedido.forma_pagamento || '').trim().toLowerCase() === 'dinheiro') {
+                await doc.ref.update({ nfce_pendente: firebase.firestore.FieldValue.delete() }).catch(() => {});
+                continue;
+            }
+            try {
+                await emitir(doc.id, pedido);
+                await doc.ref.update({ nfce_pendente: firebase.firestore.FieldValue.delete() });
+            } catch { /* continua marcado, tenta de novo na próxima */ }
+        }
+    }
+
+    // ---------- Retry automático de notas que falharam por falta de rede ----------
+    // Só mexe em notas ERRO_REDE (nunca chegaram a falar com o serviço fiscal).
+    // Reenvia o MESMO payload (mesmo nNF/seed) já salvo — nunca pede número novo,
+    // para não duplicar a nota fiscal da venda. A transação abaixo garante que,
+    // mesmo com duas abas abertas ou um retry automático concorrente com um clique
+    // manual, só uma tentativa de reenvio rode por vez para cada nota.
+    async function retentarNotasComErroDeRede() {
+        const cfg = await getConfig().catch(() => null);
+        if (!cfg || !cfg.ativo) return;
+
+        const pendentes = await db().collection('notas_fiscais').where('status', '==', 'ERRO_REDE').get();
+        for (const doc of pendentes.docs) {
+            const ref = doc.ref;
+            let payload;
+            try {
+                payload = await db().runTransaction(async (tx) => {
+                    const snap = await tx.get(ref);
+                    const d = snap.data();
+                    if (!d || d.status !== 'ERRO_REDE' || !d.payload_pendente) return null;
+                    tx.update(ref, { status: 'PROCESSANDO' });
+                    return d.payload_pendente;
+                });
+            } catch { continue; }
+            if (payload) continuarEmissaoEmSegundoPlano(ref, cfg, payload);
+        }
+    }
+
+    // Tempo depois do qual uma nota ainda em PROCESSANDO é considerada órfã
+    // (a aba que estava emitindo fechou/recarregou antes da resposta chegar,
+    // ou o fetch travou numa aba que já não existe mais pra rodar o timeout
+    // acima). Maior que TIMEOUT_EMISSAO_MS com folga, pra não competir com
+    // uma emissão que ainda está genuinamente em andamento nesta mesma aba.
+    const LIMITE_PROCESSANDO_ORFA_MS = 2 * 60 * 1000;
+
+    // Acha notas presas em PROCESSANDO por tempo demais e as move pra
+    // ERRO_REDE (usando o payload guardado desde a criação) — dali,
+    // retentarNotasComErroDeRede() reenvia sozinho com o mesmo nNF, sem
+    // duplicar a nota.
+    async function resgatarNotasTravadas() {
+        const limite = Date.now() - LIMITE_PROCESSANDO_ORFA_MS;
+        const presas = await db().collection('notas_fiscais').where('status', '==', 'PROCESSANDO').get();
+        for (const doc of presas.docs) {
+            const n = doc.data();
+            const criadoMs = n.criado_em && n.criado_em.toMillis ? n.criado_em.toMillis() : 0;
+            if (!n.payload_pendente || criadoMs > limite) continue;
+            await doc.ref.update({
+                status: 'ERRO_REDE',
+                motivo: 'Emissão interrompida (aba fechada ou conexão perdida durante o envio) — reenviando automaticamente.'
+            }).catch(() => {});
+        }
+    }
+
+    function retentarPendenciasFiscais() {
+        resgatarNotasTravadas()
+            .then(() => retentarNotasComErroDeRede())
+            .catch(() => {});
+        retentarEmissoesAutomaticasPendentes().catch(() => {});
+    }
+
+    // Reenvia sozinho assim que a internet volta, e também de tempos em
+    // tempos como reforço (ex.: se o evento 'online' não disparar de forma
+    // confiável no navegador/dispositivo usado no caixa).
+    if (typeof window !== 'undefined') {
+        window.addEventListener('online', retentarPendenciasFiscais);
+        setInterval(retentarPendenciasFiscais, 5 * 60 * 1000);
     }
 
     // ---------- Prévia de layout do cupom (sem emitir/transmitir) ----------
@@ -147,7 +337,7 @@
                 cep: cfg.cep, fone: cfg.fone, crt: cfg.regime === 'normal' ? '3' : '1'
             },
             csc: cfg.csc, cscId: cfg.cscId,
-            qrBaseUrl: cfg.qrBaseUrl, urlChave: cfg.urlChave,
+            ...urlsPorAmbiente(cfg),
             aliquotaAproxTributos: Number(cfg.aliquotaAproxTributos) || 0,
             ibptToken: cfg.ibptToken || undefined,
             payment: { tPag: '01', vPag: 25 },
@@ -307,6 +497,27 @@
         return data;
     }
 
+    // Grava um documento DFe (dfe_documentos) + auto-cadastra o fornecedor a partir
+    // do emitente. Compartilhado entre a sincronizacao automatica e a importacao manual.
+    function salvarDocumentoDfe(batch, doc, now, fornecedoresVistos) {
+        const id = doc.chave || doc.nsu;
+        if (!id) return;
+        const ref = db().collection('dfe_documentos').doc(String(id));
+        batch.set(ref, { ...doc, atualizado_em: now, criado_em: now }, { merge: true });
+
+        const cnpjForn = String(doc.cnpjEmitente || '').replace(/\D/g, '');
+        if (cnpjForn && !fornecedoresVistos.has(cnpjForn)) {
+            fornecedoresVistos.add(cnpjForn);
+            const fornRef = db().collection('fornecedores').doc(cnpjForn);
+            batch.set(fornRef, {
+                nome: doc.emitente || cnpjForn,
+                cnpj: cnpjForn,
+                fone: doc.foneEmitente || null,
+                atualizado_em: now,
+            }, { merge: true });
+        }
+    }
+
     async function sincronizarDfe() {
         const cfg = await getConfig();
         validarConfig({ ...cfg, ativo: true });
@@ -328,12 +539,8 @@
 
         const batch = db().batch();
         const now = firebase.firestore.FieldValue.serverTimestamp();
-        (data.documentos || []).forEach(doc => {
-            const id = doc.chave || doc.nsu;
-            if (!id) return;
-            const ref = db().collection('dfe_documentos').doc(String(id));
-            batch.set(ref, { ...doc, atualizado_em: now, criado_em: now }, { merge: true });
-        });
+        const fornecedoresVistos = new Set();
+        (data.documentos || []).forEach(doc => salvarDocumentoDfe(batch, doc, now, fornecedoresVistos));
         batch.set(db().collection('configuracoes').doc('fiscal'), {
             dfeUltNSU: data.ultNSU || cfg.dfeUltNSU || '0',
             dfeMaxNSU: data.maxNSU || cfg.dfeMaxNSU || '0',
@@ -343,5 +550,27 @@
         return data;
     }
 
-    window.FiscalClient = { getConfig, emitir, cancelar, inutilizar, transmitirContingencia, sincronizarDfe, visualizarCupom, prewarmTributosIbpt };
+    // Importa uma NF-e avulsa (upload de .xml), fora da sincronizacao automatica —
+    // mesmo fluxo de gravacao (dfe_documentos + fornecedor), cai na mesma tela de
+    // "dar entrada no estoque".
+    async function importarXmlAvulso(xmlTexto) {
+        const cfg = await getConfig();
+        if (!cfg.url) throw new Error('Informe a URL do servico fiscal em Configuracoes > Fiscal.');
+
+        const resp = await fetch(`${cfg.url}/fiscal/dfe/importar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { 'Authorization': `Bearer ${cfg.apiKey}` } : {}) },
+            body: JSON.stringify({ xml: xmlTexto })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || `Falha ao importar XML (${resp.status}).`);
+
+        const batch = db().batch();
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        salvarDocumentoDfe(batch, data.documento, now, new Set());
+        await batch.commit();
+        return data.documento;
+    }
+
+    window.FiscalClient = { getConfig, emitir, emitirAutomatico, cancelar, inutilizar, transmitirContingencia, sincronizarDfe, importarXmlAvulso, visualizarCupom, prewarmTributosIbpt, retentarNotasComErroDeRede, retentarEmissoesAutomaticasPendentes, resgatarNotasTravadas };
 })();
