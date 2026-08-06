@@ -18,6 +18,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const auth = firebase.auth();
     const FieldValue = firebase.firestore.FieldValue;
 
+    // Persistência offline: vendas/movimentos feitos sem internet ficam na
+    // fila local (IndexedDB) e sincronizam sozinhos quando a conexão volta.
+    // O PDV não pode depender de rede contínua para funcionar.
+    db.enablePersistence({ synchronizeTabs: true }).catch(err => {
+        if (err.code === 'failed-precondition') {
+            console.warn('Persistência offline: já ativa em outra aba deste navegador.');
+        } else if (err.code === 'unimplemented') {
+            console.warn('Persistência offline: navegador sem suporte (IndexedDB).');
+        }
+    });
+
     const COL_PEDIDOS = "pedidos";
     const COL_CARDAPIO = "cardapio";
     const COL_SESSOES = "caixa_sessoes";
@@ -36,6 +47,21 @@ document.addEventListener('DOMContentLoaded', () => {
     let usuarioEmail = null;
     let unsubMovs = null;
     let comandasPendentes = [];
+    let categoriaAtiva = "";  // "" = todas
+
+    // Emoji de fallback por categoria, pra quando o item não tem imagem
+    // cadastrada — não é pra ser "o" ícone certo, só dar uma pista visual
+    // rápida no grid touch em vez de um card totalmente em branco.
+    const EMOJI_CATEGORIA = {
+        pizza: '🍕', pizzas: '🍕', bebida: '🥤', bebidas: '🥤',
+        lanche: '🍔', lanches: '🍔', sobremesa: '🍰', sobremesas: '🍰',
+        esfiha: '🥙', esfihas: '🥙', combo: '🍽️', combos: '🍽️',
+        borda: '🧀', bordas: '🧀', porção: '🍟', porcao: '🍟', porções: '🍟'
+    };
+    function emojiDoItem(item) {
+        const cat = (item.categoria || '').toLowerCase().trim();
+        return EMOJI_CATEGORIA[cat] || '🍴';
+    }
 
     const $ = (id) => document.getElementById(id);
     const money = (v) => "R$ " + (Number(v) || 0).toFixed(2).replace('.', ',');
@@ -56,12 +82,46 @@ document.addEventListener('DOMContentLoaded', () => {
     auth.onAuthStateChanged((user) => {
         if (!user) { window.location.href = '/login.html'; return; }
         usuarioEmail = user.email || 'operador';
+        configurarIndicadorConexao();
         ouvirCardapio();
         ouvirSessaoAberta();
         ouvirComandasPendentes();
         configurarPDV();
         configurarCaixa();
     });
+
+    // ============================================================
+    //  INDICADOR DE CONEXÃO / SINCRONIZAÇÃO
+    //  O operador precisa saber que está offline (e que não perdeu nada)
+    //  em vez de ficar em dúvida e redigitar a venda.
+    // ============================================================
+    let vendasPendentes = 0;
+    function configurarIndicadorConexao() {
+        const header = document.querySelector('header.top');
+        if (!header || $('conn-indicador')) return;
+        const badge = document.createElement('span');
+        badge.id = 'conn-indicador';
+        badge.style.cssText = 'font-size:.85rem;padding:5px 10px;border-radius:20px;margin-left:8px;';
+        header.appendChild(badge);
+        window.addEventListener('online', atualizarIndicadorConexao);
+        window.addEventListener('offline', atualizarIndicadorConexao);
+        atualizarIndicadorConexao();
+    }
+    function atualizarIndicadorConexao() {
+        const badge = $('conn-indicador');
+        if (!badge) return;
+        if (navigator.onLine) {
+            badge.textContent = vendasPendentes
+                ? `🟡 Sincronizando ${vendasPendentes} venda(s)...`
+                : '🟢 Online';
+            badge.style.background = vendasPendentes ? '#fff6db' : '#e6f9ef';
+            badge.style.color = vendasPendentes ? '#8a6d00' : '#1e8e4f';
+        } else {
+            badge.textContent = '🔴 Offline — vendas continuam sendo registradas';
+            badge.style.background = '#fdecea';
+            badge.style.color = '#c0392b';
+        }
+    }
 
     // ============================================================
     //  CARDÁPIO (PDV)
@@ -74,25 +134,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }, err => console.error("Erro cardápio:", err));
     }
 
+    function renderCategorias() {
+        const wrap = $('cat-pills');
+        if (!wrap) return;
+        const categorias = [...new Set(cardapio.map(i => i.categoria).filter(Boolean))];
+        if (!categorias.length) { wrap.innerHTML = ''; return; }
+        if (categoriaAtiva && !categorias.includes(categoriaAtiva)) categoriaAtiva = '';
+        const pills = ['<button type="button" class="cat-pill' + (categoriaAtiva ? '' : ' active') + '" data-cat="">Todos</button>']
+            .concat(categorias.map(c => `<button type="button" class="cat-pill${c === categoriaAtiva ? ' active' : ''}" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>`));
+        wrap.innerHTML = pills.join('');
+        wrap.querySelectorAll('[data-cat]').forEach(btn => btn.onclick = () => {
+            categoriaAtiva = btn.dataset.cat;
+            renderCardapio($('busca-produto').value);
+        });
+    }
+
+    // Grid de produtos tocável (em vez de dropdown) — pensado pro monitor touch
+    // do caixa: nome + preço grandes, foto do cardápio quando cadastrada
+    // (item.imagem_url), tocar no card já adiciona 1 unidade ao carrinho.
     function renderCardapio(filtro = "") {
-        const select = $('produto-select');
-        if (!select) return;
+        const grid = $('produtos-grid');
+        if (!grid) return;
+        renderCategorias();
         const termo = filtro.trim().toLowerCase();
         const itens = cardapio.filter(i => {
             const nome = (i.nome_exibicao || i.nome || "").toLowerCase();
-            const categoria = (i.categoria || "").toLowerCase();
-            return i.disponivel !== false && (!termo || nome.includes(termo) || categoria.includes(termo));
+            const categoria = i.categoria || "";
+            if (i.disponivel === false) return false;
+            if (categoriaAtiva && categoria !== categoriaAtiva) return false;
+            return !termo || nome.includes(termo) || categoria.toLowerCase().includes(termo);
         });
-        select.disabled = !itens.length;
         if (!itens.length) {
-            select.innerHTML = '<option value="">Nenhum item encontrado</option>';
+            grid.innerHTML = '<div class="empty-state">Nenhum item encontrado.</div>';
             return;
         }
-        select.innerHTML = itens.map(i => {
+        grid.innerHTML = itens.map(i => {
             const nome = i.nome_exibicao || i.nome || "Item";
-            const categoria = i.categoria ? ` - ${i.categoria}` : '';
-            return `<option value="${i.id}">${escapeHtml(nome)}${escapeHtml(categoria)} - ${money(i.preco)}</option>`;
+            const imagem = i.imagem_url
+                ? `<img class="produto-img" src="${i.imagem_url}" alt="" loading="lazy">`
+                : `<div class="produto-emoji">${emojiDoItem(i)}</div>`;
+            return `<button type="button" class="produto-card" data-produto="${i.id}">
+                ${imagem}
+                <span class="produto-nome">${escapeHtml(nome)}</span>
+                <span class="produto-preco">${money(i.preco)}</span>
+            </button>`;
         }).join('');
+        grid.querySelectorAll('[data-produto]').forEach(btn => btn.onclick = () => addAoCarrinho(btn.dataset.produto));
     }
 
     // ============================================================
@@ -147,17 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function configurarPDV() {
         $('busca-produto').addEventListener('input', e => renderCardapio(e.target.value));
-        $('btn-add-produto').addEventListener('click', () => {
-            const id = $('produto-select').value;
-            if (id) addAoCarrinho(id);
-        });
-        $('produto-select').addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const id = $('produto-select').value;
-                if (id) addAoCarrinho(id);
-            }
-        });
         $('btn-limpar').addEventListener('click', () => { carrinho = []; renderCarrinho(); });
         $('pag-grid').querySelectorAll('.pag-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -228,21 +304,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const disabled = sessaoAtual ? '' : 'disabled';
             const label = sessaoAtual ? 'Receber' : 'Abra o caixa';
             return `<div class="mesa-pendente">
-                <div class="mesa-num">Mesa ${escapeHtml(p.mesa_numero || '-')}</div>
-                <div>
-                    <div class="meta">${qtd} item(ns) na comanda</div>
-                    <details class="mesa-itens">
-                        <summary>Ver itens</summary>
-                        <ul>${itensHtml || '<li><span>Sem itens listados</span><strong>R$ 0,00</strong></li>'}</ul>
-                    </details>
+                <div class="linha-topo">
+                    <span class="mesa-num">Mesa ${escapeHtml(p.mesa_numero || '-')}</span>
+                    <span class="valor">${money(p.valor_total)}</span>
                 </div>
-                <div class="valor">${money(p.valor_total)}</div>
-                <select class="mesa-pagamento" data-pag-mesa="${p.id}" ${disabled}>
-                    <option value="Dinheiro">Dinheiro</option>
-                    <option value="PIX">PIX</option>
-                    <option value="Cartão">Cartão</option>
-                </select>
-                <button data-receber-mesa="${p.id}" ${disabled}>${label}</button>
+                <div class="meta">${qtd} item(ns) na comanda</div>
+                <details class="mesa-itens">
+                    <summary>Ver itens</summary>
+                    <ul>${itensHtml || '<li><span>Sem itens listados</span><strong>R$ 0,00</strong></li>'}</ul>
+                </details>
+                <div class="acoes-mini">
+                    <select class="mesa-pagamento" data-pag-mesa="${p.id}" ${disabled}>
+                        <option value="Dinheiro">Dinheiro</option>
+                        <option value="PIX">PIX</option>
+                        <option value="Cartão">Cartão</option>
+                    </select>
+                    <button data-receber-mesa="${p.id}" ${disabled}>${label}</button>
+                </div>
             </div>`;
         }).join('');
         lista.querySelectorAll('[data-receber-mesa]').forEach(btn => {
@@ -305,19 +383,28 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        try {
-            await batch.commit();
-            if (window.GestorChefEstoque) {
-                window.GestorChefEstoque.baixarDoPedido(db, pedidoId).catch(() => {});
-            }
-            flash(`Comanda da mesa ${pedido.mesa_numero} recebida - ${money(total)} (${formaRecebimento})`);
-            autoEmitirNFCe(pedidoId, { ...pedido, status: "CONCLUIDO", forma_pagamento: formaRecebimento });
-        } catch (err) {
-            alert("Erro ao receber comanda: " + err.message);
+        // Não faz "await" no commit: com persistência offline habilitada, a
+        // Promise só resolve quando o servidor confirma — offline ela fica
+        // pendurada. O efeito é aplicado localmente na hora (cache do
+        // Firestore) e a confirmação/erro definitivo do servidor chega depois.
+        batch.commit().catch(err => {
+            flash(`⚠️ Falha ao sincronizar recebimento da mesa ${pedido.mesa_numero}: ${err.message}`);
+        });
+        if (window.GestorChefEstoque) {
+            window.GestorChefEstoque.baixarDoPedido(db, pedidoId).then(avisarPratosDesativados).catch(() => {});
         }
+        flash(`Comanda da mesa ${pedido.mesa_numero} recebida - ${money(total)} (${formaRecebimento})`);
+        autoEmitirNFCe(pedidoId, { ...pedido, status: "CONCLUIDO", forma_pagamento: formaRecebimento });
     }
+    // URL da Cloud Function que cria a cobrança na maquininha Point (Mercado Pago).
+    // Mesmo projeto/região das outras functions (WEBHOOK_URL não é acessível aqui,
+    // então repetimos o padrão fixo).
+    const CRIAR_COBRANCA_POINT_URL = "https://us-central1-pizzain-40973.cloudfunctions.net/criarCobrancaPoint";
+
     async function finalizarVenda() {
         if (!sessaoAtual || !carrinho.length) return;
+        if (formaPagamento === "Cartão") return finalizarVendaCartaoPoint();
+
         const btn = $('btn-finalizar');
         btn.disabled = true;
 
@@ -357,33 +444,128 @@ document.addEventListener('DOMContentLoaded', () => {
             ["totais." + chave]: FieldValue.increment(total)
         };
 
-        try {
-            const batch = db.batch();
-            batch.set(pedidoRef, pedido);
-            batch.set(movRef, movimento);
-            batch.update(sessaoRef, updateSessao);
-            await batch.commit();
+        const batch = db.batch();
+        batch.set(pedidoRef, pedido);
+        batch.set(movRef, movimento);
+        batch.update(sessaoRef, updateSessao);
 
-            // Venda de balcão sem cozinha já sai CONCLUIDA -> baixa o estoque
-            if (!enviarCozinha && window.GestorChefEstoque) {
-                window.GestorChefEstoque.baixarDoPedido(db, pedidoRef.id).catch(() => {});
-            }
+        // Não faz "await" no commit: com persistência offline habilitada, a
+        // Promise só resolve quando o servidor confirma (offline ela fica
+        // pendurada). O pedido já foi gravado no cache local do Firestore
+        // (por ID fixo, sem risco de duplicar) — a UI segue na hora e o
+        // erro definitivo do servidor (se houver) chega depois, em segundo plano.
+        batch.commit().catch(err => {
+            flash(`⚠️ Falha ao sincronizar a venda de ${money(total)}: ${err.message}`);
+        });
 
-            carrinho = [];
-            $('cliente-nome').value = "";
-            $('chk-cozinha').checked = false;
-            renderCarrinho();
-            flash(`✅ Venda registrada • ${money(total)} (${formaPagamento})`);
-
-            // Emissão automática de NFC-e (se configurado) — só para venda concluída
-            if (!enviarCozinha) {
-                autoEmitirNFCe(pedidoRef.id, pedido);
-            }
-        } catch (err) {
-            alert("Erro ao finalizar venda: " + err.message);
-        } finally {
-            atualizarBotaoFinalizar();
+        // Venda de balcão sem cozinha já sai CONCLUIDA -> baixa o estoque
+        if (!enviarCozinha && window.GestorChefEstoque) {
+            window.GestorChefEstoque.baixarDoPedido(db, pedidoRef.id).then(avisarPratosDesativados).catch(() => {});
         }
+
+        carrinho = [];
+        $('cliente-nome').value = "";
+        $('chk-cozinha').checked = false;
+        renderCarrinho();
+        atualizarBotaoFinalizar();
+        flash(`✅ Venda registrada • ${money(total)} (${formaPagamento})`);
+
+        // Emissão automática de NFC-e (se configurado) — só para venda concluída
+        if (!enviarCozinha) {
+            autoEmitirNFCe(pedidoRef.id, pedido);
+        }
+    }
+
+    // Venda no Cartão via maquininha Point (Mercado Pago): dispara a cobrança no
+    // terminal e só grava a venda como concluída quando o pagamento é confirmado
+    // (webhook do backend atualiza o pedido). Não trava a tela esperando — o caixa
+    // pode ver o status "Aguardando pagamento..." e o resultado chega sozinho.
+    async function finalizarVendaCartaoPoint() {
+        const btn = $('btn-finalizar');
+        btn.disabled = true;
+        btn.textContent = 'Aguardando pagamento na maquininha...';
+
+        const total = totalCarrinho();
+        const enviarCozinha = $('chk-cozinha').checked;
+        const pedidoRef = db.collection(COL_PEDIDOS).doc();
+
+        let resp, data;
+        try {
+            resp = await fetch(CRIAR_COBRANCA_POINT_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    amount: total,
+                    externalReference: pedidoRef.id,
+                    description: `Pedido balcão ${pedidoRef.id.slice(0, 6)}`
+                })
+            });
+            data = await resp.json().catch(() => ({}));
+        } catch (err) {
+            alert('Falha ao contatar a maquininha: ' + err.message);
+            atualizarBotaoFinalizar();
+            return;
+        }
+        if (!resp.ok) {
+            alert('Maquininha recusou a cobrança: ' + (data.message || `erro ${resp.status}`));
+            atualizarBotaoFinalizar();
+            return;
+        }
+
+        const paymentIntentId = data.id;
+        if (!paymentIntentId) {
+            alert('Resposta inesperada da maquininha (sem id da cobrança).');
+            atualizarBotaoFinalizar();
+            return;
+        }
+
+        const pedido = {
+            origem: "BALCAO",
+            nome_cliente: ($('cliente-nome').value || "Balcão").trim(),
+            itens: carrinho.map(c => ({ nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
+            valor_total: total,
+            forma_pagamento: formaPagamento,
+            status: "AGUARDANDO_CARTAO",
+            status_pos_pagamento: enviarCozinha ? "PENDENTE_PREPARO" : "CONCLUIDO",
+            pagamento_id: paymentIntentId,
+            operador: usuarioEmail,
+            hora_pedido: FieldValue.serverTimestamp(),
+            caixa_sessao_id: sessaoAtual.id
+        };
+
+        try {
+            await pedidoRef.set(pedido);
+        } catch (err) {
+            alert("Erro ao registrar a venda: " + err.message);
+            atualizarBotaoFinalizar();
+            return;
+        }
+
+        // Limpa o carrinho na hora — a venda já foi disparada na maquininha, o
+        // caixa pode atender o próximo cliente enquanto espera a confirmação.
+        carrinho = [];
+        $('cliente-nome').value = "";
+        $('chk-cozinha').checked = false;
+        renderCarrinho();
+        flash(`💳 Aguardando confirmação da maquininha • ${money(total)}`);
+        atualizarBotaoFinalizar();
+
+        // Observa o pedido até a confirmação (ou cancelamento) chegar pelo webhook,
+        // para então dar baixa no estoque e emitir a NFC-e — só uma vez.
+        const unsub = pedidoRef.onSnapshot(snap => {
+            const d = snap.data();
+            if (!d || d.status === 'AGUARDANDO_CARTAO') return;
+            unsub();
+            if (d.status === 'CANCELADO_PAGAMENTO') {
+                flash(`❌ Pagamento no cartão não aprovado (pedido ${pedidoRef.id.slice(0, 6)})`);
+                return;
+            }
+            flash(`✅ Cartão aprovado • ${money(d.valor_total)}`);
+            if (window.GestorChefEstoque) {
+                window.GestorChefEstoque.baixarDoPedido(db, pedidoRef.id).then(avisarPratosDesativados).catch(() => {});
+            }
+            if (d.status === 'CONCLUIDO') autoEmitirNFCe(pedidoRef.id, d);
+        }, err => console.error('Erro ao observar pagamento no cartão:', err));
     }
 
     // ============================================================
@@ -455,33 +637,42 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    async function abrirCaixa() {
+    // Sem "await" no commit em nenhuma das operações abaixo: com persistência
+    // offline habilitada, a Promise de commit só resolve quando o servidor
+    // confirma (offline ela fica pendurada — o caixa pareceria travado). Como
+    // a função inteira roda de forma síncrona até o fim (sem pontos de
+    // suspensão), um segundo clique não consegue começar antes do primeiro
+    // terminar — isso já evita abrir/fechar caixa ou lançar o mesmo
+    // movimento em duplicidade.
+    function abrirCaixa() {
         if (sessaoAtual) return;
         const fundo = parseFloat($('fundo-troco').value) || 0;
-        try {
-            const ref = await db.collection(COL_SESSOES).add({
-                status: "ABERTO",
-                operador: usuarioEmail,
-                aberto_em: FieldValue.serverTimestamp(),
-                fechado_em: null,
-                fundo_troco: fundo,
-                totais: { Dinheiro: 0, PIX: 0, Cartao: 0 },
-                total_vendas: 0,
-                qtd_vendas: 0,
-                suprimentos_total: 0,
-                sangrias_total: 0
-            });
-            await db.collection(COL_MOVS).add({
-                sessao_id: ref.id, tipo: "ABERTURA", valor: fundo, forma_pagamento: "Dinheiro",
-                descricao: "Abertura de caixa (fundo de troco)", operador: usuarioEmail,
-                hora: FieldValue.serverTimestamp()
-            });
-            flash("Caixa aberto.");
-            trocarAba('pdv');
-        } catch (err) { alert("Erro ao abrir caixa: " + err.message); }
+        const ref = db.collection(COL_SESSOES).doc();
+        const movRef = db.collection(COL_MOVS).doc();
+        const batch = db.batch();
+        batch.set(ref, {
+            status: "ABERTO",
+            operador: usuarioEmail,
+            aberto_em: FieldValue.serverTimestamp(),
+            fechado_em: null,
+            fundo_troco: fundo,
+            totais: { Dinheiro: 0, PIX: 0, Cartao: 0 },
+            total_vendas: 0,
+            qtd_vendas: 0,
+            suprimentos_total: 0,
+            sangrias_total: 0
+        });
+        batch.set(movRef, {
+            sessao_id: ref.id, tipo: "ABERTURA", valor: fundo, forma_pagamento: "Dinheiro",
+            descricao: "Abertura de caixa (fundo de troco)", operador: usuarioEmail,
+            hora: FieldValue.serverTimestamp()
+        });
+        batch.commit().catch(err => flash("⚠️ Falha ao sincronizar abertura de caixa: " + err.message));
+        flash("Caixa aberto.");
+        trocarAba('pdv');
     }
 
-    async function movimentoManual(tipo) {
+    function movimentoManual(tipo) {
         if (!sessaoAtual) return;
         const label = tipo === 'SANGRIA' ? 'Sangria (retirada)' : 'Suprimento (entrada)';
         const valStr = prompt(`${label}\nValor em R$:`);
@@ -491,18 +682,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const descricao = prompt("Descrição (opcional):") || label;
 
         const campo = tipo === 'SANGRIA' ? 'sangrias_total' : 'suprimentos_total';
-        try {
-            const batch = db.batch();
-            batch.set(db.collection(COL_MOVS).doc(), {
-                sessao_id: sessaoAtual.id, tipo, valor, forma_pagamento: "Dinheiro",
-                descricao, operador: usuarioEmail, hora: FieldValue.serverTimestamp()
-            });
-            batch.update(db.collection(COL_SESSOES).doc(sessaoAtual.id), {
-                [campo]: FieldValue.increment(valor)
-            });
-            await batch.commit();
-            flash(`${label} de ${money(valor)} registrada.`);
-        } catch (err) { alert("Erro: " + err.message); }
+        const batch = db.batch();
+        batch.set(db.collection(COL_MOVS).doc(), {
+            sessao_id: sessaoAtual.id, tipo, valor, forma_pagamento: "Dinheiro",
+            descricao, operador: usuarioEmail, hora: FieldValue.serverTimestamp()
+        });
+        batch.update(db.collection(COL_SESSOES).doc(sessaoAtual.id), {
+            [campo]: FieldValue.increment(valor)
+        });
+        batch.commit().catch(err => flash(`⚠️ Falha ao sincronizar ${label.toLowerCase()}: ${err.message}`));
+        flash(`${label} de ${money(valor)} registrada.`);
     }
 
     async function fecharCaixa() {
@@ -517,33 +706,38 @@ document.addEventListener('DOMContentLoaded', () => {
             (diferenca > 0 ? `Sobra de ${money(diferenca)}` : `Falta de ${money(Math.abs(diferenca))}`);
         if (!confirm(`Confirmar fechamento?\n${msgDif}`)) return;
 
-        try {
-            const batch = db.batch();
-            batch.update(db.collection(COL_SESSOES).doc(sessaoAtual.id), {
-                status: "FECHADO",
-                fechado_em: FieldValue.serverTimestamp(),
-                conferencia: contado,
-                saldo_esperado: esperado,
-                diferenca: diferenca
-            });
-            batch.set(db.collection(COL_MOVS).doc(), {
-                sessao_id: sessaoAtual.id, tipo: "FECHAMENTO", valor: contado, forma_pagamento: "Dinheiro",
-                descricao: `Fechamento. Esperado ${money(esperado)} | Contado ${money(contado)} | ${msgDif}`,
-                operador: usuarioEmail, hora: FieldValue.serverTimestamp()
-            });
-            await batch.commit();
-            flash("Caixa fechado. " + msgDif);
-        } catch (err) { alert("Erro ao fechar caixa: " + err.message); }
+        const batch = db.batch();
+        batch.update(db.collection(COL_SESSOES).doc(sessaoAtual.id), {
+            status: "FECHADO",
+            fechado_em: FieldValue.serverTimestamp(),
+            conferencia: contado,
+            saldo_esperado: esperado,
+            diferenca: diferenca
+        });
+        batch.set(db.collection(COL_MOVS).doc(), {
+            sessao_id: sessaoAtual.id, tipo: "FECHAMENTO", valor: contado, forma_pagamento: "Dinheiro",
+            descricao: `Fechamento. Esperado ${money(esperado)} | Contado ${money(contado)} | ${msgDif}`,
+            operador: usuarioEmail, hora: FieldValue.serverTimestamp()
+        });
+        batch.commit().catch(err => flash("⚠️ Falha ao sincronizar fechamento de caixa: " + err.message));
+        flash("Caixa fechado. " + msgDif);
     }
 
     // ---------- Movimentos da sessão ----------
     function ouvirMovimentos() {
         if (unsubMovs) { unsubMovs(); unsubMovs = null; }
         const lista = $('lista-movimentos');
-        if (!sessaoAtual) { lista.innerHTML = '<p style="color:#7f8c8d;">Sem movimentações.</p>'; return; }
+        if (!sessaoAtual) {
+            lista.innerHTML = '<p style="color:#7f8c8d;">Sem movimentações.</p>';
+            vendasPendentes = 0;
+            atualizarIndicadorConexao();
+            return;
+        }
         unsubMovs = db.collection(COL_MOVS)
             .where("sessao_id", "==", sessaoAtual.id)
-            .onSnapshot(snap => {
+            .onSnapshot({ includeMetadataChanges: true }, snap => {
+                vendasPendentes = snap.docs.filter(d => d.metadata.hasPendingWrites).length;
+                atualizarIndicadorConexao();
                 const movs = [];
                 snap.forEach(d => movs.push(d.data()));
                 movs.sort((a, b) => {
@@ -564,17 +758,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---------- Emissão fiscal automática (respeita Configurações → Fiscal) ----------
+    // FiscalClient.emitirAutomatico já marca o pedido como pendente quando falha
+    // (ex.: sem internet no momento da venda) — o retry automático do
+    // fiscal-client.js tenta de novo sozinho assim que a conexão voltar.
     async function autoEmitirNFCe(pedidoId, pedido) {
         if (!window.FiscalClient) return;
-        let cfg;
-        try { cfg = await FiscalClient.getConfig(); } catch { return; }
-        if (!cfg || !cfg.ativo) return;
-        if (!['automatico', 'ambos'].includes(cfg.modo)) return;
         try {
-            const nota = await FiscalClient.emitir(pedidoId, pedido);
-            flash(`🧾 NFC-e emitida (nº ${nota.nNF})`);
+            const nota = await FiscalClient.emitirAutomatico(pedidoId, pedido);
+            if (nota) flash(`🧾 NFC-e emitida (nº ${nota.nNF})`);
         } catch (err) {
-            flash('⚠️ NFC-e automática não emitida: ' + err.message);
+            flash('⚠️ NFC-e automática não emitida — tentaremos de novo quando a conexão voltar.');
+        }
+    }
+
+    // Avisa o operador quando a baixa de estoque desativou algum prato
+    // automaticamente (insumo esgotou) — pra não passar batido.
+    function avisarPratosDesativados(resultado) {
+        const pratos = resultado && resultado.pratos_desativados;
+        if (pratos && pratos.length) {
+            flash(`⚠️ Estoque esgotado: ${pratos.join(', ')} ${pratos.length > 1 ? 'foram desativados' : 'foi desativado'} do cardápio.`);
         }
     }
 

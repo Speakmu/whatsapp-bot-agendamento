@@ -61,13 +61,20 @@
             return { ok: false, motivo: "sem itens" };
         }
 
-        // 2) Carrega fichas
+        // 2) Carrega fichas — e monta o mapa inverso insumo -> pratos que
+        // dependem dele (considerando TODAS as fichas, não só as deste
+        // pedido, já que um insumo pode ser usado por vários pratos).
         const fichasPorId = {}, fichasPorNome = {};
+        const pratosPorInsumo = {}; // insumoId -> [cardapioId, ...]
         const fSnap = await db.collection(COL_FICHAS).get();
         fSnap.forEach(d => {
             const f = d.data();
             fichasPorId[d.id] = f;
             if (f.produto_nome) fichasPorNome[norm(f.produto_nome)] = f;
+            (f.itens || []).forEach(ins => {
+                if (!ins.insumo_id) return;
+                (pratosPorInsumo[ins.insumo_id] = pratosPorInsumo[ins.insumo_id] || []).push(d.id);
+            });
         });
 
         // 3) Acumula consumo por insumo
@@ -100,6 +107,7 @@
                 const snaps = await Promise.all(refs.map(r => txn.get(r)));
 
                 const movs = [];
+                const cardapioIdsParaDesativar = new Set();
                 snaps.forEach((snap, i) => {
                     const id = insumoIds[i];
                     const qUsada = consumo[id];
@@ -108,6 +116,13 @@
                     const saldo = atual - qUsada;
                     if (snap.exists) txn.update(refs[i], { quantidade_atual: saldo, atualizado_em: FieldValue.serverTimestamp() });
                     movs.push({ id, nome, qUsada, saldo });
+                    // Insumo esgotou (ou ficou negativo): desativa automaticamente
+                    // qualquer prato do cardápio que dependa dele, pra ninguém
+                    // (bot incluso) continuar oferecendo algo que a cozinha não
+                    // tem mais como fazer.
+                    if (saldo <= 0) {
+                        (pratosPorInsumo[id] || []).forEach(cid => cardapioIdsParaDesativar.add(cid));
+                    }
                 });
 
                 movs.forEach(m => {
@@ -121,12 +136,23 @@
                     });
                 });
 
+                const pratosDesativados = [];
+                cardapioIdsParaDesativar.forEach(cid => {
+                    txn.update(db.collection("cardapio").doc(cid), {
+                        disponivel: false,
+                        desativado_automaticamente_em: FieldValue.serverTimestamp(),
+                        desativado_motivo: "Estoque de insumo esgotado"
+                    });
+                    const ficha = fichasPorId[cid];
+                    pratosDesativados.push((ficha && ficha.produto_nome) || cid);
+                });
+
                 txn.update(pedidoRef, {
                     estoque_baixado: true,
                     estoque_baixado_em: FieldValue.serverTimestamp(),
                     estoque_baixa_itens: movs.length
                 });
-                return { ok: true, itens: movs.length };
+                return { ok: true, itens: movs.length, pratos_desativados: pratosDesativados };
             });
             return resultado;
         } catch (e) {

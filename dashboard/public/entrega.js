@@ -179,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 status: "CONCLUIDO",
                 hora_entrega: FieldValue.serverTimestamp()
             });
-            if (window.GestorChefEstoque) window.GestorChefEstoque.baixarDoPedido(db, id).catch(() => {});
+            if (window.GestorChefEstoque) window.GestorChefEstoque.baixarDoPedido(db, id).then(avisarPratosDesativados).catch(() => {});
             contarEntreguesHoje();
         } catch (err) { alert("Erro: " + err.message); }
     }
@@ -208,5 +208,17 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.warn("Contagem de entregues hoje indisponível (talvez índice):", err.message);
         }
+    }
+
+    // Avisa o operador quando a baixa de estoque desativou algum prato
+    // automaticamente (insumo esgotou) — pra não passar batido.
+    function avisarPratosDesativados(resultado) {
+        const pratos = resultado && resultado.pratos_desativados;
+        if (!pratos || !pratos.length) return;
+        const d = document.createElement('div');
+        d.textContent = `⚠️ Estoque esgotado: ${pratos.join(', ')} ${pratos.length > 1 ? 'foram desativados' : 'foi desativado'} do cardápio.`;
+        d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#2c3e50;color:#fff;padding:12px 20px;border-radius:10px;z-index:9999;box-shadow:0 4px 14px rgba(0,0,0,.3);font-size:.95rem;';
+        document.body.appendChild(d);
+        setTimeout(() => d.remove(), 4000);
     }
 });

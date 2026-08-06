@@ -210,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Baixa de estoque ao concluir (despachar) direto pela cozinha
             if (novoStatus === "CONCLUIDO" && window.GestorChefEstoque) {
-                window.GestorChefEstoque.baixarDoPedido(db, id).catch(() => {});
+                window.GestorChefEstoque.baixarDoPedido(db, id).then(avisarPratosDesativados).catch(() => {});
             }
 
             // Avisa o cliente via backend do bot quando fica pronto
@@ -236,6 +236,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 tipo_servico: pedido.endereco === "Retirada no Balcão" ? "RETIRADA" : "ENTREGA"
             })
         }).catch(err => console.warn("Não foi possível avisar o bot:", err));
+    }
+
+    // Avisa o operador quando a baixa de estoque desativou algum prato
+    // automaticamente (insumo esgotou) — pra não passar batido.
+    function avisarPratosDesativados(resultado) {
+        const pratos = resultado && resultado.pratos_desativados;
+        if (!pratos || !pratos.length) return;
+        const d = document.createElement('div');
+        d.textContent = `⚠️ Estoque esgotado: ${pratos.join(', ')} ${pratos.length > 1 ? 'foram desativados' : 'foi desativado'} do cardápio.`;
+        d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#2c3e50;color:#fff;padding:12px 20px;border-radius:10px;z-index:9999;box-shadow:0 4px 14px rgba(0,0,0,.3);font-size:.95rem;';
+        document.body.appendChild(d);
+        setTimeout(() => d.remove(), 4000);
     }
 
     // Re-render periódico para atualizar timers/urgência sem nova consulta

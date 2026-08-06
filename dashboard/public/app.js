@@ -18,6 +18,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Permite colar (Ctrl+V) um print da área de transferência como imagem do produto
+    document.addEventListener('paste', function (e) {
+        const productImageInput = document.getElementById('product-image');
+        if (!productImageInput) return;
+
+        const items = e.clipboardData && e.clipboardData.items;
+        if (!items) return;
+
+        for (const item of items) {
+            if (item.type.startsWith('image/')) {
+                const file = item.getAsFile();
+                if (!file) continue;
+
+                const dataTransfer = new DataTransfer();
+                dataTransfer.items.add(file);
+                productImageInput.files = dataTransfer.files;
+                productImageInput.dispatchEvent(new Event('change'));
+                break;
+            }
+        }
+    });
+
     // Inicializa Firebase apenas se ainda não foi iniciado
     if (!firebase.apps.length) {
         firebase.initializeApp(firebaseConfig);
@@ -970,7 +992,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // 1b. Baixa automática de estoque ao concluir o pedido
                 if (novoStatus === "CONCLUIDO" && window.GestorChefEstoque) {
-                    window.GestorChefEstoque.baixarDoPedido(db, id).catch(() => {});
+                    window.GestorChefEstoque.baixarDoPedido(db, id).then(avisarPratosDesativados).catch(() => {});
                 }
 
                 // 2. Verifica se o status aciona a notificação
@@ -1054,5 +1076,17 @@ document.addEventListener('DOMContentLoaded', () => {
             productMessage.textContent = `Erro ao salvar item: ${error.message}`;
             console.error("Erro ao salvar produto:", error);
         }
+    }
+
+    // Avisa o operador quando a baixa de estoque desativou algum prato
+    // automaticamente (insumo esgotou) — pra não passar batido.
+    function avisarPratosDesativados(resultado) {
+        const pratos = resultado && resultado.pratos_desativados;
+        if (!pratos || !pratos.length) return;
+        const d = document.createElement('div');
+        d.textContent = `⚠️ Estoque esgotado: ${pratos.join(', ')} ${pratos.length > 1 ? 'foram desativados' : 'foi desativado'} do cardápio.`;
+        d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#2c3e50;color:#fff;padding:12px 20px;border-radius:10px;z-index:9999;box-shadow:0 4px 14px rgba(0,0,0,.3);font-size:.95rem;';
+        document.body.appendChild(d);
+        setTimeout(() => d.remove(), 4000);
     }
 });
