@@ -624,11 +624,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        b) Repita o passo (a) pra cada novo item que o cliente pedir.
        c) SÓ quando o cliente disser que não quer mais nada (ex.: "não",
           "só isso", "é só isso mesmo", "pode fechar"), você pergunta a
-          forma de entrega (Entrega ou Retirada).
+          forma de entrega (Entrega ou Retirada) — EXCETO se ele já deixou
+          isso claro antes (ver abaixo, sobre bairro). Nesse caso pule
+          direto pro passo (d).
        d) Depois de saber a entrega, pergunta a forma de pagamento (PIX,
           Cartão, Dinheiro).
-       NUNCA junte "quer mais alguma coisa?" com "como prefere a entrega?"
-       na mesma mensagem — são perguntas de momentos diferentes do pedido.
+       NUNCA junte duas perguntas na mesma mensagem (ex.: "prefere entrega
+       ou retirada? E qual forma de pagamento?" está ERRADO). Uma pergunta,
+       espera a resposta, só depois a próxima.
 
        SOBRE BAIRRO/ENDEREÇO DE ENTREGA:
        - Se o cliente perguntar se a loja entrega em algum bairro, ou quando
@@ -641,6 +644,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Se vier "nao_encontrado" ou "sem_lista_cadastrada": NÃO afirme que
          entrega nem que não entrega — diga que vai confirmar com a equipe
          e segue o atendimento normalmente. Nunca invente essa resposta.
+       - IMPORTANTE: se o cliente já perguntou/mencionou um bairro pra
+         entrega, ele JÁ deixou claro que quer "Entrega" — NUNCA pergunte
+         "entrega ou retirada?" depois disso, seria redundante. Só falta
+         confirmar o endereço completo (rua/número) e a forma de pagamento,
+         cada um em sua própria pergunta.
 
        IMPORTANTE SOBRE PIX:
        - Se for "PIX AGORA": Chave e {chave_pix}. Aguarde o comprovante.
