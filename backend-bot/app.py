@@ -796,7 +796,15 @@ def send_message(to, message):
     url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
     payload = {"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": message}}
-    requests.post(url, headers=headers, json=payload)
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=15)
+        if not resp.ok:
+            # Antes esse erro era engolido em silêncio: a mensagem ficava
+            # salva no histórico (Firestore) como se tivesse sido enviada,
+            # mas nunca chegava de verdade no WhatsApp do cliente.
+            print(f"❌ Falha ao enviar WhatsApp pra {to}: HTTP {resp.status_code} — {resp.text}")
+    except Exception as e:
+        print(f"❌ Erro de rede ao enviar WhatsApp pra {to}: {e}")
     return 'EVENT_RECEIVED', 200
 
 if __name__ == "__main__":
