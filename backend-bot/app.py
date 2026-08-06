@@ -110,21 +110,22 @@ def listar_cardapio():
     
 def listar_bebidas():
     if db is None: return "Erro no banco de dados."
-    
+
     try:
-        # Busca apenas itens da categoria bebida que estejam disponíveis
-        docs = db.collection('cardapio')\
-                 .where('disponivel', '==', True)\
-                 .where('categoria', '==', 'bebida').get()
-        
-        if not docs:
+        # Filtra por "categoria contém bebida" em vez de comparar com um valor
+        # fixo — a categoria é texto livre cadastrado no Cardápio (ex.: "Bebidas",
+        # "bebida gelada" etc.), não um valor fixo garantido pelo sistema.
+        docs = db.collection('cardapio').where('disponivel', '==', True).get()
+        itens = [doc.to_dict() for doc in docs if 'bebida' in str(doc.to_dict().get('categoria', '')).lower()]
+
+        if not itens:
             return "No momento, não temos bebidas disponíveis."
 
         texto_bebidas = "🥤 Bebidas disponíveis:\n"
-        for doc in docs:
-            item = doc.to_dict()
-            texto_bebidas += f"- {item.get('nome')}: R$ {item.get('preco')}\n"
-        
+        for item in itens:
+            nome = item.get('nome_exibicao') or item.get('nome')
+            texto_bebidas += f"- {nome}: R$ {item.get('preco')}\n"
+
         return texto_bebidas
 
     except Exception as e:
@@ -407,12 +408,10 @@ def consultar_sabor(sabor_cliente):
         # Se a semelhança for maior que 65%, consideramos que encontrou
         if pontuacao > 65:
             item = itens_banco[melhor_match]
-            # Identifica se é pizza ou esfiha pelo campo 'categoria' do Firebase
-            categoria_amigavel = "Pizza" if "pizza" in item.get('categoria', '') else "Esfiha"
-    
             return {
                 "status": "disponivel",
-                "nome": f"{categoria_amigavel} {item.get('nome')}", # Retorna o nome completo
+                "nome": item.get('nome_exibicao') or item.get('nome'),
+                "categoria": item.get('categoria'),
                 "preco": item.get('preco'),
                 "pontos": item.get('pontos_fidelidade', 0),
                 "ingredientes": item.get('ingredientes')
@@ -494,13 +493,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 }
             }
         },
-        {"type": "function", "function": {"name": "listar_cardapio", "description": "Lista pizzas, esfihas e preços."}},
-        {"type": "function", "function": {"name": "listar_bebidas", "description": "Lista refrigerantes e sucos."}},
+        {"type": "function", "function": {"name": "listar_cardapio", "description": "Lista todos os itens do cardápio, organizados por categoria, com preços."}},
+        {"type": "function", "function": {"name": "listar_bebidas", "description": "Lista só as bebidas disponíveis, com preços."}},
         {
             "type": "function",
             "function": {
                 "name": "consultar_sabor",
-                "description": "Consulta disponibilidade de um sabor.",
+                "description": "Consulta disponibilidade, preço e ingredientes de um item específico do cardápio pelo nome.",
                 "parameters": {
                     "type": "object",
                     "properties": {"sabor_cliente": {"type": "string"}},
