@@ -25,7 +25,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!user) { window.location.href = '/login.html'; return; }
         carregarBot();
         $('salvar-bot').addEventListener('click', salvarBot);
+        $('salvar-bairros').addEventListener('click', salvarBairros);
+        $('bot-bairros-entrega').addEventListener('input', atualizarContagemBairros);
     });
+
+    function bairrosDoTexto() {
+        return $('bot-bairros-entrega').value
+            .split('\n')
+            .map(b => b.trim())
+            .filter(Boolean);
+    }
+
+    function atualizarContagemBairros() {
+        const n = bairrosDoTexto().length;
+        $('bairros-count').textContent = n === 1 ? '1 bairro cadastrado' : `${n} bairros cadastrados`;
+    }
 
     async function carregarBot() {
         try {
@@ -41,8 +55,23 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-mensagem-retirada').value = d.mensagem_retirada || '';
             $('bot-mensagem-erro').value = d.mensagem_erro || '';
             $('bot-instrucoes-extras').value = d.instrucoes_extras || '';
+            $('bot-bairros-entrega').value = Array.isArray(d.bairros_entrega) ? d.bairros_entrega.join('\n') : '';
+            atualizarContagemBairros();
         } catch (err) {
             console.warn('bot:', err.message);
+        }
+    }
+
+    async function salvarBairros() {
+        try {
+            await DOC_BOT.set({
+                bairros_entrega: bairrosDoTexto(),
+                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            atualizarContagemBairros();
+            flash('Bairros de entrega salvos.');
+        } catch (err) {
+            alert('Erro ao salvar bairros: ' + err.message);
         }
     }
 

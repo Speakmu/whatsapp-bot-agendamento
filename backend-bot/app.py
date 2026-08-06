@@ -39,7 +39,8 @@ BOT_CONFIG_DEFAULTS = {
     "mensagem_inativo": "No momento o atendimento automatico esta pausado. Em breve nossa equipe responde por aqui.",
     "mensagem_pronto": "Oi {nome_cliente}! Seu pedido esta pronto!",
     "mensagem_retirada": "Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!",
-    "instrucoes_extras": ""
+    "instrucoes_extras": "",
+    "bairros_entrega": []
 }
 
 def obter_config_bot():
@@ -426,7 +427,30 @@ def consultar_sabor(sabor_cliente):
         
     print(f"DEBUG: Nenhuma pizza parecida com '{sabor_cliente}' foi encontrada.")
     return {"status": "indisponivel"}
-    
+
+def verificar_bairro_entrega(bairro_cliente):
+    """Confere se um bairro citado pelo cliente está na lista cadastrada em
+    Configurações do Bot, usando busca aproximada (tolera erro de digitação/
+    abreviação) — mesma lógica do consultar_sabor, mas pra bairro."""
+    bot_cfg = obter_config_bot()
+    bairros = [str(b).strip() for b in (bot_cfg.get("bairros_entrega") or []) if str(b).strip()]
+
+    if not bairros:
+        return {"status": "sem_lista_cadastrada"}
+
+    termo = str(bairro_cliente or "").strip()
+    if not termo:
+        return {"status": "nao_encontrado"}
+
+    bairros_lower = [b.lower() for b in bairros]
+    melhor_match, pontuacao = process.extractOne(termo.lower(), bairros_lower)
+    print(f"DEBUG: bairro '{termo}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
+
+    if pontuacao > 75:
+        return {"status": "atende", "bairro": bairros[bairros_lower.index(melhor_match)]}
+
+    return {"status": "nao_encontrado"}
+
 def is_modo_manual(wa_id):
     """Conversa assumida manualmente por um atendente no painel: bot não responde."""
     try:
@@ -521,6 +545,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     "required": ["sabor_cliente"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "verificar_bairro_entrega",
+                "description": "Verifica se a loja entrega em um bairro/região que o cliente mencionou.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"bairro_cliente": {"type": "string"}},
+                    "required": ["bairro_cliente"]
+                }
+            }
         }
     ]
 
@@ -567,7 +603,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Item escolhido (pergunte se quer mais algo).
        - Forma de entrega (Entrega ou Retirada).
        - Forma de Pagamento (PIX, Cartão, Dinheiro).
-       
+
+       SOBRE BAIRRO/ENDEREÇO DE ENTREGA:
+       - Se o cliente perguntar se a loja entrega em algum bairro, ou quando
+         for confirmar o endereço de um pedido por entrega, use a função
+         'verificar_bairro_entrega' com o nome do bairro que ele mencionou.
+       - Se vier "atende": confirme a entrega normalmente, usando o nome do
+         bairro que a função retornou.
+       - Se vier "nao_encontrado" ou "sem_lista_cadastrada": NÃO afirme que
+         entrega nem que não entrega — diga que vai confirmar com a equipe
+         e segue o atendimento normalmente. Nunca invente essa resposta.
+
        IMPORTANTE SOBRE PIX:
        - Se for "PIX AGORA": Chave e {chave_pix}. Aguarde o comprovante.
        - Se for "PIX NA ENTREGA": Não precisa de comprovante agora.
@@ -616,6 +662,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     content = listar_cardapio()
                 elif function_name == "listar_bebidas":
                     content = listar_bebidas()
+                elif function_name == "verificar_bairro_entrega":
+                    content = json.dumps(verificar_bairro_entrega(args.get("bairro_cliente")))
                 elif function_name == "registrar_pedido":
                     content = registrar_pedido(
                         wa_id=wa_id,

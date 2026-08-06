@@ -70,6 +70,23 @@
             <div class="campo"><label>Mensagem de erro</label><input id="bot-mensagem-erro" placeholder="Desculpe, tive um probleminha aqui. Pode repetir?"></div>
             <div class="acoes"><button class="btn btn-salvar" id="salvar-bot">Salvar configura&ccedil;&otilde;es do bot</button></div>
         </div>
+
+        <div class="box">
+            <h2>Bairros de entrega</h2>
+            <div class="sub">
+                Um bairro por linha. Quando o cliente perguntar se a loja entrega em algum bairro
+                (ou ao confirmar o endere&ccedil;o de um pedido), o bot compara com essa lista &mdash;
+                tolera erro de digita&ccedil;&atilde;o e abrevia&ccedil;&atilde;o. Se o bairro n&atilde;o
+                estiver aqui, o bot n&atilde;o afirma nem nega a entrega, s&oacute; avisa que vai confirmar
+                com a equipe.
+            </div>
+            <div class="campo">
+                <label>Bairros atendidos</label>
+                <textarea id="bot-bairros-entrega" style="min-height:180px" placeholder="Centro&#10;Vila Formosa&#10;Jardim Paraiso&#10;..."></textarea>
+                <small id="bairros-count" class="sub" style="margin:6px 0 0"></small>
+            </div>
+            <div class="acoes"><button class="btn btn-salvar" id="salvar-bairros">Salvar bairros</button></div>
+        </div>
     </div>
 
     <script src="/shell.js" defer></script>
