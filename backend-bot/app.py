@@ -88,27 +88,24 @@ def listar_cardapio():
 
             nome = item.get('nome_exibicao') or item.get('nome')
             preco = item.get('preco')
-            pontos = item.get('pontos_fidelidade', 0)
-            ingredientes = item.get('ingredientes', '')
 
             if cat not in categorias:
                 categorias[cat] = []
-            
-            info_item = f"- {nome}: R$ {preco:.2f}"
-            
-            if ingredientes:
-                info_item += f" | Ingredientes: {ingredientes}"
-                
-            categorias[cat].append(info_item)
+
+            # Sem ingredientes aqui de propósito: essa é a lista geral do
+            # cardápio. Detalhe de ingrediente só quando o cliente pergunta
+            # de um item específico (aí a IA usa 'consultar_sabor').
+            categorias[cat].append(f"{nome}: R$ {preco:.2f}")
 
         if not categorias:
             return "No momento, não temos itens disponíveis no cardápio."
 
-        cardapio_texto = "🍕 *NOSSO CARDÁPIO* 🍕\n\n"
-        
+        # Dados crus, sem formatação de "mensagem pronta" (sem cabeçalho/negrito
+        # de catálogo) — é pra IA reescrever isso com as próprias palavras,
+        # não colar este texto quase igual na resposta pro cliente.
+        cardapio_texto = ""
         for cat, itens in categorias.items():
-            cardapio_texto += f"*{cat}:*\n"
-            cardapio_texto += "\n".join(itens) + "\n\n"
+            cardapio_texto += f"{cat}: " + "; ".join(itens) + "\n"
 
         return cardapio_texto
 
@@ -553,11 +550,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Use 'listar_cardapio' para o menu geral ou promoções.
        - Use 'listar_bebidas' só quando o cliente pedir bebida especificamente
          (bebida é acompanhamento, não faz parte do cardápio principal).
-       - Sempre mostre o preço e os ingredientes.
-       - IMPORTANTE: liste TODOS os itens que a função retornou, sem resumir,
-         sem cortar e sem dizer "e muito mais" — o cliente precisa ver a
-         lista completa que o sistema te deu.
-       - Para Kits Promocionais, use o formato: "*[Nome]* - R$ [Preço]\n Itens: [Ingredientes]"
+       - As funções retornam dados crus (nome e preço), NÃO uma mensagem
+         pronta. NUNCA copie esse texto quase igual pro cliente — reescreva
+         com suas próprias palavras, como um atendente digitando no WhatsApp
+         de verdade: frases naturais, sem cabeçalho gigante tipo "NOSSO
+         CARDÁPIO", sem repetir formatação de catálogo.
+       - Sempre mostre o preço. NÃO mencione ingredientes na lista geral do
+         cardápio — só fale de ingredientes quando o cliente perguntar sobre
+         um item específico (aí use 'consultar_sabor', que já traz isso).
+       - IMPORTANTE: mesmo reescrevendo com naturalidade, inclua TODOS os
+         itens que a função retornou — não resuma, não corte, não diga
+         "e muito mais". Só pode aparecer nome e preço de itens reais.
 
     3. FECHAMENTO DO PEDIDO (Passo a passo):
        Não tente confirmar tudo de uma vez. Vá confirmando:
