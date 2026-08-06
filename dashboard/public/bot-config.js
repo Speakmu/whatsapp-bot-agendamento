@@ -30,8 +30,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function bairrosDoTexto() {
+        // Aceita um por linha OU separados por vírgula (ou os dois misturados).
         return $('bot-bairros-entrega').value
-            .split('\n')
+            .split(/[\n,]+/)
             .map(b => b.trim())
             .filter(Boolean);
     }
