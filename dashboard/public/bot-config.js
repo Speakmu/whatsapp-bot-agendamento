@@ -57,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-mensagem-erro').value = d.mensagem_erro || '';
             $('bot-instrucoes-extras').value = d.instrucoes_extras || '';
             $('bot-bairros-entrega').value = Array.isArray(d.bairros_entrega) ? d.bairros_entrega.join('\n') : '';
+            $('bot-taxa-entrega').value = d.taxa_entrega != null ? d.taxa_entrega : 0;
             atualizarContagemBairros();
         } catch (err) {
             console.warn('bot:', err.message);
@@ -67,10 +68,11 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             await DOC_BOT.set({
                 bairros_entrega: bairrosDoTexto(),
+                taxa_entrega: parseFloat($('bot-taxa-entrega').value) || 0,
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
             atualizarContagemBairros();
-            flash('Bairros de entrega salvos.');
+            flash('Bairros e taxa de entrega salvos.');
         } catch (err) {
             alert('Erro ao salvar bairros: ' + err.message);
         }

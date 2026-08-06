@@ -40,7 +40,8 @@ BOT_CONFIG_DEFAULTS = {
     "mensagem_pronto": "Oi {nome_cliente}! Seu pedido esta pronto!",
     "mensagem_retirada": "Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!",
     "instrucoes_extras": "",
-    "bairros_entrega": []
+    "bairros_entrega": [],
+    "taxa_entrega": 0
 }
 
 def obter_config_bot():
@@ -447,7 +448,11 @@ def verificar_bairro_entrega(bairro_cliente):
     print(f"DEBUG: bairro '{termo}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
 
     if pontuacao > 75:
-        return {"status": "atende", "bairro": bairros[bairros_lower.index(melhor_match)]}
+        return {
+            "status": "atende",
+            "bairro": bairros[bairros_lower.index(melhor_match)],
+            "taxa_entrega": bot_cfg.get("taxa_entrega") or 0
+        }
 
     return {"status": "nao_encontrado"}
 
@@ -630,7 +635,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          for confirmar o endereço de um pedido por entrega, use a função
          'verificar_bairro_entrega' com o nome do bairro que ele mencionou.
        - Se vier "atende": confirme a entrega normalmente, usando o nome do
-         bairro que a função retornou.
+         bairro que a função retornou, e informe a taxa de entrega (campo
+         "taxa_entrega") — ex.: "Entregamos aí sim! A taxa de entrega é
+         R$ {{valor}}.". Se "taxa_entrega" vier 0, não cobra taxa nenhuma.
        - Se vier "nao_encontrado" ou "sem_lista_cadastrada": NÃO afirme que
          entrega nem que não entrega — diga que vai confirmar com a equipe
          e segue o atendimento normalmente. Nunca invente essa resposta.

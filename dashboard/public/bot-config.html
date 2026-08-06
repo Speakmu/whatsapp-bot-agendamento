@@ -81,12 +81,17 @@
                 aqui, o bot n&atilde;o afirma nem nega a entrega, s&oacute; avisa que vai confirmar
                 com a equipe.
             </div>
+            <div class="campo" style="max-width:220px">
+                <label>Taxa de entrega (R$)</label>
+                <input id="bot-taxa-entrega" type="number" min="0" step="0.01" placeholder="0.00">
+                <small>Valor &uacute;nico, aplicado pra qualquer bairro atendido. Deixe 0 se n&atilde;o cobra taxa.</small>
+            </div>
             <div class="campo">
                 <label>Bairros atendidos</label>
                 <textarea id="bot-bairros-entrega" style="min-height:180px" placeholder="Centro&#10;Vila Formosa&#10;Jardim Paraiso&#10;..."></textarea>
                 <small id="bairros-count" class="sub" style="margin:6px 0 0"></small>
             </div>
-            <div class="acoes"><button class="btn btn-salvar" id="salvar-bairros">Salvar bairros</button></div>
+            <div class="acoes"><button class="btn btn-salvar" id="salvar-bairros">Salvar bairros e taxa</button></div>
         </div>
     </div>
 
