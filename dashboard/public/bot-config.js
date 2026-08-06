@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
         nome_atendente: 'Sofia',
         nome_empresa: 'Lileamar Salgados',
         chave_pix: 'abc1231234567',
+        modelo: 'gpt-4o',
         mensagem_inicial: 'Ola! Como posso ajudar?',
         mensagem_inativo: 'No momento o atendimento automatico esta pausado. Em breve nossa equipe responde por aqui.',
         mensagem_pronto: 'Oi {nome_cliente}! Seu pedido esta pronto!',
@@ -50,6 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-nome-atendente').value = d.nome_atendente || '';
             $('bot-nome-empresa').value = d.nome_empresa || '';
             $('bot-chave-pix').value = d.chave_pix || '';
+            $('bot-modelo').value = d.modelo || BOT_DEFAULTS.modelo;
             $('bot-mensagem-inicial').value = d.mensagem_inicial || '';
             $('bot-mensagem-inativo').value = d.mensagem_inativo || '';
             $('bot-mensagem-pronto').value = d.mensagem_pronto || '';
@@ -84,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
             nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,
             nome_empresa: $('bot-nome-empresa').value.trim() || BOT_DEFAULTS.nome_empresa,
             chave_pix: $('bot-chave-pix').value.trim(),
+            modelo: $('bot-modelo').value || BOT_DEFAULTS.modelo,
             mensagem_inicial: $('bot-mensagem-inicial').value.trim() || BOT_DEFAULTS.mensagem_inicial,
             mensagem_inativo: $('bot-mensagem-inativo').value.trim() || BOT_DEFAULTS.mensagem_inativo,
             mensagem_pronto: $('bot-mensagem-pronto').value.trim() || BOT_DEFAULTS.mensagem_pronto,

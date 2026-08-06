@@ -31,7 +31,7 @@ BOT_CONFIG_DEFAULTS = {
     "nome_atendente": "Sofia",
     "nome_empresa": "Lileamar Salgados",
     "chave_pix": "abc1231234567",
-    "modelo": "gpt-4o-mini",
+    "modelo": "gpt-4o",
     "max_historico_contexto": 12,
     "max_historico_salvar": 15,
     "mensagem_inicial": "Ola! Como posso ajudar?",

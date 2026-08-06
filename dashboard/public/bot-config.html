@@ -55,6 +55,13 @@
                 <div class="campo"><label>Nome da IA</label><input id="bot-nome-atendente" placeholder="Sofia"></div>
                 <div class="campo"><label>Nome da empresa no bot</label><input id="bot-nome-empresa" placeholder="Lileamar Salgados"></div>
                 <div class="campo"><label>Chave PIX informada pelo bot</label><input id="bot-chave-pix" placeholder="Chave PIX"></div>
+                <div class="campo">
+                    <label>Modelo de IA</label>
+                    <select id="bot-modelo">
+                        <option value="gpt-4o">gpt-4o (mais obediente às regras, mais caro)</option>
+                        <option value="gpt-4o-mini">gpt-4o-mini (mais rápido/barato, segue regras com menos rigor)</option>
+                    </select>
+                </div>
             </div>
             <div class="campo"><label>Mensagem inicial</label><input id="bot-mensagem-inicial" placeholder="Ol&aacute;! Como posso ajudar?"></div>
             <div class="campo"><label>Mensagem quando o bot estiver pausado</label><input id="bot-mensagem-inativo" placeholder="Atendimento autom&aacute;tico pausado."></div>
