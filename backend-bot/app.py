@@ -80,11 +80,16 @@ def listar_cardapio():
 
         for doc in docs:
             item = doc.to_dict()
+            cat = item.get('categoria', 'Outros').title()
+            # Bebida é acompanhamento, não faz parte do cardápio principal —
+            # fica só na função listar_bebidas, quando o cliente pedir.
+            if 'bebida' in cat.lower():
+                continue
+
             nome = item.get('nome_exibicao') or item.get('nome')
             preco = item.get('preco')
             pontos = item.get('pontos_fidelidade', 0)
             ingredientes = item.get('ingredientes', '')
-            cat = item.get('categoria', 'Outros').title()
 
             if cat not in categorias:
                 categorias[cat] = []
@@ -95,6 +100,9 @@ def listar_cardapio():
                 info_item += f" | Ingredientes: {ingredientes}"
                 
             categorias[cat].append(info_item)
+
+        if not categorias:
+            return "No momento, não temos itens disponíveis no cardápio."
 
         cardapio_texto = "🍕 *NOSSO CARDÁPIO* 🍕\n\n"
         
@@ -503,7 +511,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 }
             }
         },
-        {"type": "function", "function": {"name": "listar_cardapio", "description": "Lista todos os itens do cardápio, organizados por categoria, com preços."}},
+        {"type": "function", "function": {"name": "listar_cardapio", "description": "Lista todos os itens de comida do cardápio (sem bebidas), organizados por categoria, com preços."}},
         {"type": "function", "function": {"name": "listar_bebidas", "description": "Lista só as bebidas disponíveis, com preços."}},
         {
             "type": "function",
@@ -543,7 +551,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     2. APRESENTAÇÃO DE PRODUTOS:
        - Use 'consultar_sabor' para itens específicos.
        - Use 'listar_cardapio' para o menu geral ou promoções.
+       - Use 'listar_bebidas' só quando o cliente pedir bebida especificamente
+         (bebida é acompanhamento, não faz parte do cardápio principal).
        - Sempre mostre o preço e os ingredientes.
+       - IMPORTANTE: liste TODOS os itens que a função retornou, sem resumir,
+         sem cortar e sem dizer "e muito mais" — o cliente precisa ver a
+         lista completa que o sistema te deu.
        - Para Kits Promocionais, use o formato: "*[Nome]* - R$ [Preço]\n Itens: [Ingredientes]"
 
     3. FECHAMENTO DO PEDIDO (Passo a passo):
