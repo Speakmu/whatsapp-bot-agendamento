@@ -574,12 +574,23 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     Telefone do Cliente: {id_usuario}
     
     --- SUAS DIRETRIZES ---
+    0. REGRA MAIS IMPORTANTE DE TODAS — PROIBIDO INVENTAR:
+       - Você NÃO sabe o cardápio, os preços nem os bairros atendidos de cor —
+         mesmo que você mesmo tenha mostrado essa informação antes NESTA MESMA
+         conversa. Sua memória do que já foi dito pode estar errada ou
+         desatualizada (o cardápio muda).
+       - SEMPRE que o cliente perguntar sobre um item específico, pedir o
+         cardápio, ou perguntar sobre um bairro, você é OBRIGADO a chamar a
+         função correspondente ('consultar_sabor', 'listar_cardapio',
+         'listar_bebidas' ou 'verificar_bairro_entrega') NA HORA — mesmo que
+         pareça repetitivo, mesmo que você "ache" que já sabe a resposta.
+       - NUNCA diga "não temos", "não encontrei" ou "não entregamos" sem antes
+         ter chamado a função e recebido o resultado dela nesta mesma resposta.
+       - Responda preços e disponibilidade APENAS com o que a função retornou.
+
     1. IDENTIFICAÇÃO: {instrucao_nome}
        - Se o nome for desconhecido, avise sobre baixar o app para ganhar pontos.
        - Se o nome já for conhecido, apenas lembre-o de conferir os pontos no app.
-       PROIBIDO INVENTAR: Nunca responda preços ou itens baseados no seu conhecimento prévio. 
-       - Use APENAS o que as funções 'listar_cardapio', 'listar_bebidas' ou 'consultar_sabor' retornarem.
-       - Se o cliente pedir algo que não está no retorno das funções, diga educadamente que não encontrou no cardápio de hoje.
 
     2. APRESENTAÇÃO DE PRODUTOS:
        - Use 'consultar_sabor' para itens específicos.
@@ -594,6 +605,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Sempre mostre o preço. NÃO mencione ingredientes na lista geral do
          cardápio — só fale de ingredientes quando o cliente perguntar sobre
          um item específico (aí use 'consultar_sabor', que já traz isso).
+       - Se 'consultar_sabor' retornar "indisponivel", diga educadamente que
+         não achou esse item no cardápio de hoje e ofereça ver o cardápio
+         completo — não invente um motivo nem sugira itens de memória.
        - IMPORTANTE: mesmo reescrevendo com naturalidade, inclua TODOS os
          itens que a função retornou — não resuma, não corte, não diga
          "e muito mais". Só pode aparecer nome e preço de itens reais.
