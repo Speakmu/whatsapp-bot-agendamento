@@ -106,10 +106,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    const STATUS_LABEL = { PAGO: 'PAGO', PENDENTE: 'PENDENTE', ATRASADO: 'ATRASADO', VENCE_HOJE: 'VENCE HOJE' };
+
     function statusExibicao(m) {
         if (m.status === 'PAGO') return 'PAGO';
         const venc = m.vencimento && m.vencimento.toDate ? m.vencimento.toDate() : null;
-        if (venc && venc < new Date()) return 'ATRASADO';
+        if (!venc) return 'PENDENTE';
+        // Compara só a data (dia/mês/ano) — comparar com a hora exata fazia
+        // qualquer horário do próprio dia do vencimento já contar como atrasado.
+        const hoje = new Date();
+        const vencDia = new Date(venc.getFullYear(), venc.getMonth(), venc.getDate());
+        const hojeDia = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+        if (vencDia.getTime() === hojeDia.getTime()) return 'VENCE_HOJE';
+        if (vencDia < hojeDia) return 'ATRASADO';
         return 'PENDENTE';
     }
 
@@ -129,7 +138,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         tbody.innerHTML = mensalidades.map(m => {
             const st = statusExibicao(m);
-            const badge = `<span class="badge ${st.toLowerCase()}">${st}</span>`;
+            const cssClass = st.toLowerCase().replace('_', '-');
+            const badge = `<span class="badge ${cssClass}">${STATUS_LABEL[st] || st}</span>`;
             const acoes = [];
             if (souFornecedor) {
                 if (st !== 'PAGO') acoes.push(`<button class="btn btn-salvar" data-marcar-pago="${m.id}" style="padding:6px 10px;font-size:.8rem">Marcar como paga</button>`);
@@ -141,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${money(m.valor)}</td>
                 <td data-venc-cell>${formatarData(m.vencimento)}</td>
                 <td>${badge}</td>
-                <td style="display:flex;gap:6px;flex-wrap:wrap">${acoes.join('')}</td>
+                <td><div style="display:flex;gap:6px;flex-wrap:wrap">${acoes.join('')}</div></td>
             </tr>`;
         }).join('');
         tbody.querySelectorAll('[data-marcar-pago]').forEach(btn => {
@@ -329,9 +339,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         wrap.style.display = '';
         const st = statusExibicao(cobranca);
+        const sufixo = st === 'ATRASADO' ? ' (atrasada)' : st === 'VENCE_HOJE' ? ' (vence hoje)' : '';
         $('cobranca-atual-desc').textContent =
-            `Referência ${cobranca.referencia} — ${money(cobranca.valor)} — vencimento ${formatarData(cobranca.vencimento)}` +
-            (st === 'ATRASADO' ? ' (atrasada)' : '');
+            `Referência ${cobranca.referencia} — ${money(cobranca.valor)} — vencimento ${formatarData(cobranca.vencimento)}` + sufixo;
 
         const payload = buildPixPayload(cobrancaCfg.pix_chave, cobranca.valor, cobrancaCfg.pix_recebedor);
         $('pix-copia-cola').value = payload;
