@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function carregarMensalidades() {
         const tbody = $('mensalidades-tbody');
         try {
-            const snap = await COL_MENSALIDADES.orderBy('vencimento', 'desc').get();
+            const snap = await COL_MENSALIDADES.orderBy('vencimento', 'asc').get();
             mensalidades = [];
             snap.forEach(doc => mensalidades.push({ id: doc.id, ...doc.data() }));
             renderMensalidades();
