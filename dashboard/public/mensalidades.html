@@ -28,7 +28,7 @@
         .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
         .campo { margin-bottom:14px; }
         .campo label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:5px; font-weight:600; }
-        .campo input, .campo textarea { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; font-family:inherit; background:#fff; }
+        .campo input, .campo textarea, .campo select { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; font-family:inherit; background:#fff; }
         .btn { padding:10px 16px; border:none; border-radius:9px; cursor:pointer; font-weight:700; color:#fff; font-size:.9rem; }
         .btn-salvar { background:var(--ok); }
         .btn-pix { background:var(--accent); }
@@ -91,15 +91,20 @@
             <h2>Área do fornecedor</h2>
             <div class="sub">Só visível pra quem lança as cobranças.</div>
 
-            <div class="campo">
-                <label>Referência (ex: 08/2026)</label>
-                <input id="nova-referencia" placeholder="MM/AAAA">
-            </div>
             <div class="grid2">
+                <div class="campo"><label>Vencimento inicial</label><input id="nova-vencimento" type="date"></div>
                 <div class="campo"><label>Valor (R$)</label><input id="nova-valor" type="number" step="0.01" min="0"></div>
-                <div class="campo"><label>Vencimento</label><input id="nova-vencimento" type="date"></div>
             </div>
-            <div class="acoes"><button class="btn btn-salvar" id="btn-lancar">Lançar mensalidade</button></div>
+            <div class="campo" style="max-width:260px">
+                <label>Quantidade de mensalidades</label>
+                <select id="nova-qtd">
+                    <option value="1">1 (só essa)</option>
+                    <option value="12">12 (um ano)</option>
+                    <option value="24">24 (dois anos)</option>
+                </select>
+                <small>A referência (MM/AAAA) de cada uma é calculada a partir do vencimento inicial, um mês depois da outra.</small>
+            </div>
+            <div class="acoes"><button class="btn btn-salvar" id="btn-lancar">Lançar mensalidade(s)</button></div>
 
             <div class="admin-only">
                 <h2 style="font-size:1rem">Dados do PIX</h2>

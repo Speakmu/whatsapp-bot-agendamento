@@ -138,26 +138,41 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function referenciaDeData(d) {
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        return `${mm}/${d.getFullYear()}`;
+    }
+
+    function somarMeses(data, n) {
+        const d = new Date(data);
+        d.setMonth(d.getMonth() + n);
+        return d;
+    }
+
     async function lancarMensalidade() {
         if (!souFornecedor) return;
-        const referencia = $('nova-referencia').value.trim();
         const valor = parseFloat($('nova-valor').value);
         const vencimentoStr = $('nova-vencimento').value;
-        if (!referencia) return alert('Informe a referência (ex: 08/2026).');
+        const qtd = parseInt($('nova-qtd').value, 10) || 1;
         if (!valor || valor <= 0) return alert('Informe um valor válido.');
-        if (!vencimentoStr) return alert('Informe o vencimento.');
+        if (!vencimentoStr) return alert('Informe o vencimento inicial.');
 
         try {
-            await COL_MENSALIDADES.add({
-                referencia,
-                valor,
-                vencimento: firebase.firestore.Timestamp.fromDate(new Date(vencimentoStr + 'T00:00:00')),
-                status: 'PENDENTE',
-                pago_em: null,
-                criado_em: firebase.firestore.FieldValue.serverTimestamp()
-            });
-            flash('Mensalidade lançada.');
-            $('nova-referencia').value = '';
+            const dataInicial = new Date(vencimentoStr + 'T00:00:00');
+            const batch = db.batch();
+            for (let i = 0; i < qtd; i++) {
+                const dataCharge = somarMeses(dataInicial, i);
+                batch.set(COL_MENSALIDADES.doc(), {
+                    referencia: referenciaDeData(dataCharge),
+                    valor,
+                    vencimento: firebase.firestore.Timestamp.fromDate(dataCharge),
+                    status: 'PENDENTE',
+                    pago_em: null,
+                    criado_em: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+            await batch.commit();
+            flash(qtd === 1 ? 'Mensalidade lançada.' : `${qtd} mensalidades lançadas.`);
             $('nova-vencimento').value = '';
             await carregarMensalidades();
         } catch (err) {
