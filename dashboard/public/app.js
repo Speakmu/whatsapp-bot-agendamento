@@ -125,6 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const idsAtuais = new Set(menuItems.map(i => i.id));
             [...selectedMenuIds].forEach(id => { if (!idsAtuais.has(id)) selectedMenuIds.delete(id); });
             renderMenu(menuItems);
+            renderCategoryToolbar(menuItems);
         });
 
         // Filtro de pesquisa
@@ -184,6 +185,46 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Botões rápidos por categoria — só afetam disponivel_online (app/bot),
+    // igual ao botão individual "Esgotar no App/Bot". Balcão/mesas/KDS não
+    // são tocados, então a loja continua vendendo por lá normalmente.
+    function renderCategoryToolbar(itens) {
+        const wrap = document.getElementById('menu-category-buttons');
+        if (!wrap) return;
+
+        const categorias = [...new Set(itens.map(i => i.categoria).filter(Boolean))].sort();
+        wrap.innerHTML = categorias.map(cat => {
+            const itensCategoria = itens.filter(i => i.categoria === cat);
+            const algumDisponivelOnline = itensCategoria.some(i => i.disponivel_online !== false);
+            const label = cat.replace(/_/g, ' ');
+            return `<button type="button" class="btn-status"
+                onclick="window.toggleCategoriaOnline('${cat.replace(/'/g, "\\'")}', ${algumDisponivelOnline})"
+                style="background: ${algumDisponivelOnline ? '#e67e22' : '#2ecc71'}; font-size:.8rem; padding:6px 10px;">
+                ${algumDisponivelOnline ? 'Esgotar' : 'Repor'} ${label}
+            </button>`;
+        }).join('');
+    }
+
+    window.toggleCategoriaOnline = async (categoria, statusAtual) => {
+        const disponivelOnline = !statusAtual;
+        const itensCategoria = menuItems.filter(i => i.categoria === categoria);
+        if (!itensCategoria.length) return;
+        if (!confirm(`${disponivelOnline ? 'Repor' : 'Esgotar'} todos os itens de "${categoria}" no app/WhatsApp?`)) return;
+        try {
+            const batch = db.batch();
+            itensCategoria.forEach(item => {
+                batch.update(db.collection(COLECAO_CARDAPIO).doc(item.id), {
+                    disponivel_online: disponivelOnline,
+                    ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            });
+            await batch.commit();
+        } catch (e) {
+            console.error("Erro ao atualizar categoria:", e);
+            alert("Erro ao atualizar a categoria no app/WhatsApp.");
+        }
+    };
+
     function atualizarToolbarSelecao() {
         const selectAll = document.getElementById('menu-select-all');
         const countLabel = document.getElementById('menu-selected-count');
@@ -216,6 +257,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         itens.forEach(item => {
             const card = document.createElement('div');
+            const onlineDisponivel = item.disponivel_online !== false;
             card.className = `menu-item-card ${item.disponivel ? 'is-available' : 'is-paused'}`;
 
             // Define a imagem ou um placeholder cinza caso não tenha foto
@@ -249,12 +291,20 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="menu-item-actions">
                 <button onclick="prepararEdicao('${item.id}')" class="btn-status btn-edit">Editar</button>
                 
-                <button onclick="window.toggleDisponibilidade('${item.id}', ${item.disponivel})" 
-                    class="btn-status" 
-                    style="background: ${item.disponivel ? '#95a5a6' : '#2ecc71'};">
-                    ${item.disponivel ? 'Pausar' : 'Ativar'}
+                <button onclick="window.toggleDisponibilidade('${item.id}', ${item.disponivel})"
+                    class="btn-status"
+                    style="background: ${item.disponivel ? '#95a5a6' : '#2ecc71'};"
+                    title="Afeta balcão, mesas, KDS, app e WhatsApp">
+                    ${item.disponivel ? 'Pausar (geral)' : 'Ativar (geral)'}
                 </button>
-                
+
+                <button onclick="window.toggleDisponibilidadeOnline('${item.id}', ${onlineDisponivel})"
+                    class="btn-status"
+                    style="background: ${onlineDisponivel ? '#e67e22' : '#2ecc71'};"
+                    title="Só afeta app e WhatsApp — continua vendendo no balcão">
+                    ${onlineDisponivel ? 'Esgotar no App/Bot' : 'Repor no App/Bot'}
+                </button>
+
                 <button onclick="deletarItem('${item.id}')" class="btn-status btn-delete">Excluir</button>
             </div>
         </div>
@@ -460,6 +510,21 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.error("Erro ao mudar status:", e);
             alert("Erro ao atualizar disponibilidade.");
+        }
+    };
+
+    window.toggleDisponibilidadeOnline = async (id, statusAtual) => {
+        try {
+            // statusAtual vem do HTML como true/false. Esse campo não afeta
+            // balcão/mesas/KDS — só o que o app e o bot do WhatsApp mostram
+            // e aceitam pedir.
+            await db.collection("cardapio").doc(id).update({
+                disponivel_online: !statusAtual,
+                ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
+            });
+        } catch (e) {
+            console.error("Erro ao mudar status online:", e);
+            alert("Erro ao atualizar disponibilidade no app/WhatsApp.");
         }
     };
 

@@ -22,13 +22,38 @@ document.addEventListener('DOMContentLoaded', () => {
         instrucoes_extras: ''
     };
 
+    const DIAS_SEMANA = [
+        { chave: 'seg', nome: 'Segunda' },
+        { chave: 'ter', nome: 'Terça' },
+        { chave: 'qua', nome: 'Quarta' },
+        { chave: 'qui', nome: 'Quinta' },
+        { chave: 'sex', nome: 'Sexta' },
+        { chave: 'sab', nome: 'Sábado' },
+        { chave: 'dom', nome: 'Domingo' }
+    ];
+    const HORARIO_MENSAGEM_PADRAO = 'No momento estamos fechados. Nosso horário de funcionamento: {horario}';
+
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
+        montarTabelaHorario();
         carregarBot();
         $('salvar-bot').addEventListener('click', salvarBot);
         $('salvar-bairros').addEventListener('click', salvarBairros);
+        $('salvar-horario').addEventListener('click', salvarHorario);
         $('bot-bairros-entrega').addEventListener('input', atualizarContagemBairros);
     });
+
+    function montarTabelaHorario() {
+        const body = $('horario-dias-body');
+        body.innerHTML = DIAS_SEMANA.map(d => `
+            <tr>
+                <td style="padding:6px 4px;">${d.nome}</td>
+                <td style="padding:6px 4px;"><input type="checkbox" id="horario-${d.chave}-aberto" style="width:18px;height:18px;"></td>
+                <td style="padding:6px 4px;"><input type="time" id="horario-${d.chave}-abre" style="padding:6px;"></td>
+                <td style="padding:6px 4px;"><input type="time" id="horario-${d.chave}-fecha" style="padding:6px;"></td>
+            </tr>
+        `).join('');
+    }
 
     function bairrosDoTexto() {
         // Aceita um por linha OU separados por vírgula (ou os dois misturados).
@@ -61,8 +86,43 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-bairros-entrega').value = Array.isArray(d.bairros_entrega) ? d.bairros_entrega.join('\n') : '';
             $('bot-taxa-entrega').value = d.taxa_entrega != null ? d.taxa_entrega : 0;
             atualizarContagemBairros();
+
+            const horario = d.horario_funcionamento || {};
+            const dias = horario.dias || {};
+            $('horario-ativo').checked = horario.ativo === true;
+            $('horario-mensagem-fechado').value = horario.mensagem_fechado || '';
+            DIAS_SEMANA.forEach(dd => {
+                const cfgDia = dias[dd.chave] || {};
+                $(`horario-${dd.chave}-aberto`).checked = cfgDia.aberto === true;
+                $(`horario-${dd.chave}-abre`).value = cfgDia.abre || '';
+                $(`horario-${dd.chave}-fecha`).value = cfgDia.fecha || '';
+            });
         } catch (err) {
             console.warn('bot:', err.message);
+        }
+    }
+
+    async function salvarHorario() {
+        const dias = {};
+        DIAS_SEMANA.forEach(d => {
+            dias[d.chave] = {
+                aberto: $(`horario-${d.chave}-aberto`).checked,
+                abre: $(`horario-${d.chave}-abre`).value || '',
+                fecha: $(`horario-${d.chave}-fecha`).value || ''
+            };
+        });
+        try {
+            await DOC_BOT.set({
+                horario_funcionamento: {
+                    ativo: $('horario-ativo').checked,
+                    mensagem_fechado: $('horario-mensagem-fechado').value.trim() || HORARIO_MENSAGEM_PADRAO,
+                    dias
+                },
+                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            flash('Horário de funcionamento salvo.');
+        } catch (err) {
+            alert('Erro ao salvar horário: ' + err.message);
         }
     }
 

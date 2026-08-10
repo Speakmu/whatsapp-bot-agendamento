@@ -100,6 +100,33 @@
             </div>
             <div class="acoes"><button class="btn btn-salvar" id="salvar-bairros">Salvar bairros e taxa</button></div>
         </div>
+
+        <div class="box">
+            <h2>Hor&aacute;rio de funcionamento</h2>
+            <div class="sub">
+                Vale pro app e pro bot do WhatsApp juntos. Fora do hor&aacute;rio configurado, o
+                app mostra um aviso pro cliente e o bot responde automaticamente informando que
+                est&aacute; fechado, sem chamar a IA.
+            </div>
+            <label class="check-line"><input id="horario-ativo" type="checkbox"> Restringir pedidos por hor&aacute;rio</label>
+            <table id="horario-tabela" style="width:100%; border-collapse:collapse; margin:12px 0;">
+                <thead>
+                    <tr style="text-align:left; font-size:.78rem; color:var(--muted); text-transform:uppercase;">
+                        <th style="padding:6px 4px;">Dia</th>
+                        <th style="padding:6px 4px;">Aberto</th>
+                        <th style="padding:6px 4px;">Abre</th>
+                        <th style="padding:6px 4px;">Fecha</th>
+                    </tr>
+                </thead>
+                <tbody id="horario-dias-body"></tbody>
+            </table>
+            <div class="campo">
+                <label>Mensagem quando fechado</label>
+                <input id="horario-mensagem-fechado" placeholder="No momento estamos fechados. Nosso hor&aacute;rio: {horario}">
+                <small>Use <code>{horario}</code> no texto pra inserir automaticamente os dias/hor&aacute;rios configurados.</small>
+            </div>
+            <div class="acoes"><button class="btn btn-salvar" id="salvar-horario">Salvar hor&aacute;rio de funcionamento</button></div>
+        </div>
     </div>
 
     <script src="/shell.js" defer></script>
