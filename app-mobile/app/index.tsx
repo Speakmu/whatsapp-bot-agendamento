@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
 import * as SecureStore from 'expo-secure-store';
@@ -42,6 +43,50 @@ const BRAND_GREEN = '#174e2a';
 const BRAND_WHITE = '#ffffff';
 const BRAND_NAME = 'Lileamar Salgados';
 const BRAND_LOGO = require('../assets/images/lileamar-logo.jpeg');
+
+// Estilos de identidade configuráveis no GestorChef (Marketing & App)
+const FONT_STYLE_MAP: Record<string, { fontFamily?: string; fontWeight?: any; fontStyle?: any }> = {
+  italico: { fontFamily: Platform.OS === 'ios' ? 'Snell Roundhand' : 'serif', fontStyle: 'italic', fontWeight: '700' },
+  classico: { fontFamily: 'serif', fontWeight: '700' },
+  moderno: { fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif', fontWeight: '800' },
+  condensado: { fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-condensed', fontWeight: '700' },
+};
+const FONT_SIZE_MAP: Record<string, number> = { pequeno: 22, medio: 28, grande: 34 };
+
+// --- Horário de funcionamento (configurado em configuracoes/bot no GestorChef) ---
+// Mesma lógica do backend-bot/app.py (verificar_horario_funcionamento), pra
+// app e bot do WhatsApp sempre concordarem se a loja está aberta ou não.
+const NOMES_DIAS_SEMANA: Record<string, string> = { seg: 'Segunda', ter: 'Terça', qua: 'Quarta', qui: 'Quinta', sex: 'Sexta', sab: 'Sábado', dom: 'Domingo' };
+const ORDEM_DIAS_SEMANA_JS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab']; // Date.getDay(): 0 = domingo
+
+function calcularHorarioFuncionamento(horarioCfg: any): { aberto: boolean; texto: string } {
+  const dias = (horarioCfg && horarioCfg.dias) || {};
+  const partes: string[] = [];
+  ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'].forEach(chave => {
+    const d = dias[chave];
+    if (d && d.aberto && d.abre && d.fecha) partes.push(`${NOMES_DIAS_SEMANA[chave]} ${d.abre}-${d.fecha}`);
+  });
+  const texto = partes.length ? partes.join('; ') : 'horário a confirmar';
+
+  if (!horarioCfg || !horarioCfg.ativo) return { aberto: true, texto };
+
+  const agora = new Date();
+  const diaCfg = dias[ORDEM_DIAS_SEMANA_JS[agora.getDay()]];
+  if (!diaCfg || !diaCfg.aberto) return { aberto: false, texto };
+
+  const abre = diaCfg.abre, fecha = diaCfg.fecha;
+  if (!abre || !fecha) return { aberto: true, texto };
+
+  const [h1, m1] = abre.split(':').map(Number);
+  const [h2, m2] = fecha.split(':').map(Number);
+  const minutosAgora = agora.getHours() * 60 + agora.getMinutes();
+  const minutosAbre = h1 * 60 + m1;
+  const minutosFecha = h2 * 60 + m2;
+  const dentro = minutosFecha <= minutosAbre
+    ? (minutosAgora >= minutosAbre || minutosAgora < minutosFecha) // fecha depois da meia-noite
+    : (minutosAgora >= minutosAbre && minutosAgora < minutosFecha);
+  return { aberto: dentro, texto };
+}
 
 export default function App() {
   return (
@@ -88,6 +133,8 @@ interface SacolaProps {
   setCupom?: (t: string) => void;
   aplicarCupom?: () => void;
   cupomAplicado?: any;
+  lojaFechada?: boolean;
+  horarioTexto?: string;
   calcularSubtotal?: () => number;
   calcularDesconto?: () => number;
   corMarca?: string;
@@ -181,7 +228,8 @@ const SecaoSacola = ({
   tecladoVisivel,
   cupom, setCupom, aplicarCupom, cupomAplicado,
   calcularSubtotal, calcularDesconto, corMarca = BRAND_GREEN,
-  usarPontos, setUsarPontos, podeResgatar, pontosPerfil, calcularDescontoResgate, pontosResgatados = 0
+  usarPontos, setUsarPontos, podeResgatar, pontosPerfil, calcularDescontoResgate, pontosResgatados = 0,
+  lojaFechada = false, horarioTexto = ''
 }: SacolaProps) => {
 
   // ESTADO LOCAL PARA OS DADOS DO CARTÃO
@@ -371,8 +419,15 @@ const SecaoSacola = ({
                   marginBottom: 0
                 }
               ]}
-              disabled={carregandoLogin}
+              disabled={carregandoLogin || lojaFechada}
               onPress={() => {
+                if (lojaFechada) {
+                  Alert.alert(
+                    'Estamos fechados',
+                    `No momento não estamos recebendo pedidos.${horarioTexto ? `\n\nHorário de funcionamento: ${horarioTexto}` : ''}`
+                  );
+                  return;
+                }
                 if (metodoPagamento === 'cartao') {
                   setModalCartaoVisivel(true);
                 } else if (metodoPagamento === 'pix') {
@@ -413,6 +468,20 @@ interface HomeProps {
   categorias?: string[];
   categoriaAtiva?: string;
   setCategoriaAtiva?: (c: string) => void;
+  usaLogotipo?: boolean;
+  logoUrl?: string;
+  estiloFonteMarca?: any;
+  tamanhoFonteMarca?: number;
+  bannerAtivo?: boolean;
+  bannerTexto?: string;
+  bannerCor?: string;
+  destaques?: any[];
+  heroUrl?: string;
+  corFundo?: string;
+  colunasVitrine?: number;
+  tamanhoImagemVitrine?: string;
+  lojaFechada?: boolean;
+  horarioTexto?: string;
 }
 
 // --- COMPONENTE DE IMAGEM COM FALLBACK ---
@@ -429,34 +498,125 @@ const ProdutoImagem = ({ uri, style }: { uri?: string; style: any }) => {
   );
 };
 
+// Tamanhos de imagem configuráveis no GestorChef (Marketing & App → Layout da vitrine)
+const IMG_TAMANHO_LISTA: Record<string, number> = { pequena: 64, media: 88, grande: 120 };
+const IMG_TAMANHO_GRADE: Record<string, number> = { pequena: 90, media: 130, grande: 170 };
+// Largura do card por quantidade de itens por linha (grade)
+const COL_LARGURA: Record<number, string> = { 2: '48%', 3: '31%', 4: '23%' };
+
+// --- CARTÃO DE PRODUTO (usado na lista de resultados e nas vitrines de destaque) ---
+const CartaoProduto = ({ item, styles, corMarca, pontos, onAbrir, onAdicionar, colunas = 1, tamanhoImagem = 'media' }: {
+  item: any; styles: any; corMarca: string; pontos: number; onAbrir: () => void; onAdicionar: () => void;
+  colunas?: number; tamanhoImagem?: string;
+}) => {
+  if (colunas > 1) {
+    const altura = IMG_TAMANHO_GRADE[tamanhoImagem] || IMG_TAMANHO_GRADE.media;
+    const largura = COL_LARGURA[colunas] || COL_LARGURA[2];
+    return (
+      <TouchableOpacity activeOpacity={0.85} style={[styles.cardGrade, { width: largura }]} onPress={onAbrir}>
+        <ProdutoImagem uri={item.imagem_url} style={[styles.fotoGrade, { height: altura }]} />
+        <Text style={styles.nomeGrade} numberOfLines={1}>{item.nome_exibicao || item.nome}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+          <Text style={styles.precoGrade}>R$ {Number(item.preco).toFixed(2)}</Text>
+          <TouchableOpacity style={[styles.btnAdicionarGrade, { borderColor: corMarca }]} onPress={onAdicionar}>
+            <Text style={[styles.btnAdicionarTxt, { color: corMarca, fontSize: 15 }]}>+</Text>
+          </TouchableOpacity>
+        </View>
+        {pontos > 0 && (
+          <View style={[styles.seloPontos, { marginTop: 4, alignSelf: 'flex-start' }]}>
+            <Text style={styles.seloPontosTxt}>⭐ +{pontos} pts</Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  }
+
+  const tamanho = IMG_TAMANHO_LISTA[tamanhoImagem] || IMG_TAMANHO_LISTA.media;
+  return (
+    <TouchableOpacity activeOpacity={0.85} style={styles.cardProdutoHorizontal} onPress={onAbrir}>
+      <ProdutoImagem uri={item.imagem_url} style={[styles.fotoProdutoEsquerda, { width: tamanho, height: tamanho }]} />
+      <View style={styles.infoProduto}>
+        <Text style={styles.nomeProduto}>{item.nome_exibicao || item.nome}</Text>
+        <Text style={styles.descricaoProduto} numberOfLines={2}>
+          {item.descricao || item.ingredientes}
+        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5, flexWrap: 'wrap', gap: 6 }}>
+          <Text style={styles.precoProduto}>R$ {Number(item.preco).toFixed(2)}</Text>
+          {pontos > 0 && (
+            <View style={styles.seloPontos}>
+              <Text style={styles.seloPontosTxt}>⭐ +{pontos} pts</Text>
+            </View>
+          )}
+        </View>
+      </View>
+      <TouchableOpacity style={[styles.btnAdicionar, { borderColor: corMarca }]} onPress={onAdicionar}>
+        <Text style={[styles.btnAdicionarTxt, { color: corMarca }]}>+</Text>
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+};
+
 // --- COMPONENTE SEÇÃO HOME ---
 const SecaoHome = ({
   produtosFiltrados, nome, busca, setBusca,
   executarBusca, adicionarAoCarrinho, insets, styles,
   pontosPorReal = 0, fidelidadeAtiva = true,
   nomeApp = BRAND_NAME, corMarca = BRAND_GREEN,
-  categorias = ['Todos'], categoriaAtiva = 'Todos', setCategoriaAtiva
+  categorias = ['Todos'], categoriaAtiva = 'Todos', setCategoriaAtiva,
+  usaLogotipo = false, logoUrl, estiloFonteMarca = FONT_STYLE_MAP.italico, tamanhoFonteMarca = FONT_SIZE_MAP.grande,
+  bannerAtivo = true, bannerTexto = 'Peça agora e ganhe pontos de fidelidade!', bannerCor = '#0f3d1e',
+  destaques = [], heroUrl, corFundo = '#ffffff',
+  colunasVitrine = 1, tamanhoImagemVitrine = 'media',
+  lojaFechada = false, horarioTexto = ''
 }: HomeProps) => {
+  const [produtoDetalhe, setProdutoDetalhe] = useState<any>(null);
+
+  const calcularPontosItem = (item: any) => {
+    if (fidelidadeAtiva === false) return 0;
+    const temPontosProprios = item.pontos_fidelidade !== undefined && item.pontos_fidelidade !== null;
+    return temPontosProprios
+      ? Number(item.pontos_fidelidade) || 0
+      : Math.floor((Number(item.preco) || 0) * pontosPorReal);
+  };
+
+  const mostrarVitrine = busca.trim() === '' && categoriaAtiva === 'Todos';
 
   return (
+    <>
     <FlatList
-      data={produtosFiltrados}
+      key={colunasVitrine}
+      numColumns={colunasVitrine}
+      columnWrapperStyle={colunasVitrine > 1 ? { justifyContent: 'space-between', paddingHorizontal: 10 } : undefined}
+      style={{ flex: 1, backgroundColor: corFundo }}
+      data={mostrarVitrine ? [] : produtosFiltrados}
       keyExtractor={(item) => item.id}
       ListHeaderComponent={
         <View>
-          {/* ÁREA VERDE DO HEADER */}
-          <View style={[styles.topoHome, { paddingTop: insets.top > 0 ? insets.top : 20 }]}>
+          {/* ÁREA COLORIDA DO HEADER */}
+          <View style={[styles.topoHome, { backgroundColor: corMarca, paddingTop: insets.top > 0 ? insets.top : 20 }]}>
+            {/* Aviso de loja fechada (horário de funcionamento) — tem prioridade sobre o banner promocional */}
+            {lojaFechada && (
+              <View style={{ backgroundColor: '#c0392b', paddingVertical: 8, paddingHorizontal: 14 }}>
+                <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>
+                  Estamos fechados no momento{horarioTexto ? ` • ${horarioTexto}` : ''}
+                </Text>
+              </View>
+            )}
+
             {/* Banner Promo */}
-            <View style={styles.promoBanner}>
-              <Text style={styles.promoBannerTxt}>🔥 Peça agora e ganhe pontos de fidelidade!</Text>
-            </View>
+            {bannerAtivo && !!bannerTexto && (
+              <View style={[styles.promoBanner, { backgroundColor: bannerCor }]}>
+                <Text style={styles.promoBannerTxt}>{bannerTexto}</Text>
+              </View>
+            )}
 
             {/* Saudação + Logo + Notificação */}
-            <View style={styles.headerHome}>
-              <View>
-                <Text style={styles.logoTexto}>Lileamar</Text>
-                <Text style={styles.logoSubtexto}>Salgados</Text>
-              </View>
+            <View style={[styles.headerHome, { backgroundColor: corMarca }]}>
+              {usaLogotipo && logoUrl ? (
+                <Image source={{ uri: logoUrl }} style={styles.marcaLogoHeader} resizeMode="contain" />
+              ) : (
+                <Text style={[styles.logoTexto, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeApp}</Text>
+              )}
               <View style={{ alignItems: 'center' }}>
                 <TouchableOpacity style={styles.btnNotificacao}>
                   <Text style={{ fontSize: 20 }}>🔔</Text>
@@ -497,53 +657,130 @@ const SecaoHome = ({
                   style={[styles.chip, ativo && { backgroundColor: corMarca, borderColor: corMarca }]}
                   onPress={() => setCategoriaAtiva && setCategoriaAtiva(cat)}
                 >
-                  <Text style={[styles.chipTxt, ativo && { color: '#fff' }]}>{cat}</Text>
+                  <Text style={[styles.chipTxt, ativo && { color: '#fff' }]}>{cat === 'Todos' ? 'Início' : cat}</Text>
                 </TouchableOpacity>
               );
             })}
           </ScrollView>
 
-          {/* Título da seção (fora do verde) */}
-          <Text style={styles.secaoTitulo}>
-            {busca.trim() !== '' ? `Resultados para "${busca}"` : 'Destaques'}
-          </Text>
+          {/* Banner principal (imagem) — primeiro bloco da vitrine */}
+          {mostrarVitrine && !!heroUrl && (
+            <Image source={{ uri: heroUrl }} style={styles.heroBanner} resizeMode="cover" />
+          )}
+
+          {/* Vitrines de Destaques (Topo / Meio / Fundo) — só na home, sem busca/filtro */}
+          {mostrarVitrine && destaques.map((grupo: any) => (
+            <View key={grupo.chave}>
+              <View style={[styles.faixaDestaque, { backgroundColor: grupo.cor || corMarca }]}>
+                <Text style={styles.faixaDestaqueTxt}>{grupo.titulo}</Text>
+              </View>
+              <View style={colunasVitrine > 1
+                ? { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: 10, paddingTop: 10 }
+                : { paddingTop: 10 }
+              }>
+                {grupo.produtos.map((p: any) => (
+                  <CartaoProduto
+                    key={p.id}
+                    item={p}
+                    styles={styles}
+                    corMarca={corMarca}
+                    pontos={calcularPontosItem(p)}
+                    onAbrir={() => setProdutoDetalhe(p)}
+                    onAdicionar={() => adicionarAoCarrinho(p)}
+                    colunas={colunasVitrine}
+                    tamanhoImagem={tamanhoImagemVitrine}
+                  />
+                ))}
+              </View>
+            </View>
+          ))}
+
+          {/* Título da seção — só aparece ao buscar ou filtrar por categoria */}
+          {!mostrarVitrine && (
+            <Text style={styles.secaoTitulo}>
+              {busca.trim() !== '' ? `Resultados para "${busca}"` : categoriaAtiva}
+            </Text>
+          )}
         </View>
       }
       renderItem={({ item }) => (
-        <View style={styles.cardProdutoHorizontal}>
-          <ProdutoImagem uri={item.imagem_url} style={styles.fotoProdutoEsquerda} />
-          <View style={styles.infoProduto}>
-            <Text style={styles.nomeProduto}>{item.nome_exibicao || item.nome}</Text>
-            <Text style={styles.descricaoProduto} numberOfLines={2}>
-              {item.descricao || item.ingredientes}
-            </Text>
-
-            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 5, flexWrap: 'wrap', gap: 6 }}>
-              <Text style={styles.precoProduto}>R$ {Number(item.preco).toFixed(2)}</Text>
-
-              {(() => {
-                if (fidelidadeAtiva === false) return null;
-                const temPontosProprios = item.pontos_fidelidade !== undefined && item.pontos_fidelidade !== null;
-                const ptsItem = temPontosProprios
-                  ? Number(item.pontos_fidelidade) || 0
-                  : Math.floor((Number(item.preco) || 0) * pontosPorReal);
-                if (ptsItem <= 0) return null;
-                return (
-                  <View style={styles.seloPontos}>
-                    <Text style={styles.seloPontosTxt}>⭐ +{ptsItem} pts</Text>
-                  </View>
-                );
-              })()}
-            </View>
-          </View>
-
-          <TouchableOpacity style={[styles.btnAdicionar, { borderColor: corMarca }]} onPress={() => adicionarAoCarrinho(item)}>
-            <Text style={[styles.btnAdicionarTxt, { color: corMarca }]}>+</Text>
-          </TouchableOpacity>
-        </View>
+        <CartaoProduto
+          item={item}
+          styles={styles}
+          corMarca={corMarca}
+          pontos={calcularPontosItem(item)}
+          onAbrir={() => setProdutoDetalhe(item)}
+          onAdicionar={() => adicionarAoCarrinho(item)}
+          colunas={colunasVitrine}
+          tamanhoImagem={tamanhoImagemVitrine}
+        />
       )}
-      contentContainerStyle={{ paddingBottom: 100 }}
+      contentContainerStyle={{ paddingBottom: 20, flexGrow: 1 }}
     />
+
+    <Modal
+      visible={!!produtoDetalhe}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => setProdutoDetalhe(null)}
+    >
+      <View style={styles.overlayModal}>
+        <View style={[styles.cardModal, { padding: 0, overflow: 'hidden' }]}>
+          {produtoDetalhe && (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 20 + (insets.bottom > 0 ? insets.bottom : 12) }}
+            >
+              <View>
+                <ProdutoImagem uri={produtoDetalhe.imagem_url} style={styles.fotoDetalheProduto} />
+                <TouchableOpacity
+                  style={styles.btnFecharDetalhe}
+                  onPress={() => setProdutoDetalhe(null)}
+                >
+                  <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#2d3436' }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={{ padding: 20 }}>
+                <Text style={styles.nomeDetalheProduto}>
+                  {produtoDetalhe.nome_exibicao || produtoDetalhe.nome}
+                </Text>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 8, flexWrap: 'wrap', gap: 8 }}>
+                  <Text style={[styles.precoProduto, { fontSize: 20 }]}>
+                    R$ {Number(produtoDetalhe.preco).toFixed(2)}
+                  </Text>
+                  {(() => {
+                    const ptsItem = calcularPontosItem(produtoDetalhe);
+                    if (ptsItem <= 0) return null;
+                    return (
+                      <View style={styles.seloPontos}>
+                        <Text style={styles.seloPontosTxt}>⭐ +{ptsItem} pts</Text>
+                      </View>
+                    );
+                  })()}
+                </View>
+
+                <Text style={styles.descricaoDetalheProduto}>
+                  {produtoDetalhe.descricao || produtoDetalhe.ingredientes || 'Sem descrição cadastrada.'}
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 25 }]}
+                  onPress={() => {
+                    adicionarAoCarrinho(produtoDetalhe);
+                    setProdutoDetalhe(null);
+                  }}
+                >
+                  <Text style={styles.btnTxtBranco}>Adicionar à sacola</Text>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 };
 interface PerfilProps {
@@ -646,7 +883,7 @@ const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, set
         <View style={styles.containerFidelidade}>
           <View style={styles.cartaoFidelidade}>
             <View style={styles.cartaoTopo}>
-              <Text style={styles.cartaoTitulo}>PIZZA IN FIDELIDADE</Text>
+              <Text style={styles.cartaoTitulo}>CLIENTE FIDELIDADE</Text>
             </View>
             <View style={styles.cartaoConteudo}>
               <Text style={styles.labelSaldo}>Seu Saldo</Text>
@@ -790,7 +1027,11 @@ function AppCliente() {
   const [cupom, setCupom] = useState('');
   const [cupomAplicado, setCupomAplicado] = useState<any>(null);
   const [usarPontos, setUsarPontos] = useState(false);
-  const corMarca = BRAND_GREEN;
+  const corMarca = appCfg.corPrimaria || BRAND_GREEN;
+  const nomeAppExibicao = appCfg.nomeApp || BRAND_NAME;
+  const usaLogotipo = appCfg.identidadeTipo === 'logo' && !!appCfg.logoUrl;
+  const estiloFonteMarca = FONT_STYLE_MAP[appCfg.fontFamily as string] || FONT_STYLE_MAP.italico;
+  const tamanhoFonteMarca = FONT_SIZE_MAP[appCfg.fontSize as string] || FONT_SIZE_MAP.grande;
 
   useEffect(() => {
     const unsub = onSnapshot(doc(dbModular, 'app_config', 'geral'), (s: any) => {
@@ -798,6 +1039,52 @@ function AppCliente() {
     }, () => { });
     return () => unsub();
   }, []);
+
+  // --- Horário de funcionamento (compartilhado com o bot do WhatsApp) ---
+  const [horarioCfg, setHorarioCfg] = useState<any>(null);
+  const [lojaFechada, setLojaFechada] = useState(false);
+  const [horarioTexto, setHorarioTexto] = useState('');
+  useEffect(() => {
+    const unsub = onSnapshot(doc(dbModular, 'configuracoes', 'bot'), (s: any) => {
+      const d = s && s.exists() ? (s.data() || {}) : {};
+      setHorarioCfg(d.horario_funcionamento || null);
+    }, () => { });
+    return () => unsub();
+  }, []);
+  useEffect(() => {
+    function recalcular() {
+      const { aberto, texto } = calcularHorarioFuncionamento(horarioCfg);
+      setLojaFechada(!aberto);
+      setHorarioTexto(texto);
+    }
+    recalcular();
+    const intervalo = setInterval(recalcular, 60000);
+    return () => clearInterval(intervalo);
+  }, [horarioCfg]);
+
+  const [destaquesGrupos, setDestaquesGrupos] = useState<any[]>([]);
+  const [heroUrl, setHeroUrl] = useState('');
+  useEffect(() => {
+    const unsub = onSnapshot(doc(dbModular, 'app_config', 'destaques'), (s: any) => {
+      const d = s && s.exists() ? (s.data() || {}) : {};
+      setDestaquesGrupos(Array.isArray(d.grupos) ? d.grupos : []);
+      setHeroUrl(d.heroUrl || '');
+    }, () => { });
+    return () => unsub();
+  }, []);
+
+  const corFundoVitrine = appCfg.corSecundaria || '#ffffff';
+
+  const destaquesResolvidos = React.useMemo(() => {
+    return destaquesGrupos
+      .map((g: any) => ({
+        ...g,
+        produtos: (g.produtosIds || [])
+          .map((id: string) => produtos.find(p => p.id === id))
+          .filter(Boolean)
+      }))
+      .filter((g: any) => g.produtos.length > 0);
+  }, [destaquesGrupos, produtos]);
 
   const [dadosCartao, setDadosCartao] = useState({
     numero: '',
@@ -1394,8 +1681,13 @@ function AppCliente() {
         }
 
         // 2. Carrega Cardápio
+        // disponivel_online é um segundo interruptor (além de "disponivel"),
+        // pra permitir esgotar um item só pro app/WhatsApp sem afetar o
+        // balcão — campo ausente conta como disponível (itens antigos).
         const prodSnapshot = await db.collection('cardapio').where('disponivel', '==', true).get();
-        const listaProd = prodSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const listaProd = prodSnapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter((p: any) => p.disponivel_online !== false);
         setProdutos(listaProd);
         setProdutosFiltrados(listaProd);
 
@@ -1536,12 +1828,16 @@ function AppCliente() {
       <StatusBar barStyle="dark-content" />
 
       {!estaCadastrado ? (
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: BRAND_GREEN }}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: corMarca }}>
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
             <View style={styles.containerCentro}>
               <View style={styles.cardCadastro}>
                 <Image source={BRAND_LOGO} style={styles.logoLogin} resizeMode="contain" />
-                <Text style={styles.tituloCadastro}>{BRAND_NAME}</Text>
+                {usaLogotipo && appCfg.logoUrl ? (
+                  <Image source={{ uri: appCfg.logoUrl }} style={styles.marcaLogoLogin} resizeMode="contain" />
+                ) : (
+                  <Text style={[styles.tituloCadastro, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeAppExibicao}</Text>
+                )}
 
                 {/* --- ESTADO 1: SELEÇÃO INICIAL --- */}
                 {modoAcesso === 'selecao' && (
@@ -1549,17 +1845,17 @@ function AppCliente() {
                     <Text style={{ textAlign: 'center', marginBottom: 20, color: '#666' }}>Como deseja prosseguir?</Text>
 
                     <TouchableOpacity
-                      style={styles.btnCadastroLargo}
+                      style={[styles.btnCadastroLargo, { backgroundColor: corMarca }]}
                       onPress={() => setModoAcesso('login')}
                     >
                       <Text style={styles.btnTxtBranco}>Já sou cliente (Login) 🔑</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
-                      style={[styles.btnCadastroLargo, { backgroundColor: BRAND_WHITE, borderWidth: 1, borderColor: BRAND_GREEN, marginTop: 10 }]}
+                      style={[styles.btnCadastroLargo, { backgroundColor: BRAND_WHITE, borderWidth: 1, borderColor: corMarca, marginTop: 10 }]}
                       onPress={() => setModoAcesso('cadastro')}
                     >
-                      <Text style={[styles.btnTxtBranco, { color: BRAND_GREEN }]}>Novo por aqui? (Cadastrar) ✨</Text>
+                      <Text style={[styles.btnTxtBranco, { color: corMarca }]}>Novo por aqui? (Cadastrar) ✨</Text>
                     </TouchableOpacity>
                   </View>
                 )}
@@ -1576,7 +1872,7 @@ function AppCliente() {
                       onChangeText={setCpf}
                       maxLength={11}
                     />
-                    <TouchableOpacity style={[styles.btnCadastroLargo, { marginTop: 20 }]} onPress={verificarOuCadastrar}>
+                    <TouchableOpacity style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 20 }]} onPress={verificarOuCadastrar}>
                       <Text style={styles.btnTxtBranco}>Entrar 🚀</Text>
                     </TouchableOpacity>
 
@@ -1605,7 +1901,7 @@ function AppCliente() {
                       maxLength={15}
                     />
 
-                    <TouchableOpacity style={[styles.btnCadastroLargo, { marginTop: 20 }]} onPress={verificarOuCadastrar}>
+                    <TouchableOpacity style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 20 }]} onPress={verificarOuCadastrar}>
                       <Text style={styles.btnTxtBranco}>Criar minha conta ⭐</Text>
                     </TouchableOpacity>
 
@@ -1634,8 +1930,22 @@ function AppCliente() {
                 styles={styles}
                 pontosPorReal={Number(appCfg.pontosPorReal) || 0}
                 fidelidadeAtiva={appCfg.fidelidadeAtiva !== false}
-                nomeApp={BRAND_NAME}
+                nomeApp={nomeAppExibicao}
                 corMarca={corMarca}
+                usaLogotipo={usaLogotipo}
+                logoUrl={appCfg.logoUrl}
+                estiloFonteMarca={estiloFonteMarca}
+                tamanhoFonteMarca={tamanhoFonteMarca}
+                bannerAtivo={appCfg.bannerAtivo}
+                bannerTexto={appCfg.bannerTexto}
+                bannerCor={appCfg.bannerCor}
+                destaques={destaquesResolvidos}
+                heroUrl={heroUrl}
+                corFundo={corFundoVitrine}
+                colunasVitrine={Number(appCfg.vitrineColunas) || 1}
+                tamanhoImagemVitrine={appCfg.vitrineImagem || 'media'}
+                lojaFechada={lojaFechada}
+                horarioTexto={horarioTexto}
                 categorias={categoriasDisponiveis}
                 categoriaAtiva={categoriaAtiva}
                 setCategoriaAtiva={setCategoriaAtiva}
@@ -1736,6 +2046,8 @@ function AppCliente() {
                 pontosPerfil={pontosPerfil}
                 calcularDescontoResgate={calcularDescontoResgate}
                 pontosResgatados={usarPontos ? pontosUsados() : 0}
+                lojaFechada={lojaFechada}
+                horarioTexto={horarioTexto}
               />
             )}
           </View>
@@ -1745,28 +2057,45 @@ function AppCliente() {
       <View style={[
         styles.tabBar,
         {
+          backgroundColor: corMarca,
           paddingBottom: insets.bottom > 20 ? insets.bottom : 10,
           height: insets.bottom > 20 ? 60 + insets.bottom : 65,
         }
       ]}>
         <TouchableOpacity style={styles.tabItem} onPress={() => setAbaAtiva('home')}>
-          <Text style={{ fontSize: 20 }}>🏠</Text>
-          <Text style={{ fontSize: 10, color: abaAtiva === 'home' ? corMarca : '#999', fontWeight: 'bold' }}>Início</Text>
+          <Ionicons
+            name={abaAtiva === 'home' ? 'home' : 'home-outline'}
+            size={22}
+            color={abaAtiva === 'home' ? '#fff' : 'rgba(255,255,255,0.65)'}
+          />
+          <Text style={{ fontSize: 10, color: abaAtiva === 'home' ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: 'bold' }}>Início</Text>
         </TouchableOpacity>
 
 
         <TouchableOpacity style={styles.tabItem} onPress={() => setAbaAtiva('pedidos')}>
-          <Text style={{ fontSize: 20 }}>📦</Text>
-          <Text style={{ fontSize: 10, color: abaAtiva === 'pedidos' ? corMarca : '#999', fontWeight: 'bold' }}>Pedidos</Text>
+          <Ionicons
+            name={abaAtiva === 'pedidos' ? 'receipt' : 'receipt-outline'}
+            size={22}
+            color={abaAtiva === 'pedidos' ? '#fff' : 'rgba(255,255,255,0.65)'}
+          />
+          <Text style={{ fontSize: 10, color: abaAtiva === 'pedidos' ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: 'bold' }}>Pedidos</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.tabItem} onPress={() => setAbaAtiva('perfil')}>
-          <Text style={{ fontSize: 20 }}>👤</Text>
-          <Text style={[styles.tabTxt, { color: abaAtiva === 'perfil' ? corMarca : '#999' }]}>Você</Text>
+          <Ionicons
+            name={abaAtiva === 'perfil' ? 'person' : 'person-outline'}
+            size={22}
+            color={abaAtiva === 'perfil' ? '#fff' : 'rgba(255,255,255,0.65)'}
+          />
+          <Text style={[styles.tabTxt, { color: abaAtiva === 'perfil' ? '#fff' : 'rgba(255,255,255,0.65)' }]}>Você</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.tabItem} onPress={() => setAbaAtiva('sacola')}>
           <View>
-            <Text style={{ fontSize: 22 }}>🛍️</Text>
+            <Ionicons
+              name={abaAtiva === 'sacola' ? 'bag' : 'bag-outline'}
+              size={22}
+              color={abaAtiva === 'sacola' ? '#fff' : 'rgba(255,255,255,0.65)'}
+            />
             {/* Este círculo vermelho avisa quantos itens tem */}
             {carrinho.length > 0 && (
               <View style={styles.badge}>
@@ -1774,7 +2103,7 @@ function AppCliente() {
               </View>
             )}
           </View>
-          <Text style={[styles.tabTxt, { color: abaAtiva === 'sacola' ? corMarca : '#999' }]}>
+          <Text style={[styles.tabTxt, { color: abaAtiva === 'sacola' ? '#fff' : 'rgba(255,255,255,0.65)' }]}>
             Sacola
           </Text>
         </TouchableOpacity>
@@ -1949,11 +2278,11 @@ const styles = StyleSheet.create({
   // === HEADER / TOPO HOME ===
   topoHome: {
     backgroundColor: BRAND_GREEN,
-    paddingBottom: 20,
+    paddingBottom: 12,
   },
   promoBanner: {
     backgroundColor: '#0f3d1e',
-    paddingVertical: 8,
+    paddingVertical: 6,
     paddingHorizontal: 16,
     alignItems: 'center',
   },
@@ -1968,11 +2297,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 4,
+    paddingTop: 10,
+    paddingBottom: 8,
     backgroundColor: BRAND_GREEN,
   },
-  saudacao: { fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: '500', marginTop: 4 },
+  saudacao: { fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: '500', marginTop: 3 },
   logoTexto: {
     fontSize: 32,
     fontWeight: '700',
@@ -1987,16 +2316,17 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     marginTop: -2,
   },
+  marcaLogoHeader: { height: 44, width: 170 },
   lojaNome: { fontSize: 22, fontWeight: 'bold', color: '#fff' },
   btnNotificacao: { backgroundColor: 'rgba(255,255,255,0.18)', padding: 9, borderRadius: 12 },
 
-  searchContainer: { paddingHorizontal: 16, marginTop: 14 },
+  searchContainer: { paddingHorizontal: 16, marginTop: 10 },
   searchBarInterna: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
     borderRadius: 14,
-    height: 46,
+    height: 42,
     elevation: 3,
     shadowColor: '#000',
     shadowOpacity: 0.12,
@@ -2029,8 +2359,6 @@ const styles = StyleSheet.create({
   // Menu Inferior
   tabBar: {
     flexDirection: 'row',
-    borderTopWidth: 1,
-    borderColor: '#e8e8e8',
     backgroundColor: '#fff',
     justifyContent: 'space-around',
     alignItems: 'center',
@@ -2056,6 +2384,7 @@ const styles = StyleSheet.create({
   },
   cardCadastro: { backgroundColor: '#fff', padding: 20, borderRadius: 15, elevation: 5 },
   logoLogin: { width: '100%', height: 115, marginBottom: 8 },
+  marcaLogoLogin: { width: '100%', height: 60, marginBottom: 12 },
   emojiBoasVindas: { fontSize: 60, textAlign: 'center', marginBottom: 10 },
   tituloCadastro: { fontSize: 22, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
   subtituloCadastro: { fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 20 },
@@ -2122,21 +2451,26 @@ const styles = StyleSheet.create({
   },
   chipsContainer: {
     paddingHorizontal: 16,
-    paddingTop: 14,
-    gap: 8,
+    paddingTop: 12,
+    paddingBottom: 12,
+    gap: 10,
   },
   chip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#ececec',
     backgroundColor: '#fff',
-    marginRight: 8,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
   },
   chipTxt: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#555',
   },
   descricaoProduto: {
@@ -2156,6 +2490,60 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   btnAdicionarTxt: { color: BRAND_GREEN, fontSize: 20, fontWeight: 'bold' },
+  cardGrade: {
+    marginBottom: 12,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 10,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  fotoGrade: { width: '100%', borderRadius: 8, marginBottom: 8 },
+  nomeGrade: { fontSize: 13, fontWeight: '700', color: '#1a1a1a' },
+  precoGrade: { fontSize: 14, fontWeight: 'bold', color: BRAND_GREEN },
+  btnAdicionarGrade: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  heroBanner: {
+    width: '100%',
+    height: 190,
+  },
+  faixaDestaque: {
+    marginTop: 10,
+    marginHorizontal: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+  },
+  faixaDestaqueTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  fotoDetalheProduto: { width: '100%', height: 240 },
+  btnFecharDetalhe: {
+    position: 'absolute',
+    top: 15,
+    right: 15,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  nomeDetalheProduto: { fontSize: 20, fontWeight: 'bold', color: '#1a1a1a' },
+  descricaoDetalheProduto: { fontSize: 14, color: '#666', lineHeight: 21, marginTop: 15 },
 
   // Aba Perfil (Você)
   containerPerfil: { flex: 1, padding: 20, backgroundColor: '#f9f9f9' },
@@ -2174,7 +2562,9 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: -12,
     top: -5,
-    backgroundColor: BRAND_GREEN,
+    backgroundColor: '#e74c3c',
+    borderWidth: 1.5,
+    borderColor: '#fff',
     borderRadius: 10,
     width: 18,
     height: 18,
