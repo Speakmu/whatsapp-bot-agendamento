@@ -8,6 +8,10 @@
         'configuracoes.html'
     ]);
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
+    // Acesso de suporte/fornecedor: só enxerga a Mensalidade, nada de
+    // operação da loja (nem a própria página Início, que não é protegida
+    // por nenhuma permissão de módulo).
+    const VENDOR_ADMIN_EMAIL = 'contato.seusuportetec@gmail.com';
     const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'mensalidade', 'configuracoes'];
     const PAGE_KEYS = {
         'painel.html': function (page) {
@@ -33,6 +37,7 @@
     };
     let acessoEfetivo = null;
     let acessoCarregado = false;
+    let souFornecedor = false;
 
     function normalizePage(raw) {
         let page = raw || '/home.html';
@@ -60,7 +65,22 @@
         return normalizarEmail(email) === ADMIN_EMAIL;
     }
 
+    function isVendor(email) {
+        return normalizarEmail(email) === VENDOR_ADMIN_EMAIL;
+    }
+
+    // Página padrão pra abrir/redirecionar quando não há uma explícita —
+    // Início mostra dados operacionais da loja, então o fornecedor nunca
+    // deve cair lá.
+    function paginaPadrao() {
+        return souFornecedor ? '/mensalidades.html' : '/home.html';
+    }
+
     async function carregarAcesso(user) {
+        if (isVendor(user && user.email)) {
+            return { mensalidade: true };
+        }
+
         const db = firebase.firestore();
 
         // Offline sem cache local (ex.: primeiro acesso já sem internet), a
@@ -109,7 +129,12 @@
     function podeAcessar(page) {
         if (!acessoCarregado) return true;
         const keys = keysDaPagina(page);
-        if (!keys.length) return true;
+        if (!keys.length) {
+            // Páginas sem permissão de módulo definida (ex.: home.html) ficam
+            // abertas por padrão pra equipe da loja — mas o acesso de
+            // suporte/fornecedor só entra no que tem permissão explícita.
+            return !souFornecedor;
+        }
         return keys.some(k => acessoEfetivo && acessoEfetivo[k] === true);
     }
 
@@ -165,7 +190,7 @@
 
     function loadPage(page, push) {
         let normalized = normalizePage(page);
-        if (!podeAcessar(normalized)) normalized = '/home.html';
+        if (!podeAcessar(normalized)) normalized = paginaPadrao();
         if (frame.getAttribute('src') !== normalized) frame.setAttribute('src', normalized);
         if (push) history.pushState({ page: normalized }, '', '/admin.html?page=' + encodeURIComponent(normalized));
         setActive(normalized);
@@ -175,11 +200,12 @@
     async function recarregarAcesso() {
         const user = firebase.auth().currentUser;
         if (!user) return;
+        souFornecedor = isVendor(user.email);
         acessoEfetivo = await carregarAcesso(user);
         acessoCarregado = true;
         filtrarMenu();
         const atual = frame.getAttribute('src') || pageFromUrl();
-        if (!podeAcessar(atual)) loadPage('/home.html', true);
+        if (!podeAcessar(atual)) loadPage(paginaPadrao(), true);
     }
 
     function wireMenu() {
@@ -192,7 +218,7 @@
             event.preventDefault();
             event.stopPropagation();
             if (!podeAcessar(href)) {
-                loadPage('/home.html', true);
+                loadPage(paginaPadrao(), true);
                 return;
             }
             document.getElementById('app-sidebar')?.classList.remove('open');
@@ -208,7 +234,7 @@
             const clean = path.split('?')[0].split('#')[0].split('/').pop().toLowerCase();
             if (allowed.has(clean)) {
                 if (!podeAcessar(path)) {
-                    loadPage('/home.html', true);
+                    loadPage(paginaPadrao(), true);
                     return;
                 }
                 history.replaceState({ page: path }, '', '/admin.html?page=' + encodeURIComponent(path));
@@ -308,6 +334,7 @@
             });
             firebase.auth().onAuthStateChanged(async user => {
                 if (!user) { window.location.href = '/login.html'; return; }
+                souFornecedor = isVendor(user.email);
                 try {
                     acessoEfetivo = await carregarAcesso(user);
                     acessoCarregado = true;
@@ -317,7 +344,7 @@
                     console.warn('Permissoes:', err);
                     acessoEfetivo = {};
                     acessoCarregado = true;
-                    loadPage('/home.html', false);
+                    loadPage(paginaPadrao(), false);
                 }
             });
         } catch (e) { /* page scripts also protect routes */ }
