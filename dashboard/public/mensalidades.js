@@ -113,6 +113,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'PENDENTE';
     }
 
+    function dataParaInput(ts) {
+        const d = ts && ts.toDate ? ts.toDate() : null;
+        if (!d) return '';
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${d.getFullYear()}-${mm}-${dd}`;
+    }
+
     function renderMensalidades() {
         const tbody = $('mensalidades-tbody');
         if (!mensalidades.length) {
@@ -122,20 +130,74 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.innerHTML = mensalidades.map(m => {
             const st = statusExibicao(m);
             const badge = `<span class="badge ${st.toLowerCase()}">${st}</span>`;
-            const acao = (souFornecedor && st !== 'PAGO')
-                ? `<button class="btn btn-salvar" data-marcar-pago="${m.id}" style="padding:6px 10px;font-size:.8rem">Marcar como paga</button>`
-                : '';
-            return `<tr>
+            const acoes = [];
+            if (souFornecedor) {
+                if (st !== 'PAGO') acoes.push(`<button class="btn btn-salvar" data-marcar-pago="${m.id}" style="padding:6px 10px;font-size:.8rem">Marcar como paga</button>`);
+                acoes.push(`<button class="btn" data-editar-venc="${m.id}" style="padding:6px 10px;font-size:.8rem;background:#eef2f7;color:#2c3e50">Editar vencimento</button>`);
+                acoes.push(`<button class="btn" data-excluir="${m.id}" style="padding:6px 10px;font-size:.8rem;background:#fdecea;color:#c0392b">Excluir</button>`);
+            }
+            return `<tr data-row="${m.id}">
                 <td>${escapeHtml(m.referencia || '-')}</td>
                 <td>${money(m.valor)}</td>
-                <td>${formatarData(m.vencimento)}</td>
+                <td data-venc-cell>${formatarData(m.vencimento)}</td>
                 <td>${badge}</td>
-                <td>${acao}</td>
+                <td style="display:flex;gap:6px;flex-wrap:wrap">${acoes.join('')}</td>
             </tr>`;
         }).join('');
         tbody.querySelectorAll('[data-marcar-pago]').forEach(btn => {
             btn.addEventListener('click', () => marcarComoPaga(btn.dataset.marcarPago));
         });
+        tbody.querySelectorAll('[data-editar-venc]').forEach(btn => {
+            btn.addEventListener('click', () => iniciarEdicaoVencimento(btn.dataset.editarVenc));
+        });
+        tbody.querySelectorAll('[data-excluir]').forEach(btn => {
+            btn.addEventListener('click', () => excluirMensalidade(btn.dataset.excluir));
+        });
+    }
+
+    function iniciarEdicaoVencimento(id) {
+        const m = mensalidades.find(x => x.id === id);
+        if (!m) return;
+        const linha = $('mensalidades-tbody').querySelector(`tr[data-row="${id}"]`);
+        const celula = linha && linha.querySelector('[data-venc-cell]');
+        if (!celula) return;
+        celula.innerHTML = `
+            <input type="date" value="${dataParaInput(m.vencimento)}" style="padding:6px;border:1px solid var(--line);border-radius:6px">
+            <button class="btn btn-salvar" style="padding:5px 9px;font-size:.78rem;margin-left:4px">Salvar</button>
+            <button class="btn" style="padding:5px 9px;font-size:.78rem;background:#eef2f7;color:#2c3e50">Cancelar</button>
+        `;
+        const input = celula.querySelector('input');
+        const [btnSalvar, btnCancelar] = celula.querySelectorAll('button');
+        btnCancelar.addEventListener('click', renderMensalidades);
+        btnSalvar.addEventListener('click', () => salvarNovoVencimento(id, input.value));
+    }
+
+    async function salvarNovoVencimento(id, dataStr) {
+        if (!souFornecedor || !dataStr) return;
+        try {
+            const novaData = new Date(dataStr + 'T00:00:00');
+            await COL_MENSALIDADES.doc(id).update({
+                vencimento: firebase.firestore.Timestamp.fromDate(novaData),
+                referencia: referenciaDeData(novaData)
+            });
+            flash('Vencimento atualizado.');
+            await carregarMensalidades();
+        } catch (err) {
+            alert('Erro ao atualizar vencimento: ' + err.message);
+        }
+    }
+
+    async function excluirMensalidade(id) {
+        if (!souFornecedor) return;
+        const m = mensalidades.find(x => x.id === id);
+        if (!confirm(`Excluir a mensalidade ${m ? m.referencia : ''} (${m ? money(m.valor) : ''})? Isso não pode ser desfeito.`)) return;
+        try {
+            await COL_MENSALIDADES.doc(id).delete();
+            flash('Mensalidade excluída.');
+            await carregarMensalidades();
+        } catch (err) {
+            alert('Erro ao excluir: ' + err.message);
+        }
     }
 
     function referenciaDeData(d) {
