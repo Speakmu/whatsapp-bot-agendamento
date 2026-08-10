@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const DOC_PAGAMENTOS = db.collection('configuracoes').doc('pagamentos');
     const COL_USUARIOS = db.collection('usuarios_admin');
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
-    const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'configuracoes'];
+    const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'mensalidade', 'configuracoes'];
     const NOMES_MODULOS = {
         pedidos: 'Pedidos',
         kds: 'Cozinha (KDS)',
@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
         cardapio: 'Cardapio',
         marketing: 'Marketing & App',
         bot: 'Bot',
+        mensalidade: 'Mensalidade',
         configuracoes: 'Configuracoes'
     };
     let usuarioAtual = null;

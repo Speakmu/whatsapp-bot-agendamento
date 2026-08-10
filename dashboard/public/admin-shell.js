@@ -4,11 +4,11 @@
         'home.html', 'painel.html', 'kds.html', 'mesas.html', 'entrega.html',
         'caixa.html', 'bi.html', 'financeiro.html', 'fiscal.html',
         'estoque.html', 'ficha-tecnica.html', 'marketing.html',
-        'bot-chat.html', 'bot-config.html',
+        'bot-chat.html', 'bot-config.html', 'mensalidades.html',
         'configuracoes.html'
     ]);
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
-    const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'configuracoes'];
+    const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'mensalidade', 'configuracoes'];
     const PAGE_KEYS = {
         'painel.html': function (page) {
             const hash = (String(page || '').split('#')[1] || '').toLowerCase();
@@ -28,6 +28,7 @@
         'marketing.html': ['marketing'],
         'bot-chat.html': ['bot'],
         'bot-config.html': ['bot'],
+        'mensalidades.html': ['mensalidade'],
         'configuracoes.html': ['configuracoes']
     };
     let acessoEfetivo = null;
