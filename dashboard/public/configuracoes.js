@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
         carregar();
         $('salvar-geral').addEventListener('click', salvarGeral);
         $('salvar-pagamentos').addEventListener('click', salvarPagamentos);
+        $('pag-provedor').addEventListener('change', aplicarVisibilidadeProvedor);
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
         $('salvar-usuario').addEventListener('click', salvarUsuario);
         $('novo-usuario').addEventListener('click', limparUsuarioForm);
@@ -79,6 +80,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function aplicarVisibilidadeProvedor() {
+        const stone = $('pag-provedor').value === 'stone';
+        $('campo-point').style.display = stone ? 'none' : 'block';
+        $('campo-stone').style.display = stone ? 'block' : 'none';
+    }
+
     async function carregarPagamentos() {
         try {
             const snap = await DOC_PAGAMENTOS.get();
@@ -86,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
             $('pag-point-device').value = d.pointDeviceId || '';
             $('pag-stone-serial').value = d.stoneDeviceSerial || '';
             $('pag-provedor').value = d.provedorCartao || 'mercadopago';
+            aplicarVisibilidadeProvedor();
         } catch (err) {
             console.warn('pagamentos:', err.message);
         }
