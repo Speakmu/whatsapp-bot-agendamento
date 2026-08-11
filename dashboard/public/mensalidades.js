@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('btn-lancar').addEventListener('click', lancarMensalidade);
         $('btn-salvar-cobranca').addEventListener('click', salvarCobrancaCfg);
         $('btn-copiar-pix').addEventListener('click', copiarPix);
+        $('btn-copiar-boleto').addEventListener('click', copiarBoleto);
     });
 
     function money(v) {
@@ -101,8 +102,9 @@ document.addEventListener('DOMContentLoaded', () => {
             snap.forEach(doc => mensalidades.push({ id: doc.id, ...doc.data() }));
             renderMensalidades();
             renderPix();
+            renderBoleto();
         } catch (err) {
-            tbody.innerHTML = `<tr><td colspan="5" class="empty">Erro ao carregar: ${escapeHtml(err.message)}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="6" class="empty">Erro ao carregar: ${escapeHtml(err.message)}</td></tr>`;
         }
     }
 
@@ -133,24 +135,29 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderMensalidades() {
         const tbody = $('mensalidades-tbody');
         if (!mensalidades.length) {
-            tbody.innerHTML = '<tr><td colspan="5" class="empty">Nenhuma mensalidade lançada ainda.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="empty">Nenhuma mensalidade lançada ainda.</td></tr>';
             return;
         }
         tbody.innerHTML = mensalidades.map(m => {
             const st = statusExibicao(m);
             const cssClass = st.toLowerCase().replace('_', '-');
             const badge = `<span class="badge ${cssClass}">${STATUS_LABEL[st] || st}</span>`;
+            const temBoleto = !!(m.boleto_url || m.boleto_linha_digitavel);
             const acoes = [];
             if (souFornecedor) {
                 if (st !== 'PAGO') acoes.push(`<button class="btn btn-salvar" data-marcar-pago="${m.id}" style="padding:6px 10px;font-size:.8rem">Marcar como paga</button>`);
                 acoes.push(`<button class="btn" data-editar-venc="${m.id}" style="padding:6px 10px;font-size:.8rem;background:#eef2f7;color:#2c3e50">Editar vencimento</button>`);
                 acoes.push(`<button class="btn" data-excluir="${m.id}" style="padding:6px 10px;font-size:.8rem;background:#fdecea;color:#c0392b">Excluir</button>`);
             }
+            const boletoCelula = souFornecedor
+                ? `<button class="btn" data-editar-boleto="${m.id}" style="padding:5px 9px;font-size:.78rem;background:#eef2f7;color:#2c3e50">${temBoleto ? 'Editar boleto' : 'Vincular boleto'}</button>`
+                : (temBoleto ? (m.boleto_url ? `<a class="boleto-link" href="${escapeHtml(m.boleto_url)}" target="_blank" rel="noopener">Ver boleto</a>` : 'Boleto disponível') : '—');
             return `<tr data-row="${m.id}">
                 <td>${escapeHtml(m.referencia || '-')}</td>
                 <td>${money(m.valor)}</td>
                 <td data-venc-cell>${formatarData(m.vencimento)}</td>
                 <td>${badge}</td>
+                <td data-boleto-cell>${boletoCelula}</td>
                 <td><div style="display:flex;gap:6px;flex-wrap:wrap">${acoes.join('')}</div></td>
             </tr>`;
         }).join('');
@@ -163,6 +170,46 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.querySelectorAll('[data-excluir]').forEach(btn => {
             btn.addEventListener('click', () => excluirMensalidade(btn.dataset.excluir));
         });
+        tbody.querySelectorAll('[data-editar-boleto]').forEach(btn => {
+            btn.addEventListener('click', () => iniciarEdicaoBoleto(btn.dataset.editarBoleto));
+        });
+    }
+
+    function iniciarEdicaoBoleto(id) {
+        const m = mensalidades.find(x => x.id === id);
+        if (!m) return;
+        const linha = $('mensalidades-tbody').querySelector(`tr[data-row="${id}"]`);
+        const celula = linha && linha.querySelector('[data-boleto-cell]');
+        if (!celula) return;
+        celula.innerHTML = `
+            <div style="display:flex;flex-direction:column;gap:5px;min-width:220px">
+                <input type="text" data-campo="url" placeholder="Link do PDF do boleto" value="${escapeHtml(m.boleto_url || '')}" style="padding:5px;border:1px solid var(--line);border-radius:6px;font-size:.8rem">
+                <input type="text" data-campo="linha" placeholder="Linha digitável" value="${escapeHtml(m.boleto_linha_digitavel || '')}" style="padding:5px;border:1px solid var(--line);border-radius:6px;font-size:.8rem;font-family:monospace">
+                <div>
+                    <button class="btn btn-salvar" style="padding:5px 9px;font-size:.78rem">Salvar</button>
+                    <button class="btn" style="padding:5px 9px;font-size:.78rem;background:#eef2f7;color:#2c3e50">Cancelar</button>
+                </div>
+            </div>
+        `;
+        const inputUrl = celula.querySelector('[data-campo="url"]');
+        const inputLinha = celula.querySelector('[data-campo="linha"]');
+        const [btnSalvar, btnCancelar] = celula.querySelectorAll('button');
+        btnCancelar.addEventListener('click', renderMensalidades);
+        btnSalvar.addEventListener('click', () => salvarBoleto(id, inputUrl.value, inputLinha.value));
+    }
+
+    async function salvarBoleto(id, url, linhaDigitavel) {
+        if (!souFornecedor) return;
+        try {
+            await COL_MENSALIDADES.doc(id).update({
+                boleto_url: (url || '').trim(),
+                boleto_linha_digitavel: (linhaDigitavel || '').trim()
+            });
+            flash('Boleto vinculado.');
+            await carregarMensalidades();
+        } catch (err) {
+            alert('Erro ao salvar boleto: ' + err.message);
+        }
     }
 
     function iniciarEdicaoVencimento(id) {
@@ -354,6 +401,43 @@ document.addEventListener('DOMContentLoaded', () => {
         navigator.clipboard.writeText(texto).then(
             () => flash('Código PIX copiado!'),
             () => { $('pix-copia-cola').select(); document.execCommand('copy'); flash('Código PIX copiado!'); }
+        );
+    }
+
+    // ---------- Boleto BTG: mostrado junto do PIX quando a cobrança atual tiver um vinculado ----------
+    function renderBoleto() {
+        const wrap = $('boleto-box-wrap');
+        const cobranca = cobrancaAtual();
+        const btnAbrir = $('btn-abrir-boleto');
+        const linhaWrap = $('boleto-linha-wrap');
+
+        if (!cobranca || (!cobranca.boleto_url && !cobranca.boleto_linha_digitavel)) {
+            wrap.style.display = 'none';
+            return;
+        }
+        wrap.style.display = '';
+
+        if (cobranca.boleto_url) {
+            btnAbrir.href = cobranca.boleto_url;
+            btnAbrir.style.display = '';
+        } else {
+            btnAbrir.style.display = 'none';
+        }
+
+        if (cobranca.boleto_linha_digitavel) {
+            $('boleto-linha-digitavel').value = cobranca.boleto_linha_digitavel;
+            linhaWrap.style.display = '';
+        } else {
+            linhaWrap.style.display = 'none';
+        }
+    }
+
+    function copiarBoleto() {
+        const texto = $('boleto-linha-digitavel').value;
+        if (!texto) return;
+        navigator.clipboard.writeText(texto).then(
+            () => flash('Linha digitável copiada!'),
+            () => { $('boleto-linha-digitavel').select(); document.execCommand('copy'); flash('Linha digitável copiada!'); }
         );
     }
 });

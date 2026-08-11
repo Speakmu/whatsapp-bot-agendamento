@@ -49,7 +49,12 @@
         .pix-copia { flex:1; min-width:240px; }
         .pix-copia textarea { width:100%; min-height:70px; font-family:monospace; font-size:.82rem; border:1px solid var(--line); border-radius:8px; padding:10px; resize:vertical; }
 
+        .boleto-copia textarea { width:100%; min-height:56px; font-family:monospace; font-size:.82rem; border:1px solid var(--line); border-radius:8px; padding:10px; resize:vertical; }
+        .btn-boleto { background:#2c5ea8; }
+
         .admin-only { border-top:2px dashed var(--line); margin-top:8px; padding-top:16px; }
+        .boleto-link { font-size:.82rem; color:var(--accent); text-decoration:none; font-weight:700; }
+        .boleto-link:hover { text-decoration:underline; }
     </style>
 </head>
 
@@ -75,15 +80,30 @@
             </div>
         </div>
 
+        <div class="box" id="boleto-box-wrap" style="display:none">
+            <h2>Boleto bancário</h2>
+            <div class="sub">Boleto registrado no banco pra essa mensalidade — alternativa ao PIX acima.</div>
+            <div class="acoes" style="margin-bottom:12px">
+                <a class="btn btn-boleto" id="btn-abrir-boleto" href="#" target="_blank" rel="noopener" style="display:none;text-decoration:none">Abrir / baixar boleto (PDF)</a>
+            </div>
+            <div class="boleto-copia" id="boleto-linha-wrap" style="display:none">
+                <label style="display:block;font-size:.82rem;color:var(--muted);margin-bottom:6px;font-weight:600">Linha digitável</label>
+                <textarea id="boleto-linha-digitavel" readonly></textarea>
+                <div class="acoes" style="margin-top:8px">
+                    <button class="btn btn-boleto" id="btn-copiar-boleto">Copiar linha digitável</button>
+                </div>
+            </div>
+        </div>
+
         <div class="box">
             <h2>Histórico de mensalidades</h2>
             <div class="sub">Cobranças lançadas para esta loja.</div>
             <table>
                 <thead>
-                    <tr><th>Referência</th><th>Valor</th><th>Vencimento</th><th>Status</th><th></th></tr>
+                    <tr><th>Referência</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Boleto</th><th></th></tr>
                 </thead>
                 <tbody id="mensalidades-tbody">
-                    <tr><td colspan="5" class="empty">Carregando...</td></tr>
+                    <tr><td colspan="6" class="empty">Carregando...</td></tr>
                 </tbody>
             </table>
         </div>
