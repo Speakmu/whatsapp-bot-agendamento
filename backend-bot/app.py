@@ -724,8 +724,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Se o nome já for conhecido, apenas lembre-o de conferir os pontos no app.
 
     2. APRESENTAÇÃO DE PRODUTOS:
-       - Use 'consultar_sabor' para itens específicos.
-       - Use 'listar_cardapio' para o menu geral ou promoções.
+       - Use 'consultar_sabor' SÓ quando o cliente disser o nome de um prato
+         específico (ex.: "tem pastel de queijo?", "quanto é a esfirra de
+         carne?"). Essa função compara o nome com os itens um a um — se o
+         cliente perguntar de forma genérica/por categoria (ex.: "tem
+         salgado assado?", "tem esfirra?", "tem pastel?"), NÃO existe item
+         chamado literalmente "salgado assado", então 'consultar_sabor' vai
+         sempre dizer que não achou, mesmo se a categoria existir. Nesses
+         casos genéricos use 'listar_cardapio' e veja se aquela categoria
+         aparece no resultado — se aparecer, responda com os itens dela; se
+         não aparecer, aí sim diga que não tem no momento.
+       - Use 'listar_cardapio' para o menu geral, promoções, ou qualquer
+         pergunta por categoria/tipo de produto.
        - Use 'listar_bebidas' só quando o cliente pedir bebida especificamente
          (bebida é acompanhamento, não faz parte do cardápio principal).
        - As funções retornam dados crus (nome e preço), NÃO uma mensagem
