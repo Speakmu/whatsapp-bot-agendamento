@@ -77,8 +77,17 @@
 
         <div class="box">
             <h2>Pagamentos (Cart&atilde;o na maquininha)</h2>
-            <div class="sub">Integra&ccedil;&atilde;o com a maquininha Point (Mercado Pago) para cobran&ccedil;a autom&aacute;tica no Caixa. O token de acesso j&aacute; &eacute; usado pelo app do cliente e fica protegido no servidor &mdash; aqui s&oacute; o identificador do terminal.</div>
+            <div class="sub">Integra&ccedil;&atilde;o com a maquininha f&iacute;sica para cobran&ccedil;a autom&aacute;tica no Caixa. As chaves de acesso ficam protegidas no servidor &mdash; aqui s&oacute; o provedor ativo e o identificador do terminal.</div>
+            <div class="campo">
+                <label>Provedor da maquininha</label>
+                <select id="pag-provedor">
+                    <option value="mercadopago">Mercado Pago (Point)</option>
+                    <option value="stone">Stone</option>
+                </select>
+                <small>Define qual maquininha o Caixa vai acionar quando a forma de pagamento for Cart&atilde;o.</small>
+            </div>
             <div class="campo"><label>ID do terminal Point (device_id)</label><input id="pag-point-device" placeholder="PAX_A910__XXXXXXXXXXXXXXX"></div>
+            <div class="campo"><label>N&uacute;mero de s&eacute;rie do terminal Stone</label><input id="pag-stone-serial" placeholder="Ex: 1078295125"><small>Fica na etiqueta da maquininha ou no portal da Stone. Se a maquininha for trocada, s&oacute; atualizar aqui.</small></div>
             <div class="acoes"><button class="btn btn-salvar" id="salvar-pagamentos">Salvar configura&ccedil;&otilde;es de pagamento</button></div>
         </div>
 

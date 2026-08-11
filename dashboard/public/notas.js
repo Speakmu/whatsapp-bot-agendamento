@@ -11,7 +11,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const money = (v) => "R$ " + (Number(v) || 0).toFixed(2).replace('.', ',');
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-    let notasPorPedido = {};   // pedido_id -> nota (autorizada)
+    let notasPorPedido = {};   // pedido_id -> nota ativa (em andamento ou concluída)
+    // Status que indicam nota já ativa para o pedido — enquanto existir uma
+    // dessas, não deixa reemitir manualmente (evita duas notas para a mesma venda).
+    // ERRO (SEFAZ rejeitou de fato) fica de fora de propósito: aí é reemissão válida.
+    const STATUS_NOTA_ATIVA = ['PROCESSANDO', 'ERRO_REDE', 'CONTINGENCIA', 'AUTORIZADA'];
 
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
@@ -38,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
             snap.forEach(d => {
                 const n = { id: d.id, ...d.data() };
                 notas.push(n);
-                if (n.status === 'AUTORIZADA' && n.pedido_id) notasPorPedido[n.pedido_id] = n;
+                if (n.pedido_id && STATUS_NOTA_ATIVA.includes(n.status)) notasPorPedido[n.pedido_id] = n;
             });
             notas.sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
             renderNotas(notas);
@@ -65,8 +69,14 @@ document.addEventListener('DOMContentLoaded', () => {
         tb.innerHTML = pedidosCache.map(p => {
             const hora = p.hora_pedido?.toDate ? p.hora_pedido.toDate().toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '--';
             const jaTem = notasPorPedido[p.id];
+            const rotuloStatus = {
+                PROCESSANDO: 'Processando...',
+                ERRO_REDE: 'Aguardando conexão',
+                CONTINGENCIA: 'Contingência (pendente)',
+                AUTORIZADA: 'NFC-e emitida'
+            };
             const acao = jaTem
-                ? `<span class="badge b-aut">NFC-e emitida</span>`
+                ? `<span class="badge b-aut">${rotuloStatus[jaTem.status] || jaTem.status}</span>`
                 : `<button class="btn btn-emitir" data-id="${p.id}">Emitir NFC-e</button>`;
             return `<tr>
                 <td>#${p.id.substring(0, 5)}</td>

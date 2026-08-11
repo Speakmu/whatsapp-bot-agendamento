@@ -30,6 +30,7 @@ whatsapp-bot-agendamentos.json
 **/.firebase/
 firebase-debug.log
 firestore-debug.log
+test-env/backups/
 
 # ===== Sobras / legado =====
 _legado_raiz_expo/

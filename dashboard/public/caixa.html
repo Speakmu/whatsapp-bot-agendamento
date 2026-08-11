@@ -12,6 +12,15 @@
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
     <script src="/firebase-config.js"></script>
     <script src="/emu.js"></script>
+    <script>
+        // Registra o Service Worker que cacheia o "esqueleto" estático do PDV
+        // (HTML/JS/CSS), para a página conseguir abrir/recarregar mesmo sem
+        // internet. Os dados (vendas, cardápio, sessão) ficam por conta do
+        // Firestore com persistência offline (caixa.js).
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+        }
+    </script>
 
     <link rel="stylesheet" href="/shell.css">
     <style>
@@ -38,35 +47,51 @@
         .panel { background:var(--card); border-radius:12px; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--line); }
         .panel-head { padding:12px 14px; font-weight:700; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; align-items:center; gap:10px; }
         .panel-body { padding:12px; overflow-y:auto; flex:1; }
-        #busca-produto, #produto-select { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; }
-        .pdv-add { display:grid; grid-template-columns:1fr auto; gap:8px; padding:12px; border-bottom:1px solid var(--line); }
-        .pdv-add button { padding:10px 14px; border:none; border-radius:8px; background:var(--ok); color:#fff; font-weight:800; cursor:pointer; }
+        #busca-produto { width:100%; padding:10px; border:1px solid var(--line); border-radius:8px; font-size:.95rem; }
         .pdv-feedback { margin:0 12px 10px; padding:10px 12px; border-radius:8px; background:#e6f9ef; color:#1e8e4f; font-weight:700; font-size:.9rem; }
+
+        /* ---------- Painel de produtos (grid touch) ---------- */
+        .produtos-busca { padding:12px; border-bottom:1px solid var(--line); }
+        .cat-pills { display:flex; gap:6px; padding:10px 12px 0; overflow-x:auto; flex:0 0 auto; }
+        .cat-pill { flex:0 0 auto; padding:8px 14px; min-height:36px; border-radius:999px; border:1px solid var(--line); background:#fff; font-size:.82rem; font-weight:700; cursor:pointer; white-space:nowrap; color:var(--txt); }
+        .cat-pill.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+        .produtos-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:10px; padding:12px; overflow-y:auto; flex:1; align-content:start; }
+        .produto-card { display:flex; flex-direction:column; gap:6px; border:1px solid var(--line); border-radius:10px; background:#fff; cursor:pointer; padding:8px; text-align:left; font-family:inherit; }
+        .produto-card:active { background:#f1f3f5; transform:scale(.97); }
+        .produto-card .produto-img { width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; background:var(--bg); }
+        .produto-card .produto-emoji { width:100%; aspect-ratio:1; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:1.9rem; background:var(--bg); }
+        .produto-card .produto-nome { font-size:.82rem; font-weight:700; line-height:1.2; }
+        .produto-card .produto-preco { font-size:.8rem; color:var(--accent); font-weight:800; }
+
+        /* ---------- Comandas para receber (versão compacta, no painel de venda) ---------- */
+        .comandas-mini { flex:0 0 auto; max-height:220px; display:flex; flex-direction:column; border-bottom:1px solid var(--line); }
+        .comandas-mini-head { padding:10px 14px; font-weight:700; font-size:.85rem; display:flex; justify-content:space-between; align-items:center; color:var(--muted); background:#fafbfc; flex:0 0 auto; }
+        .comandas-mini-lista { overflow-y:auto; padding:6px 12px; flex:1; }
+        .mesa-pendente { display:flex; flex-direction:column; gap:6px; padding:8px 0; border-bottom:1px dashed var(--line); font-size:.85rem; }
+        .mesa-pendente .linha-topo { display:flex; justify-content:space-between; align-items:center; }
+        .mesa-pendente .mesa-num { font-weight:900; font-size:.95rem; }
+        .mesa-pendente .valor { font-weight:900; }
+        .mesa-pendente .meta { color:var(--muted); font-size:.78rem; }
+        .mesa-pendente .acoes-mini { display:flex; gap:6px; }
+        .mesa-pagamento { flex:1; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; font-weight:700; font-size:.82rem; }
+        .mesa-pendente button { flex:0 0 auto; padding:9px 12px; border:none; border-radius:8px; background:var(--ok); color:#fff; font-weight:800; cursor:pointer; font-size:.82rem; }
+        .mesa-pendente button:disabled { background:#bdc3c7; cursor:not-allowed; }
 
         /* carrinho */
         .cart-item { display:grid; grid-template-columns:1fr auto; gap:6px; padding:8px 0; border-bottom:1px dashed var(--line); }
         .cart-item .ci-nome { font-weight:600; font-size:.9rem; }
         .cart-item .ci-sub { color:var(--muted); font-size:.8rem; }
         .qty { display:flex; align-items:center; gap:8px; }
-        .qty button { width:26px; height:26px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; font-weight:700; }
-        .ci-rm { color:var(--danger); cursor:pointer; font-size:.8rem; background:none; border:none; }
+        .qty button { width:40px; height:40px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font-weight:700; font-size:1.05rem; }
+        .ci-rm { color:var(--danger); cursor:pointer; font-size:.85rem; background:none; border:none; padding:10px; min-width:44px; min-height:44px; }
         .cart-total { font-size:1.5rem; font-weight:800; text-align:right; padding:10px 0; }
         .pag-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
-        .pag-btn { padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; font-size:.85rem; }
+        .pag-btn { padding:14px 10px; min-height:48px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; font-size:.9rem; }
         .pag-btn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
         .check-cozinha { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--muted); margin-bottom:10px; }
         .btn-finalizar { width:100%; padding:14px; border:none; border-radius:10px; background:var(--ok); color:#fff; font-size:1.1rem; font-weight:700; cursor:pointer; }
         .btn-finalizar:disabled { background:#bdc3c7; cursor:not-allowed; }
         .btn-limpar { background:none; border:none; color:var(--danger); cursor:pointer; font-size:.85rem; }
-        .mesa-pendentes { display:flex; flex-direction:column; min-height:0; height:100%; }
-        .mesa-pendentes-lista { overflow-y:auto; padding:12px; flex:1; }
-        .mesa-pendente { display:grid; grid-template-columns:90px 1fr 110px 120px 100px; gap:10px; align-items:center; border-bottom:1px solid var(--line); padding:9px 0; }
-        .mesa-pendente .mesa-num { font-weight:900; font-size:1rem; }
-        .mesa-pendente .meta { color:var(--muted); font-size:.82rem; }
-        .mesa-pendente .valor { font-weight:900; text-align:right; }
-        .mesa-pagamento { width:100%; padding:8px; border:1px solid var(--line); border-radius:8px; background:#fff; font-weight:700; }
-        .mesa-pendente button { padding:9px 10px; border:none; border-radius:8px; background:var(--ok); color:#fff; font-weight:800; cursor:pointer; }
-        .mesa-pendente button:disabled { background:#bdc3c7; cursor:not-allowed; }
         .mesa-itens { margin-top:4px; }
         .mesa-itens summary { cursor:pointer; color:var(--blue); font-size:.82rem; font-weight:700; list-style:none; width:max-content; }
         .mesa-itens summary::-webkit-details-marker { display:none; }
@@ -95,8 +120,6 @@
         @media (max-width:900px){
             #view-pdv{ grid-template-columns:1fr; overflow-y:auto; }
             #view-caixa{ grid-template-columns:1fr; }
-            .mesa-pendente { grid-template-columns:1fr; align-items:start; }
-            .mesa-pendente .valor { text-align:left; }
         }
         @media (max-width:700px){
             body { height:auto; min-height:100vh; overflow:auto; }
@@ -108,14 +131,22 @@
             #caixa-indicador { font-size:.95rem; padding:8px 12px; }
             main { overflow:visible; }
             #view-pdv { height:auto; display:flex; flex-direction:column; gap:10px; padding:10px; }
-            #view-pdv > .panel:not(.mesa-pendentes) { order:1; }
-            #view-pdv > .mesa-pendentes { order:2; }
+            #view-pdv > .panel:not(.produtos-box) { order:1; }
+            #view-pdv > .produtos-box { order:2; }
             .panel { border-radius:10px; overflow:visible; }
             .panel-head { padding:14px; align-items:flex-start; flex-direction:column; }
             .panel-body { overflow:visible; max-height:none; }
-            .pdv-add { grid-template-columns:1fr; padding:12px; }
-            .pdv-add button { width:100%; min-height:52px; font-size:1rem; }
-            #busca-produto, #produto-select { min-height:46px; font-size:1rem; }
+            #busca-produto { min-height:46px; font-size:1rem; }
+            .produtos-grid { overflow:visible; grid-template-columns:repeat(auto-fill, minmax(100px,1fr)); }
+            .produto-card { min-height:110px; }
+            .comandas-mini { max-height:none; }
+            .comandas-mini-lista { overflow:visible; padding:10px; }
+            .mesa-pendente { padding:14px; margin-bottom:10px; border:1px solid var(--line); border-radius:10px; background:#fff; }
+            .mesa-pendente .mesa-num { font-size:1.1rem; }
+            .mesa-pendente .valor { font-size:1.2rem; }
+            .mesa-pendente .acoes-mini { flex-direction:column; }
+            .mesa-pagamento { min-height:46px; font-size:1rem; }
+            .mesa-pendente button { width:100%; min-height:50px; font-size:1rem; }
             .cart-item { grid-template-columns:1fr; gap:10px; padding:12px; margin-bottom:8px; border:1px solid var(--line); border-radius:10px; background:#fff; }
             .qty { justify-content:space-between; }
             .qty button { width:40px; height:36px; }
@@ -123,13 +154,6 @@
             .pag-grid { grid-template-columns:1fr; }
             .pag-btn { min-height:44px; font-size:.95rem; font-weight:700; }
             .btn-finalizar { min-height:52px; }
-            .mesa-pendentes { height:auto; }
-            .mesa-pendentes-lista { overflow:visible; padding:10px; }
-            .mesa-pendente { grid-template-columns:1fr; gap:8px; padding:14px; margin-bottom:10px; border:1px solid var(--line); border-radius:10px; background:#fff; }
-            .mesa-pendente .mesa-num { font-size:1.1rem; }
-            .mesa-pendente .valor { text-align:left; font-size:1.2rem; }
-            .mesa-pagamento { min-height:46px; font-size:1rem; }
-            .mesa-pendente button { width:100%; min-height:50px; font-size:1rem; }
             .mesa-itens li { flex-direction:column; gap:2px; }
         }
     </style>
@@ -151,13 +175,16 @@
     <main>
         <!-- ===================== PDV ===================== -->
         <section id="view-pdv">
-            <div class="panel mesa-pendentes" id="mesa-pendentes-box">
+            <div class="panel produtos-box" id="produtos-box">
                 <div class="panel-head">
-                    <span>Comandas para receber</span>
-                    <span id="mesa-pendentes-total" style="color:var(--muted);font-size:.85rem;">0 abertas</span>
+                    <span>Produtos</span>
                 </div>
-                <div class="mesa-pendentes-lista" id="mesa-pendentes-lista">
-                    <div class="empty-state">Nenhuma comanda enviada ao caixa.</div>
+                <div class="produtos-busca">
+                    <input id="busca-produto" placeholder="Buscar item..." autocomplete="off">
+                </div>
+                <div class="cat-pills" id="cat-pills"></div>
+                <div class="produtos-grid" id="produtos-grid">
+                    <div class="empty-state">Carregando cardápio...</div>
                 </div>
             </div>
 
@@ -166,17 +193,19 @@
                     <span>Venda rápida / balcão</span>
                     <button class="btn-limpar" id="btn-limpar">Limpar</button>
                 </div>
-                <div class="pdv-add">
-                    <div>
-                        <input id="busca-produto" placeholder="Buscar item..." autocomplete="off">
-                        <select id="produto-select" style="margin-top:8px;"></select>
+                <div class="comandas-mini" id="mesa-pendentes-box">
+                    <div class="comandas-mini-head">
+                        <span>Comandas para receber</span>
+                        <span id="mesa-pendentes-total">0 abertas</span>
                     </div>
-                    <button id="btn-add-produto" type="button">Adicionar</button>
+                    <div class="comandas-mini-lista" id="mesa-pendentes-lista">
+                        <div class="empty-state">Nenhuma comanda enviada ao caixa.</div>
+                    </div>
                 </div>
                 <div id="pdv-feedback" class="pdv-feedback hidden"></div>
                 <div class="panel-body">
                     <div id="cart-vazio" class="aviso" style="background:#f1f3f5;border-color:var(--line);color:var(--muted);">
-                        Selecione um item acima para montar uma venda de balcão.
+                        Toque em um produto ao lado para montar uma venda de balcão.
                     </div>
                     <div id="cart-itens"></div>
                 </div>

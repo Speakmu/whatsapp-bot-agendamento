@@ -418,17 +418,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Emissão fiscal automática (respeita Configurações → Fiscal)
+    // FiscalClient.emitirAutomatico já marca o pedido como pendente quando falha
+    // (ex.: sem internet no momento da venda) — o retry automático do
+    // fiscal-client.js tenta de novo sozinho assim que a conexão voltar.
     async function autoEmitirNFCe(pedidoId, pedido) {
         if (!window.FiscalClient) return;
-        let cfg;
-        try { cfg = await FiscalClient.getConfig(); } catch { return; }
-        if (!cfg || !cfg.ativo) return;
-        if (!['automatico', 'ambos'].includes(cfg.modo)) return;
         try {
-            const nota = await FiscalClient.emitir(pedidoId, pedido);
-            alert(`NFC-e emitida automaticamente (nº ${nota.nNF}).`);
+            const nota = await FiscalClient.emitirAutomatico(pedidoId, pedido);
+            if (nota) alert(`NFC-e emitida automaticamente (nº ${nota.nNF}).`);
         } catch (err) {
-            console.warn('NFC-e automática (mesa) não emitida:', err.message);
+            console.warn('NFC-e automática (mesa) não emitida — tentaremos de novo quando a conexão voltar:', err.message);
         }
     }
 

@@ -12,6 +12,7 @@
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
     <script src="/firebase-config.js"></script>
     <script src="/emu.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 
     <link rel="stylesheet" href="/shell.css">
     <style>
@@ -20,6 +21,12 @@
             --bg:#f4f6f9; --card:#fff; --txt:#1d344c; --muted:#738391;
             --accent:#ff5200; --ok:#2ecc71; --danger:#e74c3c; --warn:#e67e22;
             --line:#dfe5eb; --blue:#2f6fed; --soft:#f8fafc;
+            /* Paleta de dados validada (dataviz skill) - categorica, status e sequencial */
+            --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100;
+            --series-5:#e87ba4; --series-6:#008300; --series-7:#4a3aa7; --series-8:#e34948;
+            --status-good:#0ca30c; --status-warning:#fab219; --status-serious:#ec835a; --status-critical:#d03b3b;
+            --seq-blue-300:#6da7ec; --seq-blue-500:#256abf;
+            --chart-grid:#e1e0d9; --chart-axis:#c3c2b7; --chart-muted:#898781;
         }
         body { background:var(--bg); color:var(--txt); font-family:'Segoe UI',Roboto,system-ui,sans-serif; min-height:100vh; }
         .topbar { background:#fff; border-bottom:3px solid var(--accent); padding:18px 24px; }
@@ -35,16 +42,19 @@
         .banner span { font-size:.9rem; }
         .banner a { margin-left:8px; font-size:.85rem; color:var(--blue); text-decoration:none; font-weight:700; }
 
-        .kpis { display:grid; grid-template-columns:repeat(3,minmax(150px,1fr)); gap:14px; margin-bottom:18px; }
+        .kpis { display:grid; grid-template-columns:repeat(6,minmax(140px,1fr)); gap:14px; margin-bottom:18px; }
         .kpi { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:16px; position:relative; min-height:94px; }
         .kpi .ic { position:absolute; right:14px; top:14px; font-size:1.45rem; opacity:.22; }
         .kpi .rotulo { font-size:.74rem; color:var(--muted); text-transform:uppercase; }
-        .kpi .valor { font-size:1.65rem; font-weight:800; margin-top:9px; }
+        .kpi .valor { font-size:1.65rem; font-weight:800; margin-top:9px; font-variant-numeric:proportional-nums; }
         .kpi .sub { color:var(--muted); font-size:.78rem; margin-top:2px; }
-        .kpi.vendas .valor { color:var(--ok); }
-        .kpi.alerta .valor { color:var(--danger); }
-        .kpi.caixa-aberto .valor { color:#179957; font-size:1.25rem; }
-        .kpi.caixa-fechado .valor { color:var(--danger); font-size:1.25rem; }
+        .kpi .delta { font-size:.78rem; font-weight:700; margin-top:4px; }
+        .kpi .delta.up { color:var(--status-good); }
+        .kpi .delta.down { color:var(--status-critical); }
+        .kpi.vendas .valor { color:var(--status-good); }
+        .kpi.alerta .valor { color:var(--status-critical); }
+        .kpi.caixa-aberto .valor { color:var(--status-good); font-size:1.25rem; }
+        .kpi.caixa-fechado .valor { color:var(--status-critical); font-size:1.25rem; }
 
         .chart-grid { display:grid; grid-template-columns:1.1fr 1.4fr .9fr; gap:16px; align-items:stretch; margin-bottom:16px; }
         .dashboard-grid { display:grid; grid-template-columns:minmax(420px,.95fr) minmax(520px,1.05fr); gap:16px; align-items:start; }
@@ -59,9 +69,9 @@
             display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:10px; align-items:center;
             padding:12px; border:1px solid var(--line); border-left:4px solid var(--blue); border-radius:8px; background:var(--soft);
         }
-        .pending.warn { border-left-color:var(--warn); }
-        .pending.danger { border-left-color:var(--danger); }
-        .pending.ok { border-left-color:var(--ok); }
+        .pending.warn { border-left-color:var(--status-warning); }
+        .pending.danger { border-left-color:var(--status-critical); }
+        .pending.ok { border-left-color:var(--status-good); }
         .pending .pi { font-size:1.25rem; }
         .pending strong { display:block; font-size:.92rem; }
         .pending small { color:var(--muted); }
@@ -78,36 +88,20 @@
         .order-total, .rank-total { font-weight:900; color:var(--txt); white-space:nowrap; }
         .badge { display:inline-flex; margin-top:5px; padding:4px 8px; border-radius:999px; font-size:.72rem; font-weight:800; background:#eef3f8; color:#516170; }
 
-        .chart-body { min-height:250px; display:flex; flex-direction:column; justify-content:center; }
-        .donut-wrap { display:grid; grid-template-columns:156px minmax(0,1fr); gap:18px; align-items:center; }
-        .donut {
-            width:156px; height:156px; border-radius:50%;
-            background:conic-gradient(var(--ok) 0deg, var(--ok) 0deg, #edf1f5 0deg 360deg);
-            display:grid; place-items:center; position:relative;
-        }
-        .donut::after { content:""; width:104px; height:104px; border-radius:50%; background:#fff; position:absolute; }
-        .donut-center { position:relative; z-index:1; text-align:center; }
-        .donut-center strong { display:block; font-size:1.6rem; line-height:1; }
-        .donut-center span { color:var(--muted); font-size:.76rem; }
-        .legend { display:flex; flex-direction:column; gap:9px; }
-        .legend-row { display:grid; grid-template-columns:12px minmax(0,1fr) auto; gap:9px; align-items:center; color:var(--muted); font-size:.86rem; }
-        .dot { width:10px; height:10px; border-radius:50%; background:var(--blue); }
-        .dot.ok { background:var(--ok); } .dot.warn { background:var(--warn); } .dot.danger { background:var(--danger); }
-
-        .bar-item { display:grid; gap:6px; }
-        .bar-top { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:.9rem; }
-        .bar-top strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        .bar-track { height:12px; background:#edf2f7; border-radius:999px; overflow:hidden; }
-        .bar-fill { height:100%; min-width:4px; border-radius:999px; background:linear-gradient(90deg,var(--accent),#f39c12); }
-        .bar-sub { color:var(--muted); font-size:.76rem; }
+        .chart-body { min-height:250px; }
+        .chart-canvas-wrap { position:relative; height:230px; }
+        .chart-canvas-wrap.short { height:150px; }
+        .chart-stat-row { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; }
+        .chart-stat-row strong { font-size:1.5rem; font-weight:800; }
+        .chart-stat-row span { color:var(--muted); font-size:.82rem; }
 
         .meters { display:grid; gap:14px; }
         .meter-card { padding:12px; border:1px solid var(--line); border-radius:8px; background:#f8fafc; }
         .meter-top { display:flex; justify-content:space-between; gap:10px; font-weight:800; margin-bottom:8px; }
         .meter-track { height:16px; background:#e9eef4; border-radius:999px; overflow:hidden; }
-        .meter-fill { height:100%; border-radius:999px; background:var(--ok); }
-        .meter-fill.warn { background:var(--warn); }
-        .meter-fill.danger { background:var(--danger); }
+        .meter-fill { height:100%; border-radius:999px; background:var(--status-good); }
+        .meter-fill.warn { background:var(--status-warning); }
+        .meter-fill.danger { background:var(--status-critical); }
         .meter-note { margin-top:7px; color:var(--muted); font-size:.78rem; }
 
         .lower-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
@@ -128,7 +122,6 @@
             .kpi .valor { font-size:1.35rem; }
             .chart-grid, .dashboard-grid { grid-template-columns:1fr; gap:12px; }
             .chart-grid .panel:last-child { grid-column:auto; }
-            .donut-wrap { grid-template-columns:1fr; justify-items:center; }
             .panel-head, .panel-body { padding-left:12px; padding-right:12px; }
             .pending { grid-template-columns:28px minmax(0,1fr); }
             .pending a { grid-column:2; }
@@ -152,12 +145,34 @@
         </div>
 
         <div class="kpis">
+            <div class="kpi vendas"><span class="ic">&#128176;</span><div class="rotulo">Faturamento hoje</div><div class="valor" id="kpi-vendas">R$ 0,00</div><div class="sub" id="kpi-ticket">Ticket medio R$ 0,00</div></div>
+            <div class="kpi"><span class="ic">&#128203;</span><div class="rotulo">Pedidos ativos</div><div class="valor" id="kpi-ativos">0</div><div class="sub">em andamento agora</div></div>
             <div class="kpi"><span class="ic">&#127869;</span><div class="rotulo">Mesas ocupadas</div><div class="valor" id="kpi-mesas">0/0</div><div class="sub" id="kpi-comandas">0 comandas no caixa</div></div>
             <div class="kpi alerta"><span class="ic">&#128230;</span><div class="rotulo">Estoque baixo</div><div class="valor" id="kpi-estoque">0</div><div class="sub">itens para repor</div></div>
             <div class="kpi caixa-fechado" id="kpi-caixa-card"><span class="ic">&#128181;</span><div class="rotulo">Caixa</div><div class="valor" id="kpi-caixa">FECHADO</div><div class="sub" id="kpi-caixa-sub">Abra para vender</div></div>
         </div>
 
-        <div class="dashboard-grid">
+        <div class="chart-grid">
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Pedidos por status (hoje)</h2>
+                    <span id="grafico-vendas-legenda">0 pedidos</span>
+                </div>
+                <div class="panel-body chart-body">
+                    <div class="chart-canvas-wrap short"><canvas id="chart-status"></canvas></div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Mais vendidos hoje</h2>
+                    <span>Top 5</span>
+                </div>
+                <div class="panel-body chart-body">
+                    <div class="chart-canvas-wrap"><canvas id="chart-produtos"></canvas></div>
+                </div>
+            </section>
+
             <section class="panel">
                 <div class="panel-head">
                     <h2>Ocupacao e caixa</h2>
@@ -169,7 +184,9 @@
                     </div>
                 </div>
             </section>
+        </div>
 
+        <div class="dashboard-grid">
             <section class="panel">
                 <div class="panel-head">
                     <h2>Pendencias agora</h2>
@@ -178,6 +195,18 @@
                 <div class="panel-body">
                     <div id="pendencias-lista" class="pending-list">
                         <div class="empty">Carregando operacao...</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Ultimos pedidos</h2>
+                    <a href="/mesas.html">Ver tudo</a>
+                </div>
+                <div class="panel-body">
+                    <div id="ultimos-pedidos" class="orders-list">
+                        <div class="empty">Carregando pedidos...</div>
                     </div>
                 </div>
             </section>

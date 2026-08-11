@@ -13,7 +13,9 @@
     "cloud:seed": "node cloud-seed.js",
     "cloud:sim": "node cloud-sim.js",
     "cloud:clean": "node cloud-clean.js",
-    "cloud:deploy": "firebase --project pizzain-40973 --config ../dashboard/firebase.json deploy --only hosting,firestore:rules"
+    "backup:cardapio": "node backup-cardapio.js",
+    "restore:cardapio": "node restore-cardapio.js",
+    "cloud:deploy": "firebase --project salgadinhos-lileamar --config ../dashboard/firebase.json deploy --only hosting,firestore:rules"
   },
   "dependencies": {
     "firebase-admin": "^12.0.0"

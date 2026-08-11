@@ -84,6 +84,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const snap = await DOC_PAGAMENTOS.get();
             const d = snap.exists ? (snap.data() || {}) : {};
             $('pag-point-device').value = d.pointDeviceId || '';
+            $('pag-stone-serial').value = d.stoneDeviceSerial || '';
+            $('pag-provedor').value = d.provedorCartao || 'mercadopago';
         } catch (err) {
             console.warn('pagamentos:', err.message);
         }
@@ -92,7 +94,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function salvarPagamentos() {
         try {
             await DOC_PAGAMENTOS.set({
+                provedorCartao: $('pag-provedor').value,
                 pointDeviceId: $('pag-point-device').value.trim(),
+                stoneDeviceSerial: $('pag-stone-serial').value.trim(),
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
             flash('Configuracoes de pagamento salvas.');

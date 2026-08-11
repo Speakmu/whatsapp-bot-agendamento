@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const auth = firebase.auth();
     const $ = (id) => document.getElementById(id);
 
-    const state = { tab: 'overview', cfg: {}, notas: [], pedidos: [], produtos: [], dfe: [], ibptCache: {} };
+    const state = { tab: 'overview', cfg: {}, notas: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, relatorioMes: mesAtualStr() };
     const tabs = [
         ['overview', 'Visao Geral'],
         ['settings', 'Config fiscal'],
@@ -18,8 +18,21 @@ document.addEventListener('DOMContentLoaded', () => {
         ['inutilization', 'Inutilizacao'],
         ['rules', 'Regras'],
         ['company', 'Empresa'],
-        ['products', 'Produtos']
+        ['products', 'Produtos'],
+        ['report', 'Relatorio']
     ];
+
+    // "YYYY-MM" do mes corrente, no fuso local (nao UTC) — usado como valor
+    // inicial do seletor de periodo do relatorio.
+    function mesAtualStr() {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+    // Converte "YYYY-MM" no intervalo [inicio, fim) do mes, em Date local.
+    function limitesDoMes(mesStr) {
+        const [ano, mes] = String(mesStr || mesAtualStr()).split('-').map(Number);
+        return { inicio: new Date(ano, (mes || 1) - 1, 1), fim: new Date(ano, mes || 1, 1) };
+    }
 
     const money = (v) => 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ',');
     const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -34,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
         listenProducts();
         listenIbptCache();
         listenDfe();
+        listenInsumos();
     });
 
     function renderTabs() {
@@ -122,6 +136,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }, err => console.warn('dfe_documentos:', err.message));
     }
 
+    function listenInsumos() {
+        db.collection('estoque_insumos').onSnapshot(snap => {
+            state.insumos = [];
+            snap.forEach(doc => state.insumos.push({ id: doc.id, ...doc.data() }));
+            state.insumos.sort((a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR'));
+            render();
+        }, err => console.warn('estoque_insumos:', err.message));
+    }
+
     function render() {
         const content = $('fiscal-content');
         if (!content) return;
@@ -129,6 +152,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.tab === 'settings') content.innerHTML = renderSettings();
         if (state.tab === 'documents') content.innerHTML = renderDocuments();
         if (state.tab === 'issuance') content.innerHTML = renderIssuance();
+        if (state.tab === 'report') content.innerHTML = renderReport();
         if (state.tab === 'dfe') content.innerHTML = renderDfe();
         if (state.tab === 'devolution') content.innerHTML = renderPlaceholder('Devolucao', 'Estrutura reservada para emitir devolucao referenciada a uma nota de entrada ou venda.');
         if (state.tab === 'inutilization') content.innerHTML = renderInutilization();
@@ -139,13 +163,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function counts() {
-        const base = { total: state.notas.length, autorizada: 0, rejeitada: 0, cancelada: 0, contingencia: 0, inutilizada: 0 };
+        const base = { total: state.notas.length, autorizada: 0, rejeitada: 0, cancelada: 0, contingencia: 0, inutilizada: 0, processando: 0 };
         state.notas.forEach(n => {
             const s = String(n.status || '').toUpperCase();
             if (s === 'AUTORIZADA') base.autorizada++;
             else if (s === 'CANCELADA') base.cancelada++;
             else if (s === 'CONTINGENCIA') base.contingencia++;
             else if (s === 'INUTILIZADA') base.inutilizada++;
+            else if (s === 'PROCESSANDO') base.processando++;
             else if (s) base.rejeitada++;
         });
         return base;
@@ -158,7 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="grid cards">
                 ${metric('Documentos', c.total)}
                 ${metric('Autorizadas', c.autorizada)}
-                ${metric('Pendencias', c.rejeitada + c.contingencia)}
+                ${metric('Pendencias', c.rejeitada + c.contingencia + c.processando)}
                 ${metric('Valor autorizado', money(total))}
             </div>
             <div class="panel" style="margin-top:14px">
@@ -192,25 +217,140 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function documentsTable(notas) {
         if (!notas.length) return '<div class="empty">Nenhum documento fiscal encontrado.</div>';
-        return `<table><thead><tr><th>Numero</th><th>Status</th><th>Chave</th><th class="num">Valor</th><th>Data</th><th class="num">Acoes</th></tr></thead><tbody>${notas.map(n => {
+        return `<table><thead><tr><th>Numero</th><th>Pedido</th><th>Status</th><th>Forma emissao</th><th>Cliente</th><th>Chave</th><th class="num">Valor</th><th>Data</th><th class="num">Acoes</th></tr></thead><tbody>${notas.map(n => {
             const status = String(n.status || '-').toUpperCase();
-            const cls = status === 'AUTORIZADA' ? 'b-ok' : (status === 'CANCELADA' || status === 'INUTILIZADA' ? 'b-muted' : (status === 'CONTINGENCIA' ? 'b-warn' : 'b-danger'));
+            const cls = status === 'AUTORIZADA' ? 'b-ok' : (status === 'CANCELADA' || status === 'INUTILIZADA' ? 'b-muted' : ((status === 'CONTINGENCIA' || status === 'PROCESSANDO') ? 'b-warn' : 'b-danger'));
             const num = n.tipo === 'INUTILIZACAO' ? `Inut. ${n.nNFIni}-${n.nNFFin}` : (n.nNF || '-');
+            // formaEmissao e permanente (historico); notas antigas sem esse campo caem no fallback abaixo
+            const forma = n.tipo === 'INUTILIZACAO' ? '-' : (n.formaEmissao || (n.contingencia || status === 'CONTINGENCIA' ? 'CONTINGENCIA' : 'NORMAL'));
             const actions = [];
             if (n.danfeBase64) actions.push(`<button class="btn" data-danfe="${n.id}">DANFE</button>`);
+            if (n.xml || n.xmlAssinado) actions.push(`<button class="btn" data-xml="${n.id}">Baixar XML</button>`);
             if (status === 'CONTINGENCIA') actions.push(`<button class="btn primary" data-transmitir="${n.id}">Transmitir</button>`);
             if (status === 'AUTORIZADA' && n.chave && n.protocolo) actions.push(`<button class="btn danger" data-cancelar="${n.id}">Cancelar</button>`);
-            return `<tr><td>${esc(num)}</td><td><span class="badge ${cls}">${esc(status)}</span>${n.motivo ? `<br><span class="muted">${esc(n.motivo)}</span>` : ''}</td><td class="chave">${esc(n.chave || (n.tipo === 'INUTILIZACAO' ? 'Inutilizacao de numeracao' : '-'))}</td><td class="num">${n.valor != null ? money(n.valor) : '-'}</td><td>${dateTxt(n.criado_em)}</td><td class="num">${actions.join(' ') || '<span class="muted">-</span>'}</td></tr>`;
+            const pedidoRef = n.pedido_id ? `#${esc(String(n.pedido_id).slice(0, 6))}` : '-';
+            return `<tr><td>${esc(num)}</td><td>${pedidoRef}</td><td><span class="badge ${cls}">${esc(status)}</span>${n.motivo ? `<br><span class="muted">${esc(n.motivo)}</span>` : ''}</td><td>${esc(forma)}</td><td>${esc(n.cliente || '-')}</td><td class="chave">${esc(n.chave || (n.tipo === 'INUTILIZACAO' ? 'Inutilizacao de numeracao' : '-'))}</td><td class="num">${n.valor != null ? money(n.valor) : '-'}</td><td>${dateTxt(n.criado_em)}</td><td class="num">${actions.join(' ') || '<span class="muted">-</span>'}</td></tr>`;
         }).join('')}</tbody></table>`;
     }
 
-    function renderIssuance() {
-        const emitted = {};
-        state.notas.forEach(n => {
-            if (n.pedido_id && ['AUTORIZADA', 'CONTINGENCIA'].includes(String(n.status || '').toUpperCase())) emitted[n.pedido_id] = true;
+    // Relatorio por periodo pra contabilidade: totais + a mesma tabela de
+    // documentos (reaproveitada), filtrada pelo mes escolhido, com exportacao
+    // em CSV e download de todos os XMLs do periodo num .zip so.
+    function renderReport() {
+        const mes = state.relatorioMes || mesAtualStr();
+        const { inicio, fim } = limitesDoMes(mes);
+        const notasDoMes = state.notas.filter(n => {
+            const d = n.criado_em?.toDate?.();
+            return d && d >= inicio && d < fim;
         });
+        const validas = notasDoMes.filter(n => n.tipo !== 'INUTILIZACAO' && (n.status === 'AUTORIZADA' || n.status === 'CONTINGENCIA'));
+        const canceladas = notasDoMes.filter(n => n.status === 'CANCELADA');
+        const totalFaturado = validas.reduce((s, n) => s + Number(n.valor || 0), 0);
+        const comXml = notasDoMes.filter(n => n.xml || n.xmlAssinado);
+
+        return `<div class="panel">
+            <div class="panel-head">
+                <h2>Relatorio para contabilidade</h2>
+                <div class="actions" style="margin:0">
+                    <label class="sub" style="margin:0">Periodo <input type="month" id="relatorio-mes" value="${esc(mes)}"></label>
+                    <button class="btn" id="btn-relatorio-csv" ${notasDoMes.length ? '' : 'disabled'}>Exportar CSV</button>
+                    <button class="btn primary" id="btn-relatorio-zip" ${comXml.length ? '' : 'disabled'}>Baixar XMLs (.zip)</button>
+                </div>
+            </div>
+            <div class="grid cards" style="margin-bottom:16px">
+                ${metric('NF-e emitidas', validas.length)}
+                ${metric('Valor faturado', money(totalFaturado))}
+                ${metric('Canceladas', canceladas.length)}
+                ${metric('XMLs disponiveis', comXml.length)}
+            </div>
+            ${documentsTable(notasDoMes)}
+        </div>`;
+    }
+
+    // CSV com os campos que a contabilidade costuma pedir pra conciliar as
+    // vendas do periodo (numero, serie, chave, datas, valores, status).
+    function exportarRelatorioCsv(notas, mes) {
+        const cols = ['Numero', 'Serie', 'Chave', 'Status', 'Forma emissao', 'Cliente', 'Valor', 'Data emissao', 'Protocolo'];
+        const linhas = notas.map(n => [
+            n.tipo === 'INUTILIZACAO' ? `Inut. ${n.nNFIni}-${n.nNFFin}` : (n.nNF ?? ''),
+            n.serie ?? '',
+            n.chave || '',
+            n.status || '',
+            n.formaEmissao || (n.contingencia ? 'CONTINGENCIA' : 'NORMAL'),
+            n.cliente || '',
+            n.valor != null ? String(n.valor).replace('.', ',') : '',
+            n.criado_em?.toDate ? n.criado_em.toDate().toLocaleString('pt-BR') : '',
+            n.protocolo || ''
+        ]);
+        const escCsv = (v) => `"${String(v).replace(/"/g, '""')}"`;
+        const csv = '﻿' + [cols, ...linhas].map(l => l.map(escCsv).join(';')).join('\r\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `relatorio-fiscal-${mes}.csv`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    // Zip com todos os XMLs (autorizados ou transmitidos em contingencia) do
+    // periodo, nomeados pela chave de acesso — formato que a contabilidade
+    // espera pra importar num sistema de escrituracao (SPED etc.).
+    async function exportarXmlsZip(notas, mes, btn) {
+        if (!window.JSZip) { alert('Biblioteca de .zip nao carregou (sem internet?). Tente novamente.'); return; }
+        const comXml = notas.filter(n => n.xml || n.xmlAssinado);
+        if (!comXml.length) return;
+        const textoOriginal = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Gerando .zip...'; }
+        try {
+            const zip = new window.JSZip();
+            comXml.forEach(n => {
+                const nome = (n.chave || `nNF-${n.nNF || n.id}`) + '-nfce.xml';
+                zip.file(nome, n.xml || n.xmlAssinado);
+            });
+            const blob = await zip.generateAsync({ type: 'blob' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `xmls-nfce-${mes}.zip`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
+        }
+    }
+
+    function notaFiscalPorPedido() {
+        // state.notas ja vem ordenado do mais recente pro mais antigo (listenNotes),
+        // entao a primeira ocorrencia por pedido_id e sempre a tentativa mais atual.
+        const map = {};
+        state.notas.forEach(n => {
+            if (n.pedido_id && !(n.pedido_id in map)) map[n.pedido_id] = n;
+        });
+        return map;
+    }
+
+    function renderIssuance() {
+        const notaPorPedido = notaFiscalPorPedido();
         if (!state.pedidos.length) return '<div class="panel"><h2>Emissao NFC-e</h2><div class="empty">Nenhuma venda concluida recente.</div></div>';
-        return `<div class="panel"><div class="panel-head"><h2>Emitir NFC-e por venda concluida</h2></div><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Pagamento</th><th class="num">Valor</th><th>Data</th><th class="num">Acao</th></tr></thead><tbody>${state.pedidos.map(p => `<tr><td>#${esc(String(p.id).slice(0, 6))}</td><td>${esc(p.nome_cliente || 'Cliente')}</td><td>${esc(p.forma_pagamento || '-')}</td><td class="num">${money(p.valor_total)}</td><td>${dateTxt(p.hora_pedido)}</td><td class="num">${emitted[p.id] ? '<span class="badge b-ok">Emitida</span>' : `<button class="btn primary" data-emitir="${p.id}">Emitir NFC-e</button>`}</td></tr>`).join('')}</tbody></table></div>`;
+        return `<div class="panel"><div class="panel-head"><h2>Emitir NFC-e por venda concluida</h2></div><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Pagamento</th><th class="num">Valor</th><th>Data</th><th class="num">Acao</th></tr></thead><tbody>${state.pedidos.map(p => {
+            const nota = notaPorPedido[p.id];
+            const st = nota ? String(nota.status || '').toUpperCase() : null;
+            let acao;
+            // AUTORIZADA/CONTINGENCIA/PROCESSANDO = NF-e valida ou em curso. CANCELADA/
+            // INUTILIZADA tambem contam: a venda ja teve uma NF-e oficialmente emitida
+            // (e depois cancelada na SEFAZ) — cancelar a venda por aqui nao desfaz isso,
+            // entao continua bloqueado mesmo com a nota cancelada.
+            const nfEmitida = st === 'AUTORIZADA' || st === 'CONTINGENCIA' || st === 'PROCESSANDO' || st === 'CANCELADA' || st === 'INUTILIZADA';
+            if (st === 'AUTORIZADA' || st === 'CONTINGENCIA') acao = '<span class="badge b-ok">Emitida</span>';
+            else if (st === 'PROCESSANDO') acao = '<span class="badge b-warn">Processando...</span>';
+            else if (st === 'ERRO_REDE') acao = '<span class="badge b-warn">Aguardando conexão (reenvia sozinho)</span>';
+            else if (st === 'REJEITADA' || st === 'ERRO') {
+                acao = `<button class="btn primary" data-emitir="${p.id}">Retry</button><br><span class="muted" style="font-size:.76rem">Tentativa anterior falhou: ${esc(nota.motivo || st)}</span>`;
+            } else if (st === 'CANCELADA' || st === 'INUTILIZADA') {
+                acao = `<span class="badge b-muted">NF-e cancelada</span><br><button class="btn primary" data-emitir="${p.id}" style="margin-top:6px">Emitir nova NFC-e</button>`;
+            } else acao = `<button class="btn primary" data-emitir="${p.id}">Emitir NFC-e</button>`;
+            acao += `<br><button class="btn danger" data-cancelar-venda="${p.id}" ${nfEmitida ? 'disabled title="NF-e já emitida — cancele a nota antes de cancelar a venda."' : ''} style="margin-top:6px">Cancelar venda</button>`;
+            return `<tr><td>#${esc(String(p.id).slice(0, 6))}</td><td>${esc(p.nome_cliente || 'Cliente')}</td><td>${esc(p.forma_pagamento || '-')}</td><td class="num">${money(p.valor_total)}</td><td>${dateTxt(p.hora_pedido)}</td><td class="num">${acao}</td></tr>`;
+        }).join('')}</tbody></table></div>`;
     }
 
     function renderInutilization() {
@@ -224,22 +364,114 @@ document.addEventListener('DOMContentLoaded', () => {
                     <h2>Notas recebidas</h2>
                     <p class="muted">Ultimo NSU: ${esc(state.cfg.dfeUltNSU || '0')} / Max NSU: ${esc(state.cfg.dfeMaxNSU || '0')}</p>
                 </div>
-                <button class="btn primary" id="btn-sync-dfe">Sincronizar SEFAZ</button>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="file" id="dfe-arquivo-xml" accept=".xml" style="display:none">
+                    <button class="btn" id="btn-importar-xml">Importar XML</button>
+                    <button class="btn primary" id="btn-sync-dfe">Sincronizar SEFAZ</button>
+                </div>
             </div>
+            <p class="sub" id="dfe-import-msg" style="margin-top:-6px"></p>
             ${dfeTable()}
         </div>`;
     }
 
     function dfeTable() {
         if (!state.dfe.length) return '<div class="empty">Nenhuma nota recebida sincronizada.</div>';
-        return `<table><thead><tr><th>NSU</th><th>Chave</th><th>Emitente</th><th class="num">Valor</th><th>Emissao</th><th>Schema</th></tr></thead><tbody>${state.dfe.map(d => `<tr>
-            <td>${esc(d.nsu || '-')}</td>
-            <td class="chave">${esc(d.chave || '-')}</td>
-            <td>${esc(d.emitente || d.cnpjEmitente || '-')}</td>
-            <td class="num">${d.valor != null ? money(d.valor) : '-'}</td>
-            <td>${esc(d.dhEmi || '-')}</td>
-            <td><span class="badge ${d.resumo ? 'b-warn' : 'b-ok'}">${esc(d.schema || '-')}</span></td>
-        </tr>`).join('')}</tbody></table>`;
+        return `<table><thead><tr><th>NSU</th><th>Chave</th><th>Emitente</th><th class="num">Valor</th><th>Emissao</th><th>Schema</th><th class="num">Estoque</th></tr></thead><tbody>${state.dfe.map(d => {
+            const temItens = Array.isArray(d.itens) && d.itens.length > 0;
+            let acaoEstoque;
+            if (d.entrada_confirmada) acaoEstoque = '<span class="badge b-ok">Entrada OK</span>';
+            else if (temItens) acaoEstoque = `<button class="btn" data-dfe-toggle="${d.id}">${state.dfeExpandido === d.id ? 'Fechar' : 'Ver itens'}</button>`;
+            else acaoEstoque = '<span class="muted">Sem itens</span>';
+            const linhaPrincipal = `<tr>
+                <td>${esc(d.nsu || '-')}</td>
+                <td class="chave">${esc(d.chave || '-')}</td>
+                <td>${esc(d.emitente || d.cnpjEmitente || '-')}</td>
+                <td class="num">${d.valor != null ? money(d.valor) : '-'}</td>
+                <td>${esc(d.dhEmi || '-')}</td>
+                <td><span class="badge ${d.resumo ? 'b-warn' : 'b-ok'}">${esc(d.schema || '-')}</span></td>
+                <td class="num">${acaoEstoque}</td>
+            </tr>`;
+            const linhaExpandida = state.dfeExpandido === d.id ? linhaEntradaEstoque(d) : '';
+            return linhaPrincipal + linhaExpandida;
+        }).join('')}</tbody></table>`;
+    }
+
+    // Normaliza (sem acento/pontuacao) pra comparar nomes de formas diferentes
+    // de escrever o mesmo produto (nota fiscal x cadastro do cardapio/estoque).
+    function normalizarNome(s) {
+        return String(s || '').trim().toLowerCase()
+            .normalize('NFD').replace(/[̀-ͯ]/g, '')
+            .replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function pontuarMatch(nomeNota, alvo) {
+        const a = normalizarNome(nomeNota);
+        if (!a) return 0;
+        const apelidos = (alvo.apelidos || []).map(normalizarNome);
+        if (apelidos.includes(a)) return 1000; // ja aprendido antes = certeza
+        const b = normalizarNome(alvo.nome);
+        if (a === b) return 999;
+        const palavrasA = new Set(a.split(' ').filter(w => w.length > 2));
+        const palavrasB = new Set(b.split(' ').filter(w => w.length > 2));
+        let comuns = 0;
+        palavrasA.forEach(w => { if (palavrasB.has(w)) comuns++; });
+        if (comuns === 0 || !palavrasA.size || !palavrasB.size) return 0;
+        return (comuns / Math.max(palavrasA.size, palavrasB.size)) * 100;
+    }
+
+    // Sugere o item mais parecido com o nome vindo da nota (exato > apelido ja
+    // aprendido > palavras em comum), numa lista generica (insumos ou cardapio).
+    // Abaixo de um limiar, nao sugere nada, pra nao arriscar um match errado.
+    function melhorMatch(nomeNota, lista) {
+        let melhor = null, melhorPontos = 0;
+        lista.forEach(i => {
+            const p = pontuarMatch(nomeNota, i);
+            if (p > melhorPontos) { melhorPontos = p; melhor = i; }
+        });
+        return melhorPontos >= 30 ? melhor : null;
+    }
+
+    function opcoesInsumos(selecionadoNome) {
+        const match = melhorMatch(selecionadoNome, state.insumos);
+        const opcoes = state.insumos.map(i =>
+            `<option value="${esc(i.id)}" ${match && match.id === i.id ? 'selected' : ''}>${esc(i.nome)}</option>`
+        ).join('');
+        return `<option value="">+ Criar novo insumo</option>${opcoes}`;
+    }
+
+    function opcoesProdutos(selecionadoNome) {
+        const match = melhorMatch(selecionadoNome, state.produtos);
+        const opcoes = state.produtos.map(p =>
+            `<option value="${esc(p.id)}" ${match && match.id === p.id ? 'selected' : ''}>${esc(p.nome || p.name || p.id)}</option>`
+        ).join('');
+        return `<option value="">Selecione o produto no cardapio...</option>${opcoes}`;
+    }
+
+    function linhaEntradaEstoque(d) {
+        const linhasItens = d.itens.map((it, idx) => `<tr>
+            <td>${esc(it.xProd || '-')}</td>
+            <td>
+                <select data-item-tipo="${idx}" style="margin-bottom:4px">
+                    <option value="produto">Produto do cardapio</option>
+                    <option value="insumo">Insumo (ingrediente)</option>
+                </select>
+                <select data-item-produto="${idx}">${opcoesProdutos(it.xProd)}</select>
+                <select data-item-insumo="${idx}" style="display:none">${opcoesInsumos(it.xProd)}</select>
+                <input type="text" data-item-novo-nome="${idx}" placeholder="Nome do novo insumo" value="${esc(it.xProd || '')}" style="margin-top:4px;display:none">
+            </td>
+            <td class="num"><input type="number" step="0.001" min="0" data-item-qtd="${idx}" value="${esc(it.qCom ?? '')}" style="width:90px"></td>
+            <td>${esc(it.uCom || '-')}</td>
+            <td class="num">${it.vUnCom != null ? money(it.vUnCom) : '-'}</td>
+        </tr>`).join('');
+        return `<tr><td colspan="7" style="background:#f8fafc">
+            <div class="panel" style="margin:6px 0;box-shadow:none">
+                <p class="sub" style="margin-top:0">Escolha se cada item e um produto pronto do cardapio ou um insumo/ingrediente, confira a quantidade e confirme. Produto do cardapio ja liga sozinho com a baixa automatica de estoque nas vendas.</p>
+                <table><thead><tr><th>Produto na nota</th><th>Corresponde a</th><th class="num">Quantidade</th><th>Unidade</th><th class="num">Custo unit.</th></tr></thead>
+                <tbody>${linhasItens}</tbody></table>
+                <div class="actions"><button class="btn primary" data-dfe-confirmar="${d.id}">Confirmar entrada no estoque</button><span class="msg" id="dfe-entrada-msg-${esc(d.id)}"></span></div>
+            </div>
+        </td></tr>`;
     }
 
     function renderSettings() {
@@ -332,9 +564,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 <details class="acc">
                     <summary><span>URLs NFC-e</span><span class="chev">&#9656;</span></summary>
                     <div class="acc-body">
-                        <div class="settings-grid full">
-                            <label>URL base do QR Code<input id="f-qrbase"></label>
-                            <label>URL de consulta por chave<input id="f-urlchave"></label>
+                        <p class="sub">O sistema escolhe automaticamente o par certo com base no Ambiente selecionado acima (Homologacao/Producao) — nao precisa trocar manualmente ao migrar de ambiente.</p>
+                        <div class="settings-grid">
+                            <label>URL do QR Code (Homologacao)<input id="f-qrbase-hom"></label>
+                            <label>URL do QR Code (Producao)<input id="f-qrbase-prod"></label>
+                            <label>URL de consulta por chave (Homologacao)<input id="f-urlchave-hom"></label>
+                            <label>URL de consulta por chave (Producao)<input id="f-urlchave-prod"></label>
                         </div>
                     </div>
                 </details>
@@ -395,13 +630,21 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[data-tab-go]').forEach(btn => btn.onclick = () => { state.tab = btn.dataset.tabGo; renderTabs(); render(); });
         document.querySelectorAll('[data-refresh-config]').forEach(btn => btn.onclick = loadConfig);
         document.querySelectorAll('[data-emitir]').forEach(btn => btn.onclick = () => emitir(btn));
+        document.querySelectorAll('[data-cancelar-venda]').forEach(btn => btn.onclick = () => cancelarVenda(btn));
         document.querySelectorAll('[data-danfe]').forEach(btn => btn.onclick = () => baixarDanfe(state.notas.find(n => n.id === btn.dataset.danfe)));
+        document.querySelectorAll('[data-xml]').forEach(btn => btn.onclick = () => baixarXml(state.notas.find(n => n.id === btn.dataset.xml)));
         document.querySelectorAll('[data-transmitir]').forEach(btn => btn.onclick = () => transmitir(btn));
         document.querySelectorAll('[data-cancelar]').forEach(btn => btn.onclick = () => cancelar(btn));
         const inut = $('btn-inutilizar-range');
         if (inut) inut.onclick = inutilizar;
         const syncDfe = $('btn-sync-dfe');
         if (syncDfe) syncDfe.onclick = () => sincronizarDfe(syncDfe);
+        const importarXml = $('btn-importar-xml');
+        const arquivoXml = $('dfe-arquivo-xml');
+        if (importarXml && arquivoXml) {
+            importarXml.onclick = () => arquivoXml.click();
+            arquivoXml.onchange = () => importarXmlAvulso(arquivoXml);
+        }
         const ativo = $('f-ativo');
         if (ativo) {
             preencherFiscalForm();
@@ -419,6 +662,41 @@ document.addEventListener('DOMContentLoaded', () => {
         if (enviarCert) enviarCert.onclick = enviarCertificadoFiscal;
         const definirNumeracao = $('btn-definir-numeracao');
         if (definirNumeracao) definirNumeracao.onclick = definirNumeracaoFiscal;
+        document.querySelectorAll('[data-dfe-toggle]').forEach(btn => btn.onclick = () => {
+            state.dfeExpandido = state.dfeExpandido === btn.dataset.dfeToggle ? null : btn.dataset.dfeToggle;
+            render();
+        });
+        document.querySelectorAll('[data-item-insumo]').forEach(sel => sel.onchange = () => {
+            const idx = sel.dataset.itemInsumo;
+            const novoNome = document.querySelector(`[data-item-novo-nome="${idx}"]`);
+            if (novoNome) novoNome.style.display = sel.value === '' ? 'block' : 'none';
+        });
+        document.querySelectorAll('[data-item-tipo]').forEach(sel => sel.onchange = () => {
+            const idx = sel.dataset.itemTipo;
+            const selProduto = document.querySelector(`[data-item-produto="${idx}"]`);
+            const selInsumo = document.querySelector(`[data-item-insumo="${idx}"]`);
+            const novoNome = document.querySelector(`[data-item-novo-nome="${idx}"]`);
+            const ehInsumo = sel.value === 'insumo';
+            if (selProduto) selProduto.style.display = ehInsumo ? 'none' : 'block';
+            if (selInsumo) selInsumo.style.display = ehInsumo ? 'block' : 'none';
+            if (novoNome) novoNome.style.display = (ehInsumo && selInsumo && selInsumo.value === '') ? 'block' : 'none';
+        });
+        document.querySelectorAll('[data-dfe-confirmar]').forEach(btn => btn.onclick = () => confirmarEntradaEstoque(btn));
+
+        const relatorioMes = $('relatorio-mes');
+        if (relatorioMes) relatorioMes.onchange = () => { state.relatorioMes = relatorioMes.value || mesAtualStr(); render(); };
+        const relatorioCsv = $('btn-relatorio-csv');
+        if (relatorioCsv) relatorioCsv.onclick = () => {
+            const { inicio, fim } = limitesDoMes(state.relatorioMes);
+            const notasDoMes = state.notas.filter(n => { const d = n.criado_em?.toDate?.(); return d && d >= inicio && d < fim; });
+            exportarRelatorioCsv(notasDoMes, state.relatorioMes || mesAtualStr());
+        };
+        const relatorioZip = $('btn-relatorio-zip');
+        if (relatorioZip) relatorioZip.onclick = () => {
+            const { inicio, fim } = limitesDoMes(state.relatorioMes);
+            const notasDoMes = state.notas.filter(n => { const d = n.criado_em?.toDate?.(); return d && d >= inicio && d < fim; });
+            exportarXmlsZip(notasDoMes, state.relatorioMes || mesAtualStr(), relatorioZip);
+        };
     }
 
     function setVal(id, value) {
@@ -457,8 +735,11 @@ document.addEventListener('DOMContentLoaded', () => {
         setVal('f-cmun', d.cMun || '');
         setVal('f-cep', d.cep || '');
         setVal('f-fone', d.fone || '');
-        setVal('f-qrbase', d.qrBaseUrl || '');
-        setVal('f-urlchave', d.urlChave || '');
+        // Migracao: se ainda so existir o valor antigo (unico), usa como Homologacao.
+        setVal('f-qrbase-hom', d.qrBaseUrlHom || d.qrBaseUrl || '');
+        setVal('f-qrbase-prod', d.qrBaseUrlProd || '');
+        setVal('f-urlchave-hom', d.urlChaveHom || d.urlChave || '');
+        setVal('f-urlchave-prod', d.urlChaveProd || '');
         setVal('f-ncm', d.ncm || '');
         setVal('f-cfop', d.cfop || '');
         setVal('f-cst', d.cst || '');
@@ -498,8 +779,10 @@ document.addEventListener('DOMContentLoaded', () => {
             cMun: getVal('f-cmun'),
             cep: getVal('f-cep'),
             fone: getVal('f-fone'),
-            qrBaseUrl: getVal('f-qrbase').replace(/\/$/, ''),
-            urlChave: getVal('f-urlchave').replace(/\/$/, ''),
+            qrBaseUrlHom: getVal('f-qrbase-hom').replace(/\/$/, ''),
+            qrBaseUrlProd: getVal('f-qrbase-prod').replace(/\/$/, ''),
+            urlChaveHom: getVal('f-urlchave-hom').replace(/\/$/, ''),
+            urlChaveProd: getVal('f-urlchave-prod').replace(/\/$/, ''),
             ncm: getVal('f-ncm'),
             cfop: getVal('f-cfop'),
             cst: getVal('f-cst'),
@@ -625,14 +908,39 @@ document.addEventListener('DOMContentLoaded', () => {
         const pedido = state.pedidos.find(p => p.id === btn.dataset.emitir);
         if (!pedido) return;
         btn.disabled = true;
-        btn.textContent = 'Emitindo...';
+        btn.textContent = 'Iniciando...';
         try {
-            const nota = await FiscalClient.emitir(pedido.id, pedido);
-            alert(nota.status === 'CONTINGENCIA' ? 'NFC-e emitida em contingencia.' : `NFC-e autorizada. Numero ${nota.nNF}.`);
+            // So espera a reserva do numero e a gravacao do registro "PROCESSANDO"
+            // (rapido, so Firestore) — a comunicacao com a SEFAZ roda em segundo
+            // plano e o status muda sozinho na tabela (badge "Processando...")
+            // assim que o listener do Firestore receber a atualizacao.
+            await FiscalClient.emitir(pedido.id, pedido);
         } catch (err) {
             alert(err.message);
             btn.disabled = false;
             btn.textContent = 'Emitir NFC-e';
+        }
+    }
+
+    async function cancelarVenda(btn) {
+        const id = btn.dataset.cancelarVenda;
+        const pedido = state.pedidos.find(p => p.id === id);
+        if (!pedido) return;
+        const nota = notaFiscalPorPedido()[id];
+        const st = nota ? String(nota.status || '').toUpperCase() : null;
+        if (st === 'AUTORIZADA' || st === 'CONTINGENCIA' || st === 'PROCESSANDO' || st === 'CANCELADA' || st === 'INUTILIZADA') {
+            alert('Esta venda já teve NF-e emitida (mesmo que a nota tenha sido cancelada depois) — não é possível cancelar a venda por aqui.');
+            return;
+        }
+        if (!confirm(`Cancelar a venda #${String(id).slice(0, 6)} (${money(pedido.valor_total)})? Isso não pode ser desfeito.`)) return;
+        btn.disabled = true;
+        btn.textContent = 'Cancelando...';
+        try {
+            await db.collection('pedidos').doc(id).update({ status: 'CANCELADO' });
+        } catch (err) {
+            alert(err.message);
+            btn.disabled = false;
+            btn.textContent = 'Cancelar venda';
         }
     }
 
@@ -703,6 +1011,122 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function importarXmlAvulso(inputEl) {
+        const arquivo = inputEl.files?.[0];
+        inputEl.value = ''; // permite selecionar o mesmo arquivo de novo depois
+        if (!arquivo) return;
+        const msg = $('dfe-import-msg');
+        if (msg) msg.textContent = 'Lendo arquivo...';
+        try {
+            const texto = await arquivo.text();
+            const documento = await FiscalClient.importarXmlAvulso(texto);
+            if (msg) msg.textContent = `Nota importada: ${documento.emitente || documento.chave || arquivo.name}.`;
+        } catch (err) {
+            if (msg) msg.textContent = '';
+            alert('Erro ao importar XML: ' + err.message);
+        }
+    }
+
+    async function confirmarEntradaEstoque(btn) {
+        const dfeId = btn.dataset.dfeConfirmar;
+        const d = state.dfe.find(x => x.id === dfeId);
+        if (!d || !Array.isArray(d.itens)) return;
+        const msg = $(`dfe-entrada-msg-${dfeId}`);
+        const operador = (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'operador';
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+
+        try {
+            const batch = db.batch();
+            d.itens.forEach((it, idx) => {
+                const qtd = parseFloat(document.querySelector(`[data-item-qtd="${idx}"]`)?.value);
+                if (!(qtd > 0)) throw new Error(`Informe uma quantidade valida para "${it.xProd || 'item ' + (idx + 1)}".`);
+                const tipo = document.querySelector(`[data-item-tipo="${idx}"]`)?.value || 'produto';
+
+                let insumoId, insumoNome, insumoAtual, motivoExtra = '';
+
+                if (tipo === 'produto') {
+                    const produtoId = document.querySelector(`[data-item-produto="${idx}"]`)?.value;
+                    if (!produtoId) throw new Error(`Selecione o produto do cardapio para "${it.xProd || 'item ' + (idx + 1)}" (ou troque pra "Insumo").`);
+                    const produto = state.produtos.find(p => p.id === produtoId);
+                    if (!produto) throw new Error('Produto selecionado nao encontrado.');
+
+                    if (produto.insumo_vinculado_id && state.insumos.find(i => i.id === produto.insumo_vinculado_id)) {
+                        // Ja existe a ponte produto <-> insumo/ficha tecnica, so reusa.
+                        const insumo = state.insumos.find(i => i.id === produto.insumo_vinculado_id);
+                        insumoId = insumo.id; insumoNome = insumo.nome; insumoAtual = Number(insumo.quantidade_atual) || 0;
+                    } else {
+                        // Primeira entrada desse produto: cria o insumo e a ficha tecnica
+                        // 1:1 que liga a venda no cardapio a baixa automatica de estoque.
+                        const novoInsumoRef = db.collection('estoque_insumos').doc();
+                        batch.set(novoInsumoRef, {
+                            nome: produto.nome, categoria: 'Produto revenda', unidade: it.uCom || 'UN',
+                            quantidade_atual: 0, estoque_minimo: 0, custo_unitario: it.vUnCom || 0,
+                            criado_em: now, atualizado_em: now
+                        });
+                        batch.set(db.collection('fichas_tecnicas').doc(produtoId), {
+                            produto_nome: produto.nome, itens: [{ insumo_id: novoInsumoRef.id, quantidade: 1 }],
+                            atualizado_em: now
+                        });
+                        batch.update(db.collection('cardapio').doc(produtoId), { insumo_vinculado_id: novoInsumoRef.id });
+                        insumoId = novoInsumoRef.id; insumoNome = produto.nome; insumoAtual = 0;
+                        motivoExtra = ' (produto novo no estoque)';
+                    }
+
+                    // Aprende o nome da nota como apelido do produto do cardapio.
+                    const nomeNota = normalizarNome(it.xProd);
+                    const jaConhecido = nomeNota === normalizarNome(produto.nome)
+                        || (produto.apelidos || []).some(a => normalizarNome(a) === nomeNota);
+                    if (it.xProd && !jaConhecido) {
+                        batch.update(db.collection('cardapio').doc(produtoId), { apelidos: firebase.firestore.FieldValue.arrayUnion(it.xProd) });
+                    }
+                } else {
+                    const selInsumoId = document.querySelector(`[data-item-insumo="${idx}"]`)?.value;
+                    if (selInsumoId) {
+                        const insumo = state.insumos.find(i => i.id === selInsumoId);
+                        if (!insumo) throw new Error('Insumo selecionado nao encontrado.');
+                        insumoId = insumo.id; insumoNome = insumo.nome; insumoAtual = Number(insumo.quantidade_atual) || 0;
+                        const nomeNota = normalizarNome(it.xProd);
+                        const jaConhecido = nomeNota === normalizarNome(insumo.nome)
+                            || (insumo.apelidos || []).some(a => normalizarNome(a) === nomeNota);
+                        if (it.xProd && !jaConhecido) {
+                            batch.update(db.collection('estoque_insumos').doc(selInsumoId), { apelidos: firebase.firestore.FieldValue.arrayUnion(it.xProd) });
+                        }
+                    } else {
+                        const nomeNovo = document.querySelector(`[data-item-novo-nome="${idx}"]`)?.value.trim();
+                        if (!nomeNovo) throw new Error(`Informe o nome do novo insumo para "${it.xProd || 'item ' + (idx + 1)}".`);
+                        const novoRef = db.collection('estoque_insumos').doc();
+                        batch.set(novoRef, {
+                            nome: nomeNovo, categoria: '', unidade: it.uCom || 'UN',
+                            quantidade_atual: 0, estoque_minimo: 0, custo_unitario: it.vUnCom || 0,
+                            criado_em: now, atualizado_em: now
+                        });
+                        insumoId = novoRef.id; insumoNome = nomeNovo; insumoAtual = 0;
+                        motivoExtra = ' (insumo novo)';
+                    }
+                }
+
+                const novoSaldo = insumoAtual + qtd;
+                batch.set(db.collection('estoque_insumos').doc(insumoId), { quantidade_atual: novoSaldo, atualizado_em: now }, { merge: true });
+                batch.set(db.collection('estoque_movimentos').doc(), {
+                    insumo_id: insumoId, insumo_nome: insumoNome, tipo: 'ENTRADA',
+                    quantidade: qtd, saldo_resultante: novoSaldo,
+                    motivo: `Entrada NF ${d.chave || d.nsu}${motivoExtra}`, operador, data: now
+                });
+            });
+
+            batch.update(db.collection('dfe_documentos').doc(dfeId), {
+                entrada_confirmada: true, entrada_confirmada_em: now, entrada_confirmada_por: operador
+            });
+
+            await batch.commit();
+            state.dfeExpandido = null;
+            render();
+        } catch (err) {
+            if (msg) msg.textContent = err.message;
+            else alert(err.message);
+        }
+    }
+
     function baixarDanfe(nota) {
         if (!nota?.danfeBase64) return;
         const bytes = atob(nota.danfeBase64);
@@ -712,6 +1136,17 @@ document.addEventListener('DOMContentLoaded', () => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `DANFE-NFCe-${nota.nNF || nota.chave || 'nota'}.pdf`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    function baixarXml(nota) {
+        const xml = nota?.xml || nota?.xmlAssinado;
+        if (!xml) return;
+        const blob = new Blob([xml], { type: 'application/xml' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `NFCe-${nota.nNF || nota.chave || 'nota'}.xml`;
         a.click();
         URL.revokeObjectURL(a.href);
     }

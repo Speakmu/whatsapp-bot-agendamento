@@ -6,7 +6,7 @@
 const path = require('path');
 const admin = require('firebase-admin');
 
-const CRED = path.join(__dirname, '..', 'backend-bot', 'pizzain-40973-firebase-adminsdk-fbsvc-001fd1cfb7.json');
+const CRED = path.join(__dirname, '..', 'backend-bot', 'salgadinhos-lileamar-firebase-adminsdk-fbsvc-76d7889ffc.json');
 let serviceAccount;
 try { serviceAccount = require(CRED); }
 catch (e) { console.error('Credencial não encontrada: ' + CRED); process.exit(1); }

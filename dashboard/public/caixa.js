@@ -396,14 +396,21 @@ document.addEventListener('DOMContentLoaded', () => {
         flash(`Comanda da mesa ${pedido.mesa_numero} recebida - ${money(total)} (${formaRecebimento})`);
         autoEmitirNFCe(pedidoId, { ...pedido, status: "CONCLUIDO", forma_pagamento: formaRecebimento });
     }
-    // URL da Cloud Function que cria a cobrança na maquininha Point (Mercado Pago).
+    // URLs das Cloud Functions que criam a cobrança na maquininha (Point ou Stone).
     // Mesmo projeto/região das outras functions (WEBHOOK_URL não é acessível aqui,
-    // então repetimos o padrão fixo).
-    const CRIAR_COBRANCA_POINT_URL = "https://us-central1-pizzain-40973.cloudfunctions.net/criarCobrancaPoint";
+    // então repetimos o padrão fixo). O provedor ativo vem de configuracoes/pagamentos.
+    const CRIAR_COBRANCA_POINT_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaPoint";
+    const CRIAR_COBRANCA_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaStone";
+    let provedorPagamentoCartao = "mercadopago";
+    db.collection('configuracoes').doc('pagamentos').onSnapshot(snap => {
+        provedorPagamentoCartao = (snap.exists && snap.data()?.provedorCartao) || "mercadopago";
+    }, err => console.warn('Erro ao ler provedor de pagamento:', err.message));
 
     async function finalizarVenda() {
         if (!sessaoAtual || !carrinho.length) return;
-        if (formaPagamento === "Cartão") return finalizarVendaCartaoPoint();
+        if (formaPagamento === "Cartão") {
+            return provedorPagamentoCartao === "stone" ? finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_STONE_URL, "Stone") : finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_POINT_URL, "Point");
+        }
 
         const btn = $('btn-finalizar');
         btn.disabled = true;
@@ -476,11 +483,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Venda no Cartão via maquininha Point (Mercado Pago): dispara a cobrança no
-    // terminal e só grava a venda como concluída quando o pagamento é confirmado
-    // (webhook do backend atualiza o pedido). Não trava a tela esperando — o caixa
-    // pode ver o status "Aguardando pagamento..." e o resultado chega sozinho.
-    async function finalizarVendaCartaoPoint() {
+    // Venda no Cartão via maquininha física (Point/Mercado Pago ou Stone): dispara a
+    // cobrança no terminal e só grava a venda como concluída quando o pagamento é
+    // confirmado (webhook do backend atualiza o pedido). Não trava a tela esperando —
+    // o caixa pode ver o status "Aguardando pagamento..." e o resultado chega sozinho.
+    async function finalizarVendaCartaoMaquininha(criarCobrancaUrl, nomeProvedor) {
         const btn = $('btn-finalizar');
         btn.disabled = true;
         btn.textContent = 'Aguardando pagamento na maquininha...';
@@ -491,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let resp, data;
         try {
-            resp = await fetch(CRIAR_COBRANCA_POINT_URL, {
+            resp = await fetch(criarCobrancaUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -547,7 +554,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('cliente-nome').value = "";
         $('chk-cozinha').checked = false;
         renderCarrinho();
-        flash(`💳 Aguardando confirmação da maquininha • ${money(total)}`);
+        flash(`💳 Aguardando confirmação da maquininha (${nomeProvedor}) • ${money(total)}`);
         atualizarBotaoFinalizar();
 
         // Observa o pedido até a confirmação (ou cancelamento) chegar pelo webhook,

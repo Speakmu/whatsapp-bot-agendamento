@@ -36,6 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ouvirComandasCaixa();
         ouvirEstoque();
         ouvirCaixaAberto();
+        ouvirVendasHoje();
+        ouvirPedidosAtivos();
+        ouvirUltimosPedidos();
     });
 
     async function carregarNomeEmpresa() {
@@ -130,45 +133,64 @@ document.addEventListener('DOMContentLoaded', () => {
         return Math.max(0, Math.min(100, Math.round((valor / total) * 100)));
     }
 
-    function corStatus(status, idx) {
-        const cores = {
-            CONCLUIDO: '#2ecc71',
-            AGUARDANDO_PAGAMENTO: '#e67e22',
-            PENDENTE_PREPARO: '#2f6fed',
-            PENDENTE_VALIDACAO: '#8e44ad',
-            EM_PREPARO: '#f39c12',
-            PRONTO_PARA_ENTREGA: '#16a085',
-            SAIU_PARA_ENTREGA: '#3498db',
-            AGUARDANDO_PIX: '#95a5a6'
-        };
-        return cores[status] || ['#2f6fed', '#e67e22', '#2ecc71', '#e74c3c', '#8e44ad'][idx % 5];
+    // Paleta categorica validada (dataviz skill) - ordem fixa, nunca ciclada por indice.
+    const PALETA_CATEGORICA = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+    // Cada status sempre usa o MESMO slot de cor, independente de quais outros status existem agora.
+    const SLOT_STATUS = {
+        CONCLUIDO: 0,
+        EM_PREPARO: 1,
+        PENDENTE_PREPARO: 2,
+        PRONTO_PARA_ENTREGA: 3,
+        SAIU_PARA_ENTREGA: 4,
+        PENDENTE_VALIDACAO: 5,
+        AGUARDANDO_PAGAMENTO: 6,
+        AGUARDANDO_PIX: 7
+    };
+    function corStatus(status) {
+        const slot = SLOT_STATUS[status];
+        return PALETA_CATEGORICA[slot != null ? slot : PALETA_CATEGORICA.length - 1];
     }
 
+    let chartStatus = null;
     function renderGraficoVendas() {
         const total = estado.qtdVendasHoje;
         $('grafico-vendas-legenda').textContent = `${total} ${total === 1 ? 'pedido' : 'pedidos'}`;
-        $('donut-vendas-total').textContent = String(total);
-        const entries = Object.entries(estado.statusHoje || {}).sort((a, b) => b[1] - a[1]);
+        const entries = Object.entries(estado.statusHoje || {}).sort((a, b) => (SLOT_STATUS[a[0]] ?? 99) - (SLOT_STATUS[b[0]] ?? 99));
+        const ctx = $('chart-status');
+        if (chartStatus) { chartStatus.destroy(); chartStatus = null; }
         if (!entries.length) {
-            $('donut-vendas').style.background = '#edf1f5';
-            $('status-legenda').innerHTML = '<div class="empty">Sem vendas registradas hoje.</div>';
+            ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
             return;
         }
-        let acumulado = 0;
-        const fatias = entries.map(([status, qtd], idx) => {
-            const inicio = (acumulado / total) * 360;
-            acumulado += qtd;
-            const fim = (acumulado / total) * 360;
-            return `${corStatus(status, idx)} ${inicio}deg ${fim}deg`;
-        }).join(', ');
-        $('donut-vendas').style.background = `conic-gradient(${fatias})`;
-        $('status-legenda').innerHTML = entries.slice(0, 5).map(([status, qtd], idx) => `
-            <div class="legend-row">
-                <span class="dot" style="background:${corStatus(status, idx)}"></span>
-                <span>${escapeHtml(labelStatus(status))}</span>
-                <strong>${qtd}</strong>
-            </div>
-        `).join('');
+        // Barra horizontal empilhada de 1 categoria só ("Hoje") - forma recomendada
+        // para parte-do-todo, com legenda (>=2 series) e tooltip por segmento.
+        chartStatus = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Hoje'],
+                datasets: entries.map(([status, qtd]) => ({
+                    label: labelStatus(status),
+                    data: [qtd],
+                    backgroundColor: corStatus(status),
+                    borderRadius: 4,
+                    borderSkipped: false,
+                    maxBarThickness: 40,
+                }))
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { stacked: true, grid: { color: '#e1e0d9' }, ticks: { color: '#898781', precision: 0 } },
+                    y: { stacked: true, grid: { display: false }, ticks: { display: false } }
+                },
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, padding: 12, color: '#52514e', font: { size: 11 } } },
+                    tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${c.parsed.x}` } }
+                }
+            }
+        });
     }
 
     function renderResumoOperacao() {
@@ -327,23 +349,73 @@ document.addEventListener('DOMContentLoaded', () => {
         }).join('');
     }
 
+    // Plugin leve (sem dependencia extra) que escreve o valor na ponta de cada barra.
+    const valorNaPontaPlugin = {
+        id: 'valorNaPonta',
+        afterDatasetsDraw(chart) {
+            const { ctx } = chart;
+            chart.data.datasets.forEach((ds, di) => {
+                const meta = chart.getDatasetMeta(di);
+                meta.data.forEach((bar, i) => {
+                    const valor = ds.data[i];
+                    if (valor == null) return;
+                    ctx.save();
+                    ctx.fillStyle = '#52514e';
+                    ctx.font = '600 11px system-ui, -apple-system, "Segoe UI", sans-serif';
+                    ctx.textBaseline = 'middle';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(String(valor), bar.x + 6, bar.y);
+                    ctx.restore();
+                });
+            });
+        }
+    };
+
+    let chartProdutos = null;
     function renderMaisVendidos() {
-        const el = $('mais-vendidos');
+        const ctx = $('chart-produtos');
+        if (chartProdutos) { chartProdutos.destroy(); chartProdutos = null; }
         if (!estado.ranking.length) {
-            el.innerHTML = '<div class="empty">Sem vendas registradas hoje.</div>';
+            ctx.getContext('2d').clearRect(0, 0, ctx.width, ctx.height);
             return;
         }
-        const maiorQtd = Math.max(...estado.ranking.map(item => item.qtd), 1);
-        el.innerHTML = estado.ranking.map((item, idx) => `
-            <div class="bar-item">
-                <div class="bar-top">
-                    <strong>#${idx + 1} ${escapeHtml(item.nome)}</strong>
-                    <span>${item.qtd} un. - ${money(item.total)}</span>
-                </div>
-                <div class="bar-track"><div class="bar-fill" style="width:${pct(item.qtd, maiorQtd)}%"></div></div>
-                <div class="bar-sub">${pct(item.qtd, maiorQtd)}% do item mais vendido</div>
-            </div>
-        `).join('');
+        // Ranking de magnitude, 1 serie so -> hue sequencial (azul), sem legenda
+        // (uma serie so nao precisa de caixa de legenda), valor direto na ponta.
+        chartProdutos = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: estado.ranking.map(item => item.nome),
+                datasets: [{
+                    data: estado.ranking.map(item => item.qtd),
+                    backgroundColor: '#2a78d6',
+                    borderRadius: 4,
+                    borderSkipped: false,
+                    maxBarThickness: 22,
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                layout: { padding: { right: 28 } },
+                scales: {
+                    x: { display: false, grid: { display: false } },
+                    y: { grid: { display: false }, ticks: { color: '#0b0b0b', font: { size: 11, weight: '600' } } }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: (c) => {
+                                const item = estado.ranking[c.dataIndex];
+                                return `${item.qtd} un. - ${money(item.total)}`;
+                            }
+                        }
+                    }
+                }
+            },
+            plugins: [valorNaPontaPlugin]
+        });
     }
 
     function itensDoPedido(p) {
