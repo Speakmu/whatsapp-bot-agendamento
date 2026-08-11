@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('salvar-geral').addEventListener('click', salvarGeral);
         $('salvar-pagamentos').addEventListener('click', salvarPagamentos);
         $('pag-provedor').addEventListener('change', aplicarVisibilidadeProvedor);
+        $('testar-stone').addEventListener('click', testarMaquininhaStone);
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
         $('salvar-usuario').addEventListener('click', salvarUsuario);
         $('novo-usuario').addEventListener('click', limparUsuarioForm);
@@ -84,6 +85,60 @@ document.addEventListener('DOMContentLoaded', () => {
         const stone = $('pag-provedor').value === 'stone';
         $('campo-point').style.display = stone ? 'none' : 'block';
         $('campo-stone').style.display = stone ? 'block' : 'none';
+        $('campo-teste-stone').style.display = stone ? 'block' : 'none';
+    }
+
+    const CRIAR_COBRANCA_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaStone";
+
+    async function testarMaquininhaStone() {
+        const btn = $('testar-stone');
+        const resultado = $('pag-teste-resultado');
+        const serial = $('pag-stone-serial').value.trim();
+        if (!serial) {
+            alert('Informe o número de série da maquininha antes de testar.');
+            return;
+        }
+
+        // Garante que o backend vai ler o serial que está no campo agora, mesmo
+        // que a pessoa ainda não tenha clicado em Salvar.
+        try {
+            await DOC_PAGAMENTOS.set({
+                provedorCartao: $('pag-provedor').value,
+                stoneDeviceSerial: serial,
+                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        } catch (err) {
+            alert('Não foi possível salvar o serial antes do teste: ' + err.message);
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Enviando cobrança de teste...';
+        resultado.style.display = 'block';
+        resultado.textContent = 'Aguardando resposta da maquininha...';
+
+        try {
+            const resp = await fetch(CRIAR_COBRANCA_STONE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    amount: 0.01,
+                    externalReference: 'teste-conexao-' + Date.now(),
+                    description: 'Teste de conexão da maquininha'
+                })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) {
+                resultado.textContent = '❌ Falha ao acionar a maquininha: ' + (data.message || `erro ${resp.status}`);
+                return;
+            }
+            resultado.textContent = `✅ Pedido de teste criado (id: ${data.id || '?'}). Confira se apareceu R$ 0,01 na tela da maquininha — se sim, a conexão está ok. Cancele o valor direto por lá.`;
+        } catch (err) {
+            resultado.textContent = '❌ Erro ao contatar o servidor: ' + err.message;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Testar maquininha (R$ 0,01)';
+        }
     }
 
     async function carregarPagamentos() {
