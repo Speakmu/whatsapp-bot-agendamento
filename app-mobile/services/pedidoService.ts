@@ -24,6 +24,27 @@ export const finalizarPedido = async ({
         return alert('Preencha o endereço de entrega');
     }
 
+    // Última checagem de disponibilidade antes de gravar. O carrinho é
+    // montado a partir do cardápio carregado quando a tela abriu — se um
+    // item esgotar (disponivel ou disponivel_online) enquanto o cliente já
+    // estava com ele no carrinho, sem isso o pedido seria gravado do mesmo
+    // jeito, igual ao bot corrigia mas o app ainda não.
+    const idsUnicos: string[] = [...new Set<string>(carrinho.map((i: any) => i.id).filter(Boolean))];
+    const docsAtuais = await Promise.all(idsUnicos.map((id: string) => db.collection('cardapio').doc(id).get()));
+    const idsIndisponiveis = new Set<string>();
+    docsAtuais.forEach((snap: any) => {
+        const d = snap.exists ? (snap.data() || {}) : null;
+        if (!d || d.disponivel === false || d.disponivel_online === false) idsIndisponiveis.add(snap.id);
+    });
+    if (idsIndisponiveis.size > 0) {
+        const nomesIndisponiveis = [...new Set(
+            carrinho.filter((i: any) => idsIndisponiveis.has(i.id)).map((i: any) => i.nome_exibicao || i.nome)
+        )];
+        alert(`Esses itens esgotaram e foram removidos do seu carrinho: ${nomesIndisponiveis.join(', ')}. Revise o pedido e finalize novamente.`);
+        setCarrinho(carrinho.filter((i: any) => !idsIndisponiveis.has(i.id)));
+        return;
+    }
+
     // Montagem do objeto EXATAMENTE como o seu app.js (painel) espera
     const pedido = {
         origem: "APP",

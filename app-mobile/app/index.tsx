@@ -34,6 +34,7 @@ import {
 } from 'react-native-safe-area-context';
 import { finalizarPedido } from '../services/pedidoService';
 import { firebaseConfig } from '../firebaseConfig';
+import { clientConfig } from '../clientConfig';
 
 // --- CONFIGURAÇÃO FIREBASE (centralizada em firebaseConfig.ts) ---
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
@@ -1013,7 +1014,6 @@ function AppCliente() {
   const [modalVisivel, setModalVisivel] = useState(false);
   const [statusPagamento, setStatusPagamento] = useState<'sucesso' | 'erro'>('sucesso');
   const flatListRef = useRef<FlatList>(null);
-  const NGROK_URL = "https://leann-southbound-vito.ngrok-free.dev";
   const [modalPixVisivel, setModalPixVisivel] = useState(false);
   const [pixCopiaECola, setPixCopiaECola] = useState('');
   const [modalCartaoVisivel, setModalCartaoVisivel] = useState(false);
@@ -1036,6 +1036,20 @@ function AppCliente() {
   useEffect(() => {
     const unsub = onSnapshot(doc(dbModular, 'app_config', 'geral'), (s: any) => {
       setAppCfg(s && s.exists() ? (s.data() || {}) : {});
+    }, () => { });
+    return () => unsub();
+  }, []);
+
+  // Cardápio em tempo real — antes era uma leitura única no login, então um
+  // item esgotado (disponivel/disponivel_online) enquanto o app já estava
+  // aberto continuava aparecendo pro cliente até ele fechar e reabrir o app.
+  useEffect(() => {
+    const q = query(collection(dbModular, 'cardapio'), where('disponivel', '==', true));
+    const unsub = onSnapshot(q, (snapshot: any) => {
+      const listaProd = snapshot.docs
+        .map((d: any) => ({ id: d.id, ...d.data() }))
+        .filter((p: any) => p.disponivel_online !== false);
+      setProdutos(listaProd);
     }, () => { });
     return () => unsub();
   }, []);
@@ -1224,7 +1238,7 @@ function AppCliente() {
             nome: item.nome_exibicao || item.nome,
             preco: parseFloat(Number(item.preco).toFixed(2))
           })),
-          usuarioEmail: "cliente@pizzain.com"
+          usuarioEmail: clientConfig.emailPagamentoPadrao
         })
       });
 
@@ -1270,7 +1284,7 @@ function AppCliente() {
       // Gere a chave aqui fora
       const idempotencyKey = "key-" + Date.now() + "-" + Math.random().toString(36).substring(7);
 
-      const response = await fetch('https://processarpagamentodireto-tpk65iddza-uc.a.run.app', {
+      const response = await fetch(`https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net/processarPagamentoDireto`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1281,10 +1295,10 @@ function AppCliente() {
           payment_method_id: "pix",
           idempotency_key: idempotencyKey,
           item: {
-            title: "Pedido PizzaIn",
+            title: `Pedido ${nomeAppExibicao}`,
             total: parseFloat(calcularTotal())
           },
-          email: "vendas@pizzain.com.br", // Verifique se o servidor aceita email fixo
+          email: clientConfig.emailPagamentoPadrao,
           nome: nome,
           cpf: cpfLimpo
         })
@@ -1384,7 +1398,7 @@ function AppCliente() {
       }
 
       // --- PASSO A: Gerar Token do Cartão ---
-      const responseToken = await fetch('https://api.mercadopago.com/v1/card_tokens?public_key=TEST-568666ff-b126-42c0-9897-92c916f02d14', {
+      const responseToken = await fetch(`https://api.mercadopago.com/v1/card_tokens?public_key=${clientConfig.mercadoPagoPublicKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1410,16 +1424,16 @@ function AppCliente() {
       }
 
       // --- PASSO B: Processar Pagamento na Cloud Function ---
-      const responsePagamento = await fetch('https://processarpagamentodireto-tpk65iddza-uc.a.run.app', {
+      const responsePagamento = await fetch(`https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net/processarPagamentoDireto`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: tokenData.id,
           item: {
-            title: "Pedido PizzaIn",
+            title: `Pedido ${nomeAppExibicao}`,
             total: parseFloat(calcularTotal()),
           },
-          email: "cliente_pizzain@teste.com"
+          email: clientConfig.emailPagamentoPadrao
         })
       });
 
@@ -1679,17 +1693,6 @@ function AppCliente() {
             });
           }
         }
-
-        // 2. Carrega Cardápio
-        // disponivel_online é um segundo interruptor (além de "disponivel"),
-        // pra permitir esgotar um item só pro app/WhatsApp sem afetar o
-        // balcão — campo ausente conta como disponível (itens antigos).
-        const prodSnapshot = await db.collection('cardapio').where('disponivel', '==', true).get();
-        const listaProd = prodSnapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() }))
-          .filter((p: any) => p.disponivel_online !== false);
-        setProdutos(listaProd);
-        setProdutosFiltrados(listaProd);
 
       } catch (error) {
         console.error("Erro ao carregar dados:", error);
