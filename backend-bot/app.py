@@ -542,6 +542,22 @@ def salvar_historico_firestore(wa_id, role, content, limite=None):
             })
     except Exception as e:
         print(f"Erro ao salvar histórico: {e}")
+
+def marcar_atencao(wa_id, motivo):
+    """Sinaliza pro painel de Atendimento (bot-chat.html) que essa conversa
+    tem uma situação que o bot não conseguiu resolver sozinho — bairro
+    ambíguo, item do pedido não reconhecido, etc. — e precisa de um humano
+    olhando. Sem isso a conversa fica igual a qualquer outra na lista, sem
+    nenhum sinal de que precisa de atenção."""
+    try:
+        db.collection("historico_conversas").document(wa_id).set({
+            "precisa_atencao": True,
+            "motivo_atencao": motivo,
+            "atencao_marcada_em": datetime.now(timezone.utc)
+        }, merge=True)
+    except Exception as e:
+        print(f"Erro ao marcar atenção: {e}")
+
 def consultar_sabor(sabor_cliente):
     if db is None: return {"status": "erro"}
     
@@ -1058,7 +1074,27 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         forma_pagamento=args.get("forma_pagamento"),
                         telefone=wa_id
                     )
-                
+
+                # Sinaliza no painel de Atendimento quando o bot bate numa
+                # situação que não consegue resolver sozinho — dá pra ver
+                # o texto exato que o cliente digitou em 'args', então usa
+                # ele na mensagem em vez do que a função devolveu.
+                if function_name == "verificar_bairro_entrega":
+                    try:
+                        resultado_bairro = json.loads(content)
+                        if resultado_bairro.get("status") in ("nao_encontrado", "sem_lista_cadastrada"):
+                            marcar_atencao(id_usuario, f"Bairro não reconhecido: \"{args.get('bairro_cliente')}\"")
+                    except (ValueError, TypeError):
+                        pass
+                elif function_name in ("registrar_pedido", "calcular_pedido"):
+                    try:
+                        resultado_pedido = json.loads(content)
+                        nao_reconhecidos = resultado_pedido.get("itens_nao_reconhecidos") or []
+                        if nao_reconhecidos:
+                            marcar_atencao(id_usuario, f"Item(ns) não reconhecido(s) no pedido: {', '.join(nao_reconhecidos)}")
+                    except (ValueError, TypeError):
+                        pass
+
                 messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": content})
             
             second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages)

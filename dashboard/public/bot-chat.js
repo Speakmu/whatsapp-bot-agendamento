@@ -52,6 +52,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const snap = await COL.orderBy('ultima_interacao', 'desc').limit(50).get();
             conversas = [];
             snap.forEach(doc => conversas.push({ id: doc.id, ...doc.data() }));
+            // Conversas que precisam de atenção sempre no topo, senão a mais recente primeiro.
+            conversas.sort((a, b) => (b.precisa_atencao ? 1 : 0) - (a.precisa_atencao ? 1 : 0));
             renderConversas();
         } catch (err) {
             lista.innerHTML = `<div class="empty">Erro ao carregar conversas: ${escapeHtml(err.message)}</div>`;
@@ -69,13 +71,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const ultima = msgs[msgs.length - 1];
             const preview = ultima ? escapeHtml(ultima.content).slice(0, 80) : 'Sem mensagens';
             const ativo = c.id === conversaAtualId ? ' active' : '';
-            const badge = c.modo_manual ? '<span class="badge-manual">Manual</span>' : '';
-            return `<div class="conv-item${ativo}" data-id="${escapeHtml(c.id)}">
+            const classeAtencao = c.precisa_atencao ? ' precisa-atencao' : '';
+            const badgeManual = c.modo_manual ? '<span class="badge-manual">Manual</span>' : '';
+            const badgeAtencao = c.precisa_atencao
+                ? `<span class="badge-atencao" title="${escapeHtml(c.motivo_atencao || '')}">⚠️ Precisa de atenção</span>`
+                : '';
+            return `<div class="conv-item${ativo}${classeAtencao}" data-id="${escapeHtml(c.id)}">
                 <div class="conv-id">${escapeHtml(c.id)}</div>
+                ${badgeAtencao}
                 <div class="conv-preview">${preview}</div>
                 <div class="conv-meta">
                     <span class="conv-time">${formatarHora(c.ultima_interacao)}</span>
-                    ${badge}
+                    ${badgeManual}
                 </div>
             </div>`;
         }).join('');
@@ -95,6 +102,19 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pollMensagens) clearInterval(pollMensagens);
         await carregarMensagens();
         pollMensagens = setInterval(carregarMensagens, 10000);
+
+        // Atendente abriu a conversa — considera que já viu o motivo da
+        // atenção, tira o sinalizador daqui e da lista local.
+        const conversa = conversas.find(c => c.id === id);
+        if (conversa && conversa.precisa_atencao) {
+            conversa.precisa_atencao = false;
+            try {
+                await COL.doc(id).set({ precisa_atencao: false }, { merge: true });
+            } catch (err) {
+                console.warn('Erro ao limpar sinalizador de atenção:', err.message);
+            }
+            renderConversas();
+        }
     }
 
     async function carregarMensagens() {
