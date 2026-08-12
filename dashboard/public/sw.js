@@ -4,10 +4,19 @@
 // offline (enablePersistence, ligado em caixa.js) — este arquivo só resolve
 // o "esqueleto" da página.
 //
-// Estratégia: network-first (tenta a rede, atualiza o cache com a resposta
-// mais nova) e só cai pro cache quando a rede falha de verdade (offline).
-// Isso evita servir uma versão desatualizada da página para quem está online.
-const CACHE = 'pdv-static-v2';
+// Duas estratégias diferentes por tipo de arquivo:
+// - Código próprio (HTML/JS/CSS deste domínio): network-first — tenta a rede
+//   e atualiza o cache com a resposta mais nova, só cai pro cache se a rede
+//   falhar de verdade (offline). Evita servir versão desatualizada depois
+//   de um deploy.
+// - SDK do Firebase no gstatic.com: cache-first. A URL já tem a versão presa
+//   (8.6.8) — o conteúdo dela NUNCA muda, então baixar de novo a cada reload
+//   só adiciona demora sem nenhum ganho de atualização. Cada página do
+//   painel carrega esse SDK de novo (o shell e o iframe de dentro, cada um
+//   com seu próprio <script>), então essa troca sozinha já evita várias
+//   rodadas de rede desnecessárias por navegação.
+const CACHE = 'pdv-static-v3';
+const GSTATIC_FIREBASE_PREFIX = 'https://www.gstatic.com/firebasejs/8.6.8/';
 
 // Pré-cache: sem isso, o Service Worker só guarda um arquivo depois que ele é
 // visitado online pelo menos uma vez (cache "sob demanda") — se o operador for
@@ -64,6 +73,22 @@ self.addEventListener('fetch', (event) => {
         || url.includes('identitytoolkit.googleapis.com')
         || url.includes('cloudfunctions.net')
         || url.includes('/__/')) return;
+
+    // SDK do Firebase (URL com versão presa): serve do cache na hora se já
+    // tiver, sem nem tentar a rede primeiro — não tem "versão mais nova"
+    // possível pra essa URL específica.
+    if (url.startsWith(GSTATIC_FIREBASE_PREFIX)) {
+        event.respondWith(
+            caches.match(event.request).then(cached => cached || fetch(event.request).then(resp => {
+                if (resp && resp.ok) {
+                    const copy = resp.clone();
+                    caches.open(CACHE).then(cache => cache.put(event.request, copy)).catch(() => {});
+                }
+                return resp;
+            }))
+        );
+        return;
+    }
 
     event.respondWith(
         fetch(event.request)
