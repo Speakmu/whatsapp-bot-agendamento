@@ -329,6 +329,35 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
         print(f"ERRO: {str(e)}")
         return json.dumps({"status": "erro", "motivo": "Erro interno."})
 
+def consultar_meu_pedido(wa_id: str):
+    """Busca o pedido mais recente já registrado deste cliente — usada quando
+    ele pergunta sobre um pedido que JÁ fez (valor, itens, status), pra não
+    o bot precisar "adivinhar"/reconstruir isso de cabeça (ou, pior, chamar
+    registrar_pedido de novo só pra descrever, o que cria um pedido duplicado
+    de verdade no sistema)."""
+    if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
+    try:
+        docs = db.collection('pedidos') \
+            .where('telefone_cliente', '==', str(wa_id)) \
+            .order_by('hora_pedido', direction=firestore.Query.DESCENDING) \
+            .limit(1).get()
+        if not docs:
+            return json.dumps({"status": "sem_pedido"})
+
+        pedido = docs[0].to_dict()
+        return json.dumps({
+            "status": "ok",
+            "itens": [i.get("nome") for i in (pedido.get("itens") or [])],
+            "valor_total": pedido.get("valor_total"),
+            "taxa_entrega": pedido.get("taxa_entrega"),
+            "tipo_entrega": pedido.get("tipo_entrega"),
+            "forma_pagamento": pedido.get("forma_pagamento"),
+            "status_pedido": pedido.get("status")
+        })
+    except Exception as e:
+        print(f"ERRO ao consultar pedido: {e}")
+        return json.dumps({"status": "erro", "motivo": "Erro interno."})
+
 def registrar_comprovante(wa_id: str, imagem_url: str):
     if db is None: return "Erro no banco de dados."
     
@@ -689,6 +718,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     "required": ["bairro_cliente"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "consultar_meu_pedido",
+                "description": "Busca o pedido mais recente que este cliente já fez (itens, valor total, forma de pagamento, status). Use quando ele perguntar sobre um pedido já realizado — NUNCA use 'registrar_pedido' pra responder esse tipo de pergunta."
+            }
         }
     ]
 
@@ -800,6 +836,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     4. FINALIZAÇÃO:
        - Use a função 'registrar_pedido' APENAS quando tiver: Itens, Forma de
          Entrega e Forma de Pagamento definidos.
+       - Se o cliente perguntar sobre um pedido que ELE JÁ FEZ (ex.: "qual o
+         valor do meu pedido?", "pode descrever meu pedido?", "o que eu
+         pedi mesmo?", "cadê meu pedido"), use a função
+         'consultar_meu_pedido' — NUNCA 'registrar_pedido' pra isso, mesmo
+         que pareça mais simples. 'registrar_pedido' sempre CRIA um pedido
+         novo no sistema; usá-la só pra responder uma pergunta duplica o
+         pedido do cliente de verdade. Se 'consultar_meu_pedido' devolver
+         "sem_pedido", diga que não encontrou nenhum pedido dele ainda.
        - Passe cada item pedido separadamente em "itens" (nome_produto +
          quantidade) — NUNCA junte tudo numa frase só de novo.
        - Se o cliente já tiver cadastro, use o nome '{nome_cliente}' na função. Se não, use o nome que ele informou.
@@ -878,6 +922,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     content = listar_bebidas()
                 elif function_name == "verificar_bairro_entrega":
                     content = json.dumps(verificar_bairro_entrega(args.get("bairro_cliente")))
+                elif function_name == "consultar_meu_pedido":
+                    content = consultar_meu_pedido(wa_id)
                 elif function_name == "registrar_pedido":
                     content = registrar_pedido(
                         wa_id=wa_id,
