@@ -43,6 +43,14 @@
         .badge-manual { background:#fff0d9; color:#a8620a; border-radius:999px; padding:2px 8px; font-size:.7rem; font-weight:800; }
         .badge-atencao { display:inline-block; background:#fdecea; color:#c0392b; border-radius:999px; padding:2px 8px; font-size:.72rem; font-weight:800; margin:4px 0; }
         .conv-item.precisa-atencao { border-color:#f3b6ae; background:#fffaf9; }
+
+        .atencao-box { background:#fff7f6; border-bottom:1px solid #f3b6ae; padding:12px 14px; }
+        .atencao-box .atencao-titulo { font-weight:800; color:#c0392b; font-size:.88rem; margin-bottom:8px; }
+        .atencao-box .atencao-acoes { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+        .atencao-box select { padding:7px 10px; border:1px solid var(--line); border-radius:8px; font-size:.85rem; min-width:220px; }
+        .btn-sim { background:var(--ok); color:#fff; }
+        .btn-nao { background:var(--danger); color:#fff; }
+        .btn-vincular { background:var(--accent); color:#fff; }
         .empty { color:var(--muted); font-size:.88rem; padding:16px; text-align:center; }
 
         .chat-wrap { display:grid; grid-template-rows:auto 1fr auto; }
@@ -94,6 +102,7 @@
                     Assumir controle manual
                 </label>
             </div>
+            <div id="atencao-box" class="atencao-box" style="display:none"></div>
             <div id="messages" class="messages">
                 <div class="chat-empty">Escolha uma conversa na lista ao lado.</div>
             </div>

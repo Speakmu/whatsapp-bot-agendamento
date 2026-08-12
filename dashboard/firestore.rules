@@ -74,6 +74,14 @@ service cloud.firestore {
     match /historico_conversas/{id} {
       allow read, write: if request.auth != null;
     }
+    // Aprendizado do bot (painel de Atendimento ensina bairro/item que ele
+    // não reconheceu sozinho) — mesmo nível de proteção que historico_conversas.
+    match /bairros_aprendizado/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /itens_aprendizado/{id} {
+      allow read, write: if request.auth != null;
+    }
     // Mensalidade do sistema: qualquer usuário logado da loja lê (pra ver
     // e pagar), mas só o fornecedor (Murilo) pode lançar/editar cobranças —
     // a loja não pode marcar a própria mensalidade como paga.

@@ -16,15 +16,35 @@ document.addEventListener('DOMContentLoaded', () => {
     // Base do backend do bot (mesmo endereço usado em kds.js / entrega.js).
     const BOT_BASE_URL = "https://whatsapp-bot-agendamento.onrender.com";
     const COL = db.collection('historico_conversas');
+    const COL_BAIRROS_APRENDIZADO = db.collection('bairros_aprendizado');
+    const COL_ITENS_APRENDIZADO = db.collection('itens_aprendizado');
+    const COL_CARDAPIO = db.collection('cardapio');
 
     let conversas = [];
     let conversaAtualId = null;
     let pollConversas = null;
     let pollMensagens = null;
+    let cardapioCache = [];
+
+    // Mesma normalização usada no backend (minúsculo, sem espaço sobrando,
+    // sem acento) — pra bater com a mesma chave que o bot vai consultar.
+    // Remove marca de acentuação via checagem numérica de code point (não
+    // embute caractere combinante literal no fonte — isso já causou um
+    // problema de encoding real em outra parte do sistema).
+    function normalizarTermo(s) {
+        let semAcento = '';
+        for (const ch of String(s || '').normalize('NFD')) {
+            const code = ch.codePointAt(0);
+            if (code >= 0x0300 && code <= 0x036f) continue;
+            semAcento += ch;
+        }
+        return semAcento.toLowerCase().trim().replace(/\s+/g, ' ');
+    }
 
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
         carregarConversas();
+        carregarCardapioCache();
         $('btn-refresh-conversas').addEventListener('click', carregarConversas);
         $('toggle-manual').addEventListener('change', onToggleManual);
         $('btn-send').addEventListener('click', enviarMensagem);
@@ -102,19 +122,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pollMensagens) clearInterval(pollMensagens);
         await carregarMensagens();
         pollMensagens = setInterval(carregarMensagens, 10000);
-
-        // Atendente abriu a conversa — considera que já viu o motivo da
-        // atenção, tira o sinalizador daqui e da lista local.
-        const conversa = conversas.find(c => c.id === id);
-        if (conversa && conversa.precisa_atencao) {
-            conversa.precisa_atencao = false;
-            try {
-                await COL.doc(id).set({ precisa_atencao: false }, { merge: true });
-            } catch (err) {
-                console.warn('Erro ao limpar sinalizador de atenção:', err.message);
-            }
-            renderConversas();
-        }
     }
 
     async function carregarMensagens() {
@@ -124,9 +131,141 @@ document.addEventListener('DOMContentLoaded', () => {
             const dados = doc.exists ? doc.data() : {};
             $('toggle-manual').checked = dados.modo_manual === true;
             renderMensagens(dados.mensagens || []);
+            renderAtencaoBox(dados);
         } catch (err) {
             $('chat-status').textContent = 'Erro ao carregar mensagens: ' + err.message;
         }
+    }
+
+    async function carregarCardapioCache() {
+        try {
+            const snap = await COL_CARDAPIO.orderBy('nome').get();
+            cardapioCache = [];
+            snap.forEach(doc => cardapioCache.push({ id: doc.id, ...doc.data() }));
+        } catch (err) {
+            console.warn('Erro ao carregar cardápio:', err.message);
+        }
+    }
+
+    function renderAtencaoBox(dados) {
+        const box = $('atencao-box');
+        if (!dados.precisa_atencao || !dados.tipo_atencao) {
+            box.style.display = 'none';
+            box.innerHTML = '';
+            return;
+        }
+        const info = dados.atencao_dados || {};
+        box.style.display = '';
+
+        if (dados.tipo_atencao === 'bairro') {
+            box.innerHTML = `
+                <div class="atencao-titulo">⚠️ Bairro que o bot não reconheceu: "${escapeHtml(info.bairro_cliente || '')}"</div>
+                <div class="atencao-acoes">
+                    <button class="btn btn-sim" id="btn-bairro-atende">Atendemos esse bairro</button>
+                    <button class="btn btn-nao" id="btn-bairro-nao-atende">Não atendemos</button>
+                </div>
+            `;
+            $('btn-bairro-atende').addEventListener('click', () => responderBairro(info.bairro_cliente, true));
+            $('btn-bairro-nao-atende').addEventListener('click', () => responderBairro(info.bairro_cliente, false));
+        } else if (dados.tipo_atencao === 'item') {
+            const opcoes = cardapioCache.map(p =>
+                `<option value="${p.id}">${escapeHtml(p.nome_exibicao || p.nome)}</option>`
+            ).join('');
+            box.innerHTML = `
+                <div class="atencao-titulo">⚠️ Item que o bot não reconheceu: "${escapeHtml(info.nome_produto || '')}"</div>
+                <div class="atencao-acoes">
+                    <select id="select-item-vincular">
+                        <option value="">Qual item do cardápio é esse?</option>
+                        ${opcoes}
+                    </select>
+                    <button class="btn btn-vincular" id="btn-vincular-item">Vincular</button>
+                </div>
+            `;
+            $('btn-vincular-item').addEventListener('click', () => {
+                const itemId = $('select-item-vincular').value;
+                if (!itemId) { alert('Escolha o item correspondente antes de vincular.'); return; }
+                vincularItem(info.nome_produto, itemId);
+            });
+        } else {
+            box.style.display = 'none';
+            box.innerHTML = '';
+        }
+    }
+
+    async function limparAtencao(id) {
+        await COL.doc(id).set({ precisa_atencao: false }, { merge: true });
+        const conversa = conversas.find(c => c.id === id);
+        if (conversa) conversa.precisa_atencao = false;
+        renderConversas();
+    }
+
+    async function enviarMensagemDireta(wa_id, mensagem) {
+        try {
+            await fetch(`${BOT_BASE_URL}/painel/enviar_mensagem`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                // assumir_manual:false — só informa o cliente, o bot continua
+                // cuidando do resto da conversa sozinho normalmente.
+                body: JSON.stringify({ wa_id, mensagem, assumir_manual: false })
+            });
+        } catch (err) {
+            console.warn('Erro ao enviar aviso pro cliente:', err.message);
+        }
+    }
+
+    async function responderBairro(bairroCliente, atende) {
+        if (!conversaAtualId) return;
+        try {
+            await COL_BAIRROS_APRENDIZADO.doc(normalizarTermo(bairroCliente)).set({
+                bairro_original: bairroCliente,
+                atende,
+                respondido_por: (auth.currentUser && auth.currentUser.email) || null,
+                respondido_em: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await enviarMensagemDireta(
+                conversaAtualId,
+                atende
+                    ? `Confirmei aqui: entregamos sim em ${bairroCliente}! Pode seguir com o pedido.`
+                    : `Confirmei aqui: infelizmente não entregamos em ${bairroCliente}. Mas você pode fazer a retirada no balcão, se preferir!`
+            );
+            await limparAtencao(conversaAtualId);
+            flashLocal('Resposta salva e enviada ao cliente.');
+            await carregarMensagens();
+        } catch (err) {
+            alert('Erro ao responder bairro: ' + err.message);
+        }
+    }
+
+    async function vincularItem(nomeProduto, itemId) {
+        if (!conversaAtualId) return;
+        const item = cardapioCache.find(p => p.id === itemId);
+        if (!item) return;
+        try {
+            await COL_ITENS_APRENDIZADO.doc(normalizarTermo(nomeProduto)).set({
+                apelido_original: nomeProduto,
+                item_id: itemId,
+                item_nome: item.nome_exibicao || item.nome,
+                respondido_por: (auth.currentUser && auth.currentUser.email) || null,
+                respondido_em: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            await enviarMensagemDireta(
+                conversaAtualId,
+                `Encontrei aqui! "${nomeProduto}" é o nosso "${item.nome_exibicao || item.nome}" (${(item.preco != null ? 'R$ ' + Number(item.preco).toFixed(2).replace('.', ',') : '')}). Quer que eu inclua no seu pedido?`
+            );
+            await limparAtencao(conversaAtualId);
+            flashLocal('Item vinculado e cliente avisado.');
+            await carregarMensagens();
+        } catch (err) {
+            alert('Erro ao vincular item: ' + err.message);
+        }
+    }
+
+    function flashLocal(t) {
+        const d = document.createElement('div');
+        d.textContent = t;
+        d.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#2c3e50;color:#fff;padding:10px 18px;border-radius:10px;z-index:9999;font-size:.85rem;';
+        document.body.appendChild(d);
+        setTimeout(() => d.remove(), 2400);
     }
 
     function renderMensagens(mensagens) {

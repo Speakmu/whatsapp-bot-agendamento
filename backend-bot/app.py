@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from flask import Flask, request, jsonify
 import requests
 import os
@@ -205,11 +206,14 @@ def _montar_itens_pedido(itens, endereco_completo):
     """
     docs_cardapio = list(db.collection('cardapio').get())
     cardapio_por_nome = {}
+    cardapio_por_id = {}
     for doc in docs_cardapio:
         dados = doc.to_dict()
+        item_com_id = {**dados, "id": doc.id}
+        cardapio_por_id[doc.id] = item_com_id
         nome_chave = str(dados.get('nome', '')).strip().lower()
         if nome_chave:
-            cardapio_por_nome[nome_chave] = {**dados, "id": doc.id}
+            cardapio_por_nome[nome_chave] = item_com_id
     nomes_cardapio = list(cardapio_por_nome.keys())
 
     total_pontos = 0
@@ -226,18 +230,31 @@ def _montar_itens_pedido(itens, endereco_completo):
             qtd = 1
         if not nome_pedido:
             continue
-        if not nomes_cardapio:
-            itens_nao_reconhecidos.append(nome_pedido)
-            continue
 
-        melhor_match, pontuacao = process.extractOne(nome_pedido, nomes_cardapio)
-        print(f"DEBUG: item do pedido '{nome_pedido}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
+        # Apelido já ensinado pela equipe (painel de Atendimento) pra esse
+        # nome exato — pula a busca aproximada e vai direto no item certo.
+        dados = None
+        try:
+            aprendido = db.collection("itens_aprendizado").document(_normalizar_termo(nome_pedido)).get()
+            if aprendido.exists:
+                item_id_aprendido = aprendido.to_dict().get("item_id")
+                dados = cardapio_por_id.get(item_id_aprendido)
+        except Exception as e:
+            print(f"Erro ao checar item aprendido: {e}")
 
-        if pontuacao < 70:
-            itens_nao_reconhecidos.append(nome_pedido)
-            continue
+        if not dados:
+            if not nomes_cardapio:
+                itens_nao_reconhecidos.append(nome_pedido)
+                continue
 
-        dados = cardapio_por_nome[melhor_match]
+            melhor_match, pontuacao = process.extractOne(nome_pedido, nomes_cardapio)
+            print(f"DEBUG: item do pedido '{nome_pedido}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
+
+            if pontuacao < 70:
+                itens_nao_reconhecidos.append(nome_pedido)
+                continue
+
+            dados = cardapio_por_nome[melhor_match]
 
         if dados.get('disponivel') is False or not _disponivel_online(dados):
             itens_indisponiveis.append(dados.get('nome') or nome_pedido)
@@ -543,20 +560,62 @@ def salvar_historico_firestore(wa_id, role, content, limite=None):
     except Exception as e:
         print(f"Erro ao salvar histórico: {e}")
 
-def marcar_atencao(wa_id, motivo):
+def _normalizar_termo(s):
+    """Chave de comparação exata pra aprendizado (bairro/item): minúsculo,
+    sem espaço sobrando, sem acento — pra 'Passos' e 'passos ' caírem na
+    mesma entrada aprendida."""
+    semAcento = ''.join(
+        ch for ch in unicodedata.normalize('NFD', str(s or ''))
+        if not unicodedata.combining(ch)
+    )
+    return ' '.join(semAcento.lower().split())
+
+def marcar_atencao(wa_id, motivo, tipo=None, dados=None):
     """Sinaliza pro painel de Atendimento (bot-chat.html) que essa conversa
     tem uma situação que o bot não conseguiu resolver sozinho — bairro
     ambíguo, item do pedido não reconhecido, etc. — e precisa de um humano
-    olhando. Sem isso a conversa fica igual a qualquer outra na lista, sem
-    nenhum sinal de que precisa de atenção."""
+    olhando. 'tipo'/'dados' alimentam a caixa de resposta rápida do painel
+    (ex.: tipo='bairro', dados={'bairro_cliente': 'Passos'})."""
     try:
         db.collection("historico_conversas").document(wa_id).set({
             "precisa_atencao": True,
             "motivo_atencao": motivo,
+            "tipo_atencao": tipo,
+            "atencao_dados": dados or {},
             "atencao_marcada_em": datetime.now(timezone.utc)
         }, merge=True)
     except Exception as e:
         print(f"Erro ao marcar atenção: {e}")
+
+def texto_atencao_pendente_antiga(wa_id, minutos_limite=10):
+    """Se essa conversa tem uma dúvida marcada pra equipe há mais tempo que
+    o limite e ninguém respondeu ainda, devolve um aviso pro prompt — sem
+    isso o bot ficaria prometendo "vou confirmar com a equipe" de novo a
+    cada mensagem, numa espera que nunca chega no fim. Não há timer/cron
+    rodando o tempo todo; a checagem acontece na próxima mensagem que o
+    cliente mandar (verificado aqui, no início de cada resposta)."""
+    try:
+        doc = db.collection("historico_conversas").document(wa_id).get()
+        if not doc.exists:
+            return ""
+        dados = doc.to_dict()
+        if not dados.get("precisa_atencao"):
+            return ""
+        marcado_em = dados.get("atencao_marcada_em")
+        if not marcado_em:
+            return ""
+        agora = datetime.now(timezone.utc)
+        if agora - marcado_em > timedelta(minutes=minutos_limite):
+            return (
+                f'AVISO: você marcou uma dúvida pra equipe há mais de {minutos_limite} '
+                f'minutos ("{dados.get("motivo_atencao", "")}") e ninguém respondeu ainda. '
+                f'NÃO prometa verificar com a equipe de novo sobre isso — resolva com o '
+                f'cliente agora mesmo (ofereça retirada como alternativa, ou siga sem esse '
+                f'dado se ele preferir esperar por conta própria).'
+            )
+    except Exception as e:
+        print(f"Erro ao checar atenção pendente: {e}")
+    return ""
 
 def consultar_sabor(sabor_cliente):
     if db is None: return {"status": "erro"}
@@ -602,16 +661,35 @@ def consultar_sabor(sabor_cliente):
 def verificar_bairro_entrega(bairro_cliente):
     """Confere se um bairro citado pelo cliente está na lista cadastrada em
     Configurações do Bot, usando busca aproximada (tolera erro de digitação/
-    abreviação) — mesma lógica do consultar_sabor, mas pra bairro."""
+    abreviação) — mesma lógica do consultar_sabor, mas pra bairro.
+
+    Antes de tudo, checa 'bairros_aprendizado' — respostas que a própria
+    equipe já deu antes pra esse nome exato de bairro (pelo painel de
+    Atendimento), pra não escalar de novo uma dúvida que já foi resolvida."""
+    termo = str(bairro_cliente or "").strip()
+    if not termo:
+        return {"status": "nao_encontrado"}
+
+    try:
+        aprendido = db.collection("bairros_aprendizado").document(_normalizar_termo(termo)).get()
+        if aprendido.exists:
+            dados_aprendido = aprendido.to_dict()
+            bot_cfg_taxa = obter_config_bot().get("taxa_entrega") or 0
+            if dados_aprendido.get("atende"):
+                return {
+                    "status": "atende",
+                    "bairro": dados_aprendido.get("bairro_original") or termo,
+                    "taxa_entrega": bot_cfg_taxa
+                }
+            return {"status": "nao_atende_confirmado", "bairro": dados_aprendido.get("bairro_original") or termo}
+    except Exception as e:
+        print(f"Erro ao checar bairro aprendido: {e}")
+
     bot_cfg = obter_config_bot()
     bairros = [str(b).strip() for b in (bot_cfg.get("bairros_entrega") or []) if str(b).strip()]
 
     if not bairros:
         return {"status": "sem_lista_cadastrada"}
-
-    termo = str(bairro_cliente or "").strip()
-    if not termo:
-        return {"status": "nao_encontrado"}
 
     bairros_lower = [b.lower() for b in bairros]
     melhor_match, pontuacao = process.extractOne(termo.lower(), bairros_lower)
@@ -705,6 +783,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         horario_cfg = bot_cfg.get("horario_funcionamento") or {}
         msg_fechado = horario_cfg.get("mensagem_fechado") or "No momento estamos fechados. Nosso horário de funcionamento: {horario}"
         return msg_fechado.replace("{horario}", texto_horario)
+
+    aviso_atencao_antiga = texto_atencao_pendente_antiga(id_usuario)
 
     # Primeiro contato deste cliente (sem histórico ainda): manda a saudação
     # configurada em vez de chamar a IA. Se ele já tiver perguntado algo
@@ -844,6 +924,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     {contexto_identificacao}
     Telefone do Cliente: {id_usuario}
     {f"Cidade onde a loja entrega: {cidade_atendida} (só entrega dentro dessa cidade, nenhuma outra)." if cidade_atendida else ""}
+    {aviso_atencao_antiga}
     
     --- SUAS DIRETRIZES ---
     0. REGRA MAIS IMPORTANTE DE TODAS — PROIBIDO INVENTAR:
@@ -937,9 +1018,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          bairro que a função retornou, e informe a taxa de entrega (campo
          "taxa_entrega") — ex.: "Entregamos aí sim! A taxa de entrega é
          R$ {{valor}}.". Se "taxa_entrega" vier 0, não cobra taxa nenhuma.
-       - Se vier "nao_encontrado" ou "sem_lista_cadastrada": NÃO existe
-         nenhum canal pra "confirmar com a equipe" depois — nunca prometa
-         isso, é uma promessa vazia que ninguém vai cumprir. Em vez disso:
+       - Se vier "nao_atende_confirmado": a equipe já confirmou antes que
+         NÃO entrega nesse bairro exato — diga isso com confiança, sem
+         hesitar e sem escalar de novo (já é resposta definitiva), e ofereça
+         a retirada no balcão como alternativa.
+       - Se vier "nao_encontrado" ou "sem_lista_cadastrada":
          · Se a loja tem cidade configurada (ver "Cidade onde a loja
            entrega" no topo) e o que o cliente mencionou é claramente uma
            cidade DIFERENTE dessa (não um bairro local) — use seu
@@ -947,16 +1030,27 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
            cidade vizinha, não um bairro de São Sebastião do Paraíso) — diga
            com confiança que a entrega é só dentro de "{cidade_atendida}" e
            que ali fora não dá, oferecendo a retirada no balcão como
-           alternativa.
+           alternativa. NÃO escala pra equipe nesse caso — você já tem
+           certeza suficiente sozinho.
          · Se for realmente ambíguo (pode ser um bairro local não
-           cadastrado na lista, dentro da mesma cidade), diga que não tem
-           certeza se esse bairro específico está na área de entrega e
-           pergunte se o cliente prefere fazer a retirada (mais garantido)
-           ou aguardar — sem prometer confirmação de terceiros. NÃO
-           prossiga pra pergunta de pagamento nesse caso; espere o cliente
-           decidir entre retirada ou continuar tentando a entrega.
+           cadastrado na lista, dentro da mesma cidade): diga que não tem
+           certeza se esse bairro específico está na área de entrega, que
+           vai confirmar com a equipe e avisa assim que souber — essa
+           promessa agora é real (a equipe recebe um aviso no painel e
+           pode responder, e essa resposta fica salva pra próxima vez que
+           alguém perguntar do mesmo bairro). Enquanto isso, ofereça a
+           retirada como alternativa imediata pro cliente não ficar sem
+           opção. NÃO prossiga pra pergunta de pagamento nesse caso; espere
+           o cliente decidir entre retirada ou continuar aguardando a
+           entrega.
+         · EXCEÇÃO — se no topo do prompt vier um aviso dizendo que essa
+           mesma dúvida já foi escalada há mais de 10 minutos sem resposta:
+           NÃO repita a promessa de confirmar com a equipe de novo — nesse
+           caso, resolva você mesmo com o cliente (ofereça só a retirada,
+           ou siga sem confirmar a entrega se ele preferir esperar por
+           conta própria).
          Nunca invente uma resposta de "atende" ou "não atende" fora dessas
-         duas situações.
+         situações.
        - IMPORTANTE: se o cliente já perguntou/mencionou um bairro pra
          entrega, ele JÁ deixou claro que quer "Entrega" — NUNCA pergunte
          "entrega ou retirada?" depois disso, seria redundante. Só falta
@@ -1002,7 +1096,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          entender que é o mesmo total de antes.
        - Se a função devolver "itens_nao_reconhecidos" com algo dentro,
          avise o cliente que esses itens específicos não foram reconhecidos
-         e pergunte de novo sobre eles — não finja que deu tudo certo.
+         e pergunte de novo sobre eles (pode ser um apelido diferente do
+         nome no cardápio) — não finja que deu tudo certo. Isso também fica
+         registrado pro painel de Atendimento; se a equipe já tiver
+         ensinado esse apelido antes, a próxima tentativa já reconhece
+         normal, sem precisar escalar de novo.
        - Se a função devolver "itens_indisponiveis" com algo dentro, avise o
          cliente que esse(s) item(ns) está(ão) em falta no momento (esgotado
          no estoque) e pergunte se ele quer trocar por outra coisa — nunca
@@ -1078,12 +1176,19 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 # Sinaliza no painel de Atendimento quando o bot bate numa
                 # situação que não consegue resolver sozinho — dá pra ver
                 # o texto exato que o cliente digitou em 'args', então usa
-                # ele na mensagem em vez do que a função devolveu.
+                # ele na mensagem em vez do que a função devolveu. 'tipo' e
+                # 'dados' alimentam a caixa de resposta rápida do painel.
                 if function_name == "verificar_bairro_entrega":
                     try:
                         resultado_bairro = json.loads(content)
                         if resultado_bairro.get("status") in ("nao_encontrado", "sem_lista_cadastrada"):
-                            marcar_atencao(id_usuario, f"Bairro não reconhecido: \"{args.get('bairro_cliente')}\"")
+                            bairro_cliente = args.get("bairro_cliente")
+                            marcar_atencao(
+                                id_usuario,
+                                f"Bairro não reconhecido: \"{bairro_cliente}\"",
+                                tipo="bairro",
+                                dados={"bairro_cliente": bairro_cliente}
+                            )
                     except (ValueError, TypeError):
                         pass
                 elif function_name in ("registrar_pedido", "calcular_pedido"):
@@ -1091,7 +1196,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         resultado_pedido = json.loads(content)
                         nao_reconhecidos = resultado_pedido.get("itens_nao_reconhecidos") or []
                         if nao_reconhecidos:
-                            marcar_atencao(id_usuario, f"Item(ns) não reconhecido(s) no pedido: {', '.join(nao_reconhecidos)}")
+                            marcar_atencao(
+                                id_usuario,
+                                f"Item(ns) não reconhecido(s) no pedido: {', '.join(nao_reconhecidos)}",
+                                tipo="item",
+                                dados={"nome_produto": nao_reconhecidos[0], "todos": nao_reconhecidos}
+                            )
                     except (ValueError, TypeError):
                         pass
 
@@ -1318,17 +1428,22 @@ def gerenciar_chat_app():
 
 @app.route('/painel/enviar_mensagem', methods=['POST'])
 def painel_enviar_mensagem():
-    """Atendente responde manualmente pelo painel: envia via WhatsApp,
-    registra no histórico e assume o controle manual da conversa."""
+    """Atendente responde manualmente pelo painel: envia via WhatsApp e
+    registra no histórico. Por padrão assume o controle manual da conversa
+    (composer de texto livre) — mas a caixa de resposta rápida (bairro/item
+    aprendido) manda 'assumir_manual: false', porque ali o objetivo é só
+    informar o cliente e deixar o bot seguir cuidando do resto sozinho."""
     data = request.json or {}
     wa_id = re.sub(r'\D', '', str(data.get('wa_id') or ''))
     mensagem = str(data.get('mensagem') or '').strip()
+    assumir_manual = data.get('assumir_manual', True)
 
     if not wa_id or not mensagem:
         return jsonify({"error": "wa_id e mensagem são obrigatórios"}), 400
 
     send_message(wa_id, mensagem)
     salvar_historico_firestore(wa_id, "assistant", mensagem)
-    db.collection("historico_conversas").document(wa_id).set({"modo_manual": True}, merge=True)
+    if assumir_manual:
+        db.collection("historico_conversas").document(wa_id).set({"modo_manual": True}, merge=True)
     return jsonify({"ok": True}), 200
 
