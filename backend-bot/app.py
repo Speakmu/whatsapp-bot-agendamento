@@ -41,7 +41,8 @@ BOT_CONFIG_DEFAULTS = {
     "mensagem_retirada": "Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!",
     "instrucoes_extras": "",
     "bairros_entrega": [],
-    "taxa_entrega": 0
+    "taxa_entrega": 0,
+    "cidade_atendida": ""
 }
 
 def obter_config_bot():
@@ -811,6 +812,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     nome_empresa = bot_cfg.get("nome_empresa") or BOT_CONFIG_DEFAULTS["nome_empresa"]
     chave_pix = bot_cfg.get("chave_pix") or "consulte a equipe"
     instrucoes_extras = bot_cfg.get("instrucoes_extras") or ""
+    cidade_atendida = bot_cfg.get("cidade_atendida") or ""
 
     # 5. Prompt Otimizado (Limpo e Direto)
     system_prompt = f"""
@@ -819,6 +821,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     --- DADOS DO SISTEMA ---
     {contexto_identificacao}
     Telefone do Cliente: {id_usuario}
+    {f"Cidade onde a loja entrega: {cidade_atendida} (só entrega dentro dessa cidade, nenhuma outra)." if cidade_atendida else ""}
     
     --- SUAS DIRETRIZES ---
     0. REGRA MAIS IMPORTANTE DE TODAS — PROIBIDO INVENTAR:
@@ -909,9 +912,26 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          bairro que a função retornou, e informe a taxa de entrega (campo
          "taxa_entrega") — ex.: "Entregamos aí sim! A taxa de entrega é
          R$ {{valor}}.". Se "taxa_entrega" vier 0, não cobra taxa nenhuma.
-       - Se vier "nao_encontrado" ou "sem_lista_cadastrada": NÃO afirme que
-         entrega nem que não entrega — diga que vai confirmar com a equipe
-         e segue o atendimento normalmente. Nunca invente essa resposta.
+       - Se vier "nao_encontrado" ou "sem_lista_cadastrada": NÃO existe
+         nenhum canal pra "confirmar com a equipe" depois — nunca prometa
+         isso, é uma promessa vazia que ninguém vai cumprir. Em vez disso:
+         · Se a loja tem cidade configurada (ver "Cidade onde a loja
+           entrega" no topo) e o que o cliente mencionou é claramente uma
+           cidade DIFERENTE dessa (não um bairro local) — use seu
+           conhecimento geral pra reconhecer isso (ex.: "Passos" é uma
+           cidade vizinha, não um bairro de São Sebastião do Paraíso) — diga
+           com confiança que a entrega é só dentro de "{cidade_atendida}" e
+           que ali fora não dá, oferecendo a retirada no balcão como
+           alternativa.
+         · Se for realmente ambíguo (pode ser um bairro local não
+           cadastrado na lista, dentro da mesma cidade), diga que não tem
+           certeza se esse bairro específico está na área de entrega e
+           pergunte se o cliente prefere fazer a retirada (mais garantido)
+           ou aguardar — sem prometer confirmação de terceiros. NÃO
+           prossiga pra pergunta de pagamento nesse caso; espere o cliente
+           decidir entre retirada ou continuar tentando a entrega.
+         Nunca invente uma resposta de "atende" ou "não atende" fora dessas
+         duas situações.
        - IMPORTANTE: se o cliente já perguntou/mencionou um bairro pra
          entrega, ele JÁ deixou claro que quer "Entrega" — NUNCA pergunte
          "entrega ou retirada?" depois disso, seria redundante. Só falta
