@@ -10,6 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const DOC_GERAL = db.collection('configuracoes').doc('sistema');
     const DOC_EXIB = db.collection('configuracoes').doc('exibicao');
     const DOC_PAGAMENTOS = db.collection('configuracoes').doc('pagamentos');
+    // horario_funcionamento mora no mesmo doc do bot (configuracoes/bot) porque
+    // é lido por ele (backend-bot) e pelo app — não é exclusivo desta tela.
+    const DOC_BOT = db.collection('configuracoes').doc('bot');
     const COL_USUARIOS = db.collection('usuarios_admin');
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
     const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'mensalidade', 'configuracoes'];
@@ -31,12 +34,24 @@ document.addEventListener('DOMContentLoaded', () => {
         mensalidade: 'Mensalidade',
         configuracoes: 'Configuracoes'
     };
+    const DIAS_SEMANA = [
+        { chave: 'seg', nome: 'Segunda' },
+        { chave: 'ter', nome: 'Terça' },
+        { chave: 'qua', nome: 'Quarta' },
+        { chave: 'qui', nome: 'Quinta' },
+        { chave: 'sex', nome: 'Sexta' },
+        { chave: 'sab', nome: 'Sábado' },
+        { chave: 'dom', nome: 'Domingo' }
+    ];
+    const HORARIO_MENSAGEM_PADRAO = 'No momento estamos fechados. Nosso horário de funcionamento: {horario}';
+
     let usuarioAtual = null;
     let editandoEmail = null;
 
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
         usuarioAtual = user;
+        montarTabelaHorario();
         carregar();
         $('salvar-geral').addEventListener('click', salvarGeral);
         $('salvar-pagamentos').addEventListener('click', salvarPagamentos);
@@ -45,12 +60,67 @@ document.addEventListener('DOMContentLoaded', () => {
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
         $('salvar-usuario').addEventListener('click', salvarUsuario);
         $('novo-usuario').addEventListener('click', limparUsuarioForm);
+        $('salvar-horario').addEventListener('click', salvarHorario);
         if (!isAdmin(user.email)) {
             $('usuarios-admin-box').style.display = 'none';
         } else {
             carregarUsuarios();
         }
     });
+
+    function montarTabelaHorario() {
+        const body = $('horario-dias-body');
+        body.innerHTML = DIAS_SEMANA.map(d => `
+            <tr>
+                <td style="padding:6px 4px;">${d.nome}</td>
+                <td style="padding:6px 4px;"><input type="checkbox" id="horario-${d.chave}-aberto" style="width:18px;height:18px;"></td>
+                <td style="padding:6px 4px;"><input type="time" id="horario-${d.chave}-abre" style="padding:6px;"></td>
+                <td style="padding:6px 4px;"><input type="time" id="horario-${d.chave}-fecha" style="padding:6px;"></td>
+            </tr>
+        `).join('');
+    }
+
+    async function carregarHorario() {
+        try {
+            const snap = await DOC_BOT.get();
+            const horario = (snap.exists ? snap.data() : {})?.horario_funcionamento || {};
+            const dias = horario.dias || {};
+            $('horario-ativo').checked = horario.ativo === true;
+            $('horario-mensagem-fechado').value = horario.mensagem_fechado || '';
+            DIAS_SEMANA.forEach(dd => {
+                const cfgDia = dias[dd.chave] || {};
+                $(`horario-${dd.chave}-aberto`).checked = cfgDia.aberto === true;
+                $(`horario-${dd.chave}-abre`).value = cfgDia.abre || '';
+                $(`horario-${dd.chave}-fecha`).value = cfgDia.fecha || '';
+            });
+        } catch (err) {
+            console.warn('horario:', err.message);
+        }
+    }
+
+    async function salvarHorario() {
+        const dias = {};
+        DIAS_SEMANA.forEach(d => {
+            dias[d.chave] = {
+                aberto: $(`horario-${d.chave}-aberto`).checked,
+                abre: $(`horario-${d.chave}-abre`).value || '',
+                fecha: $(`horario-${d.chave}-fecha`).value || ''
+            };
+        });
+        try {
+            await DOC_BOT.set({
+                horario_funcionamento: {
+                    ativo: $('horario-ativo').checked,
+                    mensagem_fechado: $('horario-mensagem-fechado').value.trim() || HORARIO_MENSAGEM_PADRAO,
+                    dias
+                },
+                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            flash('Horário de funcionamento salvo.');
+        } catch (err) {
+            alert('Erro ao salvar horário: ' + err.message);
+        }
+    }
 
     function chk(mod) {
         return document.querySelector(`input[data-mod="${mod}"]`);
@@ -76,6 +146,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             await carregarExibicao();
             await carregarPagamentos();
+            await carregarHorario();
         } catch (err) {
             alert('Erro ao carregar configuracoes: ' + err.message);
         }
@@ -85,10 +156,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const stone = $('pag-provedor').value === 'stone';
         $('campo-point').style.display = stone ? 'none' : 'block';
         $('campo-stone').style.display = stone ? 'block' : 'none';
+        $('campo-stone-code').style.display = stone ? 'block' : 'none';
+        $('campo-stone-referer').style.display = stone ? 'block' : 'none';
+        $('campo-stone-secret').style.display = stone ? 'block' : 'none';
         $('campo-teste-stone').style.display = stone ? 'block' : 'none';
     }
 
     const CRIAR_COBRANCA_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaStone";
+    const CONFIGURAR_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/configurarStoneConnect";
+
+    async function authHeaders() {
+        if (!usuarioAtual) throw new Error('Sessao expirada. Entre novamente no sistema.');
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${await usuarioAtual.getIdToken()}`
+        };
+    }
 
     async function testarMaquininhaStone() {
         const btn = $('testar-stone');
@@ -99,16 +182,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Garante que o backend vai ler o serial que está no campo agora, mesmo
-        // que a pessoa ainda não tenha clicado em Salvar.
         try {
-            await DOC_PAGAMENTOS.set({
-                provedorCartao: $('pag-provedor').value,
-                stoneDeviceSerial: serial,
-                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+            await salvarStoneConnect();
         } catch (err) {
-            alert('Não foi possível salvar o serial antes do teste: ' + err.message);
+            alert('Não foi possível validar a configuração Stone: ' + err.message);
             return;
         }
 
@@ -120,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const resp = await fetch(CRIAR_COBRANCA_STONE_URL, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: await authHeaders(),
                 body: JSON.stringify({
                     amount: 0.01,
                     externalReference: 'teste-conexao-' + Date.now(),
@@ -147,6 +224,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = snap.exists ? (snap.data() || {}) : {};
             $('pag-point-device').value = d.pointDeviceId || '';
             $('pag-stone-serial').value = d.stoneDeviceSerial || '';
+            $('pag-stone-code').value = d.stoneCode || '';
+            $('pag-stone-referer').value = d.stoneServiceRefererName || '';
+            $('pag-stone-secret').value = '';
+            $('pag-stone-secret').placeholder = d.stoneSecretConfigured ? 'Chave Connect salva no servidor' : 'sk_...';
             $('pag-provedor').value = d.provedorCartao || 'mercadopago';
             aplicarVisibilidadeProvedor();
         } catch (err) {
@@ -156,16 +237,33 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function salvarPagamentos() {
         try {
+            if ($('pag-provedor').value === 'stone') await salvarStoneConnect();
             await DOC_PAGAMENTOS.set({
                 provedorCartao: $('pag-provedor').value,
                 pointDeviceId: $('pag-point-device').value.trim(),
-                stoneDeviceSerial: $('pag-stone-serial').value.trim(),
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
             flash('Configuracoes de pagamento salvas.');
         } catch (err) {
             alert('Erro ao salvar pagamentos: ' + err.message);
         }
+    }
+
+    async function salvarStoneConnect() {
+        const resp = await fetch(CONFIGURAR_STONE_URL, {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify({
+                stoneCode: $('pag-stone-code').value.trim(),
+                stoneDeviceSerial: $('pag-stone-serial').value.trim(),
+                stoneServiceRefererName: $('pag-stone-referer').value.trim(),
+                stoneSecretKey: $('pag-stone-secret').value.trim()
+            })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.message || `erro ${resp.status}`);
+        $('pag-stone-secret').value = '';
+        $('pag-stone-secret').placeholder = 'Chave Connect salva no servidor';
     }
 
     async function carregarExibicao() {

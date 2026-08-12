@@ -22,9 +22,16 @@
         header.top h1 { font-size:1.4rem; }
         .link { border:1px solid var(--line); background:#fff; color:var(--txt); padding:8px 14px; border-radius:8px; text-decoration:none; font-size:.9rem; }
         .wrap { padding:20px 24px; max-width:900px; display:grid; gap:18px; }
-        .box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px; }
+        .box { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:0; }
         .box h2 { font-size:1.1rem; margin-bottom:4px; }
-        .box .sub { color:var(--muted); font-size:.85rem; margin-bottom:16px; }
+        .box .sub { color:var(--muted); font-size:.85rem; margin-bottom:0; }
+        .box > summary { list-style:none; cursor:pointer; padding:20px; display:flex; align-items:flex-start; justify-content:space-between; gap:14px; }
+        .box > summary::-webkit-details-marker { display:none; }
+        .box > summary .chevron { flex:none; color:var(--muted); margin-top:2px; transition:transform .15s ease; }
+        .box[open] > summary .chevron { transform:rotate(90deg); }
+        .box > summary:hover h2 { color:var(--accent); }
+        .box-body { padding:0 20px 20px; }
+        .box-body .sub { margin-bottom:16px; }
         .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
         .campo { margin-bottom:14px; }
         .campo label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:5px; font-weight:600; }
@@ -64,48 +71,65 @@
     </header>
 
     <div class="wrap">
-        <div class="box">
-            <h2>Estabelecimento</h2>
-            <div class="sub">Dados gerais usados nas telas e documentos.</div>
+        <details class="box" open>
+            <summary><div><h2>Estabelecimento</h2><div class="sub">Dados gerais usados nas telas e documentos.</div></div><span class="chevron">&#9656;</span></summary>
+            <div class="box-body">
             <div class="grid2">
                 <div class="campo"><label>Nome do estabelecimento</label><input id="g-nome" placeholder="Pizzaria Deliciosa"></div>
                 <div class="campo"><label>Telefone</label><input id="g-telefone" placeholder="(00) 0000-0000"></div>
             </div>
             <div class="campo"><label>Endere&ccedil;o</label><input id="g-endereco" placeholder="Rua, n&uacute;mero, bairro, cidade/UF"></div>
             <div class="acoes"><button class="btn btn-salvar" id="salvar-geral">Salvar dados gerais</button></div>
-        </div>
+            </div>
+        </details>
 
-        <div class="box">
-            <h2>Pagamentos (Cart&atilde;o na maquininha)</h2>
-            <div class="sub">Integra&ccedil;&atilde;o com a maquininha f&iacute;sica para cobran&ccedil;a autom&aacute;tica no Caixa. As chaves de acesso ficam protegidas no servidor &mdash; aqui s&oacute; o provedor ativo e o identificador do terminal.</div>
+        <details class="box">
+            <summary><div><h2>Pagamentos (Cart&atilde;o na maquininha)</h2><div class="sub">Integra&ccedil;&atilde;o com a maquininha f&iacute;sica para cobran&ccedil;a autom&aacute;tica no Caixa. As chaves de acesso ficam protegidas no servidor &mdash; aqui s&oacute; o provedor ativo e o identificador do terminal.</div></div><span class="chevron">&#9656;</span></summary>
+            <div class="box-body">
             <div class="campo">
                 <label>Provedor da maquininha</label>
                 <select id="pag-provedor">
                     <option value="mercadopago">Mercado Pago (Point)</option>
-                    <option value="stone">Stone</option>
+                    <option value="stone">Stone Connect 2.0</option>
                 </select>
                 <small>Define qual maquininha o Caixa vai acionar quando a forma de pagamento for Cart&atilde;o.</small>
             </div>
             <div class="campo" id="campo-point"><label>ID do terminal Point (device_id)</label><input id="pag-point-device" placeholder="PAX_A910__XXXXXXXXXXXXXXX"></div>
             <div class="campo" id="campo-stone">
-                <label>N&uacute;mero de s&eacute;rie do terminal Stone</label>
+                <label>N&uacute;mero de s&eacute;rie da POS Stone</label>
                 <input id="pag-stone-serial" placeholder="Ex: 1078295125">
-                <small>Fica na etiqueta da maquininha ou no portal da Stone. Se a maquininha for trocada, s&oacute; atualizar aqui.</small>
+                <small>Use o serial da maquininha habilitada no Connect 2.0, n&atilde;o o StoneCode.</small>
+            </div>
+            <div class="campo" id="campo-stone-code">
+                <label>StoneCode do estabelecimento</label>
+                <input id="pag-stone-code" inputmode="numeric" maxlength="9" placeholder="Ex: 123456789">
+                <small>C&oacute;digo de afilia&ccedil;&atilde;o do estabelecimento. Ele n&atilde;o substitui o serial da POS.</small>
+            </div>
+            <div class="campo" id="campo-stone-referer">
+                <label>Identificador do parceiro (ServiceRefererName)</label>
+                <input id="pag-stone-referer" placeholder="Fornecido pela Stone ap&oacute;s homologa&ccedil;&atilde;o">
+                <small>Identificador do GestorChef no Programa de Parcerias Stone, obrigat&oacute;rio para encaminhar pedidos &agrave; POS.</small>
+            </div>
+            <div class="campo" id="campo-stone-secret">
+                <label>Secret Key do Stone Connect 2.0</label>
+                <input id="pag-stone-secret" type="password" placeholder="sk_..." autocomplete="off">
+                <small>Esta chave come&ccedil;a com <code>sk_</code>. Chaves criadas como TEF n&atilde;o funcionam em uma POS independente. Deixe em branco para manter a chave j&aacute; salva.</small>
             </div>
             <div class="acoes"><button class="btn btn-salvar" id="salvar-pagamentos">Salvar configura&ccedil;&otilde;es de pagamento</button></div>
             <div class="campo" id="campo-teste-stone" style="margin-top:16px; border-top:1px solid var(--line); padding-top:16px;">
                 <label>Testar conex&atilde;o com a maquininha Stone</label>
-                <small>N&atilde;o existe um &quot;ping&quot; silencioso &mdash; a API n&atilde;o expõe status do terminal. Este teste dispara uma cobran&ccedil;a de R$ 0,01 de verdade na maquininha; se ela aparecer na tela, a conex&atilde;o est&aacute; ok. Cancele o valor direto na maquininha depois.</small>
+                <small>N&atilde;o existe um &quot;ping&quot; silencioso. O teste cria um pedido real de R$ 0,01 pelo Connect 2.0. A POS precisa estar habilitada pela Stone e com o aplicativo Pagamento em &quot;Aguardando Pagamentos&quot;.</small>
                 <div class="acoes" style="margin-top:10px;">
                     <button class="btn btn-azul" id="testar-stone" type="button">Testar maquininha (R$ 0,01)</button>
                 </div>
                 <div id="pag-teste-resultado" class="muted-box" style="margin-top:10px; display:none;"></div>
             </div>
-        </div>
+            </div>
+        </details>
 
-        <div class="box">
-            <h2>Exibi&ccedil;&atilde;o de m&oacute;dulos</h2>
-            <div class="sub">Escolha o que aparece no menu lateral da loja. O cadastro de usu&aacute;rios controla o acesso por pessoa.</div>
+        <details class="box">
+            <summary><div><h2>Exibi&ccedil;&atilde;o de m&oacute;dulos</h2><div class="sub">Escolha o que aparece no menu lateral da loja. O cadastro de usu&aacute;rios controla o acesso por pessoa.</div></div><span class="chevron">&#9656;</span></summary>
+            <div class="box-body">
             <div class="exib-grupos">
                 <div class="exib-grupo">
                     <h3>Opera&ccedil;&atilde;o</h3>
@@ -140,11 +164,12 @@
                 </div>
             </div>
             <div class="acoes" style="margin-top:16px;"><button class="btn btn-salvar" id="salvar-exibicao">Salvar exibi&ccedil;&atilde;o</button></div>
-        </div>
+            </div>
+        </details>
 
-        <div class="box" id="usuarios-admin-box">
-            <h2>Usu&aacute;rios e acessos</h2>
-            <div class="sub">Cadastre o e-mail do colaborador e marque os m&oacute;dulos que ele pode acessar. A conta precisa existir no Firebase Authentication para conseguir entrar.</div>
+        <details class="box" id="usuarios-admin-box">
+            <summary><div><h2>Usu&aacute;rios e acessos</h2><div class="sub">Cadastre o e-mail do colaborador e marque os m&oacute;dulos que ele pode acessar. A conta precisa existir no Firebase Authentication para conseguir entrar.</div></div><span class="chevron">&#9656;</span></summary>
+            <div class="box-body">
             <div class="grid2">
                 <div class="campo">
                     <label>Nome do usu&aacute;rio</label>
@@ -194,7 +219,32 @@
                 <button class="btn btn-cinza" id="novo-usuario" type="button">Novo</button>
             </div>
             <div id="usuarios-lista" style="margin-top:16px;"></div>
-        </div>
+            </div>
+        </details>
+
+        <details class="box">
+            <summary><div><h2>Hor&aacute;rio de funcionamento</h2><div class="sub">Vale pro app e pro bot do WhatsApp juntos. Fora do hor&aacute;rio configurado, o app mostra um aviso pro cliente e o bot responde automaticamente informando que est&aacute; fechado, sem chamar a IA.</div></div><span class="chevron">&#9656;</span></summary>
+            <div class="box-body">
+            <label class="check-line"><input id="horario-ativo" type="checkbox"> Restringir pedidos por hor&aacute;rio</label>
+            <table id="horario-tabela" style="width:100%; border-collapse:collapse; margin:12px 0;">
+                <thead>
+                    <tr style="text-align:left; font-size:.78rem; color:var(--muted); text-transform:uppercase;">
+                        <th style="padding:6px 4px;">Dia</th>
+                        <th style="padding:6px 4px;">Aberto</th>
+                        <th style="padding:6px 4px;">Abre</th>
+                        <th style="padding:6px 4px;">Fecha</th>
+                    </tr>
+                </thead>
+                <tbody id="horario-dias-body"></tbody>
+            </table>
+            <div class="campo">
+                <label>Mensagem quando fechado</label>
+                <input id="horario-mensagem-fechado" placeholder="No momento estamos fechados. Nosso hor&aacute;rio: {horario}">
+                <small>Use <code>{horario}</code> no texto pra inserir automaticamente os dias/hor&aacute;rios configurados.</small>
+            </div>
+            <div class="acoes"><button class="btn btn-salvar" id="salvar-horario">Salvar hor&aacute;rio de funcionamento</button></div>
+            </div>
+        </details>
     </div>
 
     <script src="/shell.js" defer></script>
