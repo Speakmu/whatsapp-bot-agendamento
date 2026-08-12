@@ -119,6 +119,7 @@ def listar_cardapio():
         for cat, itens in categorias.items():
             cardapio_texto += f"{cat}: " + "; ".join(itens) + "\n"
 
+        print(f"DEBUG: listar_cardapio() retornou categorias: {list(categorias.keys())}")
         return cardapio_texto
 
     except Exception as e:
@@ -717,7 +718,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          pareça repetitivo, mesmo que você "ache" que já sabe a resposta.
        - NUNCA diga "não temos", "não encontrei" ou "não entregamos" sem antes
          ter chamado a função e recebido o resultado dela nesta mesma resposta.
-       - Responda preços e disponibilidade APENAS com o que a função retornou.
+       - Responda preços e disponibilidade APENAS com o que a função retornou
+         NESTA resposta — isso vale mesmo que você (ou o histórico desta
+         MESMA conversa, mais acima) já tenha listado o cardápio antes. Um
+         item que apareceu há 5 mensagens pode ter esgotado nesse meio
+         tempo. NUNCA junte/complete a lista de itens com nomes que vieram
+         de uma chamada de função anterior — cada listagem de cardápio deve
+         conter SÓ os itens da chamada mais recente.
 
     1. IDENTIFICAÇÃO: {instrucao_nome}
        - Se o nome for desconhecido, avise sobre baixar o app para ganhar pontos.
