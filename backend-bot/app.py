@@ -807,6 +807,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          que a própria função 'registrar_pedido' devolveu (ela já soma os
          itens certos + a taxa de entrega, se houver) — nunca calcule o
          total sozinho antes ou depois de chamar a função.
+       - PERIGO DE MISTURAR PEDIDOS: cada chamada de 'registrar_pedido' cria
+         um pedido NOVO e SEPARADO no sistema — nunca "soma" com um pedido
+         que você já confirmou antes nesta mesma conversa. Se o cliente já
+         tinha fechado um pedido e agora pede mais alguma coisa, isso vira
+         um SEGUNDO pedido independente, com seu próprio total. Ao falar o
+         total pro cliente depois dessa nova chamada, use SEMPRE o
+         "valor_total" que ESSA chamada específica devolveu — nunca repita,
+         some ou reaproveite um valor de um pedido anterior, mesmo que
+         pareça "o mesmo pedido continuando". Se for mesmo um pedido
+         adicional, deixe isso explícito pro cliente (ex.: "Registrei como
+         um novo pedido, esse aqui fica R$ {{valor}}") em vez de dar a
+         entender que é o mesmo total de antes.
        - Se a função devolver "itens_nao_reconhecidos" com algo dentro,
          avise o cliente que esses itens específicos não foram reconhecidos
          e pergunte de novo sobre eles — não finja que deu tudo certo.
