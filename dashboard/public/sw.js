@@ -41,11 +41,27 @@ const PRECACHE_URLS = [
 
 self.addEventListener('install', (event) => {
     event.waitUntil(
-        caches.open(CACHE)
-            .then(cache => Promise.all(PRECACHE_URLS.map(url =>
-                cache.add(new Request(url, { cache: 'reload' })).catch(err => console.warn('Pré-cache falhou:', url, err))
-            )))
-            .then(() => self.skipWaiting())
+        (async () => {
+            const cache = await caches.open(CACHE);
+            // Um de cada vez, não Promise.all: baixar os ~12 arquivos em
+            // paralelo saturava a conexão e travava a navegação real que
+            // estivesse rolando ao mesmo tempo (visto direto no Network do
+            // DevTools — a página pedida ficava "pending" minutos enquanto
+            // o pré-cache competia pela mesma banda). Sequencial demora um
+            // pouco mais pra terminar, mas não briga com o que o usuário
+            // está tentando abrir na hora.
+            // Sem 'cache: reload' também: deixa o navegador validar com o
+            // servidor (HTTP 304) em vez de forçar rebaixar tudo inteiro
+            // sempre que o SW reinstala.
+            for (const url of PRECACHE_URLS) {
+                try {
+                    await cache.add(url);
+                } catch (err) {
+                    console.warn('Pré-cache falhou:', url, err);
+                }
+            }
+            await self.skipWaiting();
+        })()
     );
 });
 

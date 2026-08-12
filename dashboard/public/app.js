@@ -1,3 +1,40 @@
+// Redimensiona/comprime a foto do produto no navegador antes de enviar pro
+// Storage — sem isso, fotos de câmera de celular (vários MB cada) são
+// baixadas em tamanho real toda vez que a grade de produtos aparece
+// (Cardápio, Caixa, Mesas, Totem, app do cliente), pesando muito numa
+// conexão/computador mais fraco. 900px de lado maior é sobra pra exibição
+// em card — resultado tipicamente sai abaixo de 200KB.
+function redimensionarImagem(file, maxDim = 900, qualidade = 0.82) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            let { width, height } = img;
+            if (width > maxDim || height > maxDim) {
+                if (width >= height) {
+                    height = Math.round(height * (maxDim / width));
+                    width = maxDim;
+                } else {
+                    width = Math.round(width * (maxDim / height));
+                    height = maxDim;
+                }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            canvas.toBlob(
+                blob => blob ? resolve(blob) : reject(new Error('Falha ao comprimir imagem')),
+                'image/jpeg',
+                qualidade
+            );
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não foi possível ler a imagem')); };
+        img.src = url;
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // Apenas a configuração do Firebase é definida fora do DOMContentLoaded
     const firebaseConfig = window.__FIREBASE_CONFIG__;
@@ -410,12 +447,15 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 // 2. Lógica de Upload da Imagem (se houver arquivo novo)
                 if (imageFile) {
+                    productMessage.textContent = 'Comprimindo imagem...';
+                    const imagemComprimida = await redimensionarImagem(imageFile);
+
                     productMessage.textContent = 'Fazendo upload da imagem...';
                     const storageRef = firebase.storage().ref();
-                    const fileName = `cardapio/${Date.now()}_${imageFile.name}`;
+                    const fileName = `cardapio/${Date.now()}_${imageFile.name.replace(/\.[^.]+$/, '')}.jpg`;
                     const fileRef = storageRef.child(fileName);
 
-                    const snapshot = await fileRef.put(imageFile);
+                    const snapshot = await fileRef.put(imagemComprimida, { contentType: 'image/jpeg' });
                     imageUrl = await snapshot.ref.getDownloadURL();
                 }
 
