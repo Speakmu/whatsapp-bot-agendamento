@@ -180,6 +180,128 @@ from thefuzz import process, fuzz # <--- Adicione 'fuzz' aqui
 
 # ... (restante do código) ...
 
+def _montar_itens_pedido(itens, endereco_completo):
+    """Casa cada item pedido (nome + quantidade) contra o cardápio via busca
+    aproximada e calcula o total — usada tanto por 'calcular_pedido' (só
+    prévia, não escreve nada) quanto por 'registrar_pedido' (grava de
+    verdade), pra garantir que o valor mostrado na confirmação seja
+    exatamente o mesmo que vai pro pedido real.
+
+    Antes o código tentava re-interpretar uma frase inteira escrita pela IA
+    (ex.: "2 pastéis de carne e queijo e 2 enroladinhos..."), comparando
+    pedaço a pedaço com limite fixo de 85% — um item com plural/acento podia
+    ficar 4 pontos abaixo do limite e sumir do pedido inteiro sem aviso.
+    Casamos contra o cardápio inteiro (disponível ou não) pra poder avisar
+    quando o item existe mas está indisponível — um prato desativado
+    automaticamente por falta de estoque (baixa-estoque.js) não pode ser
+    aceito aqui, mesmo que o cliente peça pelo nome de cor.
+    """
+    docs_cardapio = list(db.collection('cardapio').get())
+    cardapio_por_nome = {}
+    for doc in docs_cardapio:
+        dados = doc.to_dict()
+        nome_chave = str(dados.get('nome', '')).strip().lower()
+        if nome_chave:
+            cardapio_por_nome[nome_chave] = {**dados, "id": doc.id}
+    nomes_cardapio = list(cardapio_por_nome.keys())
+
+    total_pontos = 0
+    lista_itens_tsx = []
+    valor_itens = 0.0
+    itens_nao_reconhecidos = []
+    itens_indisponiveis = []
+
+    for item in (itens or []):
+        nome_pedido = str((item or {}).get('nome_produto') or '').strip().lower()
+        try:
+            qtd = int((item or {}).get('quantidade') or 1)
+        except (TypeError, ValueError):
+            qtd = 1
+        if not nome_pedido:
+            continue
+        if not nomes_cardapio:
+            itens_nao_reconhecidos.append(nome_pedido)
+            continue
+
+        melhor_match, pontuacao = process.extractOne(nome_pedido, nomes_cardapio)
+        print(f"DEBUG: item do pedido '{nome_pedido}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
+
+        if pontuacao < 70:
+            itens_nao_reconhecidos.append(nome_pedido)
+            continue
+
+        dados = cardapio_por_nome[melhor_match]
+
+        if dados.get('disponivel') is False or not _disponivel_online(dados):
+            itens_indisponiveis.append(dados.get('nome') or nome_pedido)
+            continue
+        preco_unitario = float(dados.get('preco', 0))
+        preco_total_item = preco_unitario * qtd
+        nome_formatado = f"{qtd}x {dados.get('nome')}" if qtd > 1 else dados.get('nome')
+
+        lista_itens_tsx.append({
+            "id": dados["id"],                 # id do produto no cardápio (para baixa de estoque via ficha técnica)
+            "nome": nome_formatado,             # exibição no painel ("2x Pizza")
+            "nome_exibicao": dados.get('nome_exibicao') or dados.get('nome'),
+            "quantidade": qtd,                  # quantidade numérica (baixa automática)
+            "preco_unitario": preco_unitario,
+            "preco": preco_total_item
+        })
+        valor_itens += preco_total_item
+        total_pontos += int(dados.get('pontos_fidelidade', 0)) * qtd
+
+    # Tipo de entrega: retirada se não houver endereço ou se o texto indicar retirada
+    eh_retirada = (not endereco_completo) or ("retirada" in str(endereco_completo).lower())
+    tipo_entrega = "RETIRADA" if eh_retirada else "ENTREGA"
+
+    # Taxa de entrega somada aqui pelo servidor (nunca pela IA de cabeça)
+    # — só quando é entrega de verdade.
+    taxa_entrega = 0.0
+    if tipo_entrega == "ENTREGA":
+        bot_cfg = obter_config_bot()
+        taxa_entrega = float(bot_cfg.get("taxa_entrega") or 0)
+
+    valor_total_final = round(valor_itens + taxa_entrega, 2)
+
+    return {
+        "lista_itens_tsx": lista_itens_tsx,
+        "itens_nao_reconhecidos": itens_nao_reconhecidos,
+        "itens_indisponiveis": itens_indisponiveis,
+        "valor_itens": round(valor_itens, 2),
+        "taxa_entrega": taxa_entrega,
+        "valor_total": valor_total_final,
+        "tipo_entrega": tipo_entrega,
+        "total_pontos": total_pontos
+    }
+
+def calcular_pedido(itens, endereco_completo=None):
+    """Prévia do pedido (não grava nada) — mostra pro cliente exatamente os
+    itens reconhecidos, a taxa de entrega e o total ANTES de confirmar de
+    vez com 'registrar_pedido'. Existe pra evitar o bot fechar um pedido
+    sem o cliente ter chance de corrigir uma quantidade errada antes."""
+    if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
+    try:
+        montado = _montar_itens_pedido(itens, endereco_completo)
+        if not montado["lista_itens_tsx"]:
+            return json.dumps({
+                "status": "erro",
+                "motivo": "Nenhum item reconhecido no cardápio.",
+                "itens_nao_reconhecidos": montado["itens_nao_reconhecidos"],
+                "itens_indisponiveis": montado["itens_indisponiveis"]
+            })
+        return json.dumps({
+            "status": "ok",
+            "itens_confirmados": [i["nome"] for i in montado["lista_itens_tsx"]],
+            "itens_nao_reconhecidos": montado["itens_nao_reconhecidos"],
+            "itens_indisponiveis": montado["itens_indisponiveis"],
+            "valor_itens": montado["valor_itens"],
+            "taxa_entrega": montado["taxa_entrega"],
+            "valor_total": montado["valor_total"]
+        })
+    except Exception as e:
+        print(f"ERRO ao calcular pedido: {e}")
+        return json.dumps({"status": "erro", "motivo": "Erro interno."})
+
 def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, telefone=None):
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
 
@@ -203,70 +325,14 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
         user_doc = user_query[0] if user_query else None
         usuario_id = user_doc.id if user_doc else f"wa_{wa_id}"
 
-        # Cada item vem separado (nome + quantidade), casado individualmente
-        # contra o cardápio via busca aproximada — mesma lógica confiável do
-        # consultar_sabor. Antes o código tentava re-interpretar uma frase
-        # inteira escrita pela IA (ex.: "2 pastéis de carne e queijo e 2
-        # enroladinhos..."), comparando pedaço a pedaço com limite fixo de
-        # 85% — um item com plural/acento podia ficar 4 pontos abaixo do
-        # limite e sumir do pedido inteiro sem nenhum aviso.
-        # Casamos contra o cardápio inteiro (disponível ou não) pra poder
-        # avisar quando o item existe mas está indisponível — um prato
-        # desativado automaticamente por falta de estoque (baixa-estoque.js)
-        # não pode ser aceito aqui, mesmo que o cliente peça pelo nome de cor.
-        docs_cardapio = list(db.collection('cardapio').get())
-        cardapio_por_nome = {}
-        for doc in docs_cardapio:
-            dados = doc.to_dict()
-            nome_chave = str(dados.get('nome', '')).strip().lower()
-            if nome_chave:
-                cardapio_por_nome[nome_chave] = {**dados, "id": doc.id}
-        nomes_cardapio = list(cardapio_por_nome.keys())
-
-        total_pontos = 0
-        lista_itens_tsx = []
-        valor_itens = 0.0
-        itens_nao_reconhecidos = []
-        itens_indisponiveis = []
-
-        for item in (itens or []):
-            nome_pedido = str((item or {}).get('nome_produto') or '').strip().lower()
-            try:
-                qtd = int((item or {}).get('quantidade') or 1)
-            except (TypeError, ValueError):
-                qtd = 1
-            if not nome_pedido:
-                continue
-            if not nomes_cardapio:
-                itens_nao_reconhecidos.append(nome_pedido)
-                continue
-
-            melhor_match, pontuacao = process.extractOne(nome_pedido, nomes_cardapio)
-            print(f"DEBUG: item do pedido '{nome_pedido}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
-
-            if pontuacao < 70:
-                itens_nao_reconhecidos.append(nome_pedido)
-                continue
-
-            dados = cardapio_por_nome[melhor_match]
-
-            if dados.get('disponivel') is False or not _disponivel_online(dados):
-                itens_indisponiveis.append(dados.get('nome') or nome_pedido)
-                continue
-            preco_unitario = float(dados.get('preco', 0))
-            preco_total_item = preco_unitario * qtd
-            nome_formatado = f"{qtd}x {dados.get('nome')}" if qtd > 1 else dados.get('nome')
-
-            lista_itens_tsx.append({
-                "id": dados["id"],                 # id do produto no cardápio (para baixa de estoque via ficha técnica)
-                "nome": nome_formatado,             # exibição no painel ("2x Pizza")
-                "nome_exibicao": dados.get('nome_exibicao') or dados.get('nome'),
-                "quantidade": qtd,                  # quantidade numérica (baixa automática)
-                "preco_unitario": preco_unitario,
-                "preco": preco_total_item
-            })
-            valor_itens += preco_total_item
-            total_pontos += int(dados.get('pontos_fidelidade', 0)) * qtd
+        montado = _montar_itens_pedido(itens, endereco_completo)
+        lista_itens_tsx = montado["lista_itens_tsx"]
+        itens_nao_reconhecidos = montado["itens_nao_reconhecidos"]
+        itens_indisponiveis = montado["itens_indisponiveis"]
+        tipo_entrega = montado["tipo_entrega"]
+        taxa_entrega = montado["taxa_entrega"]
+        valor_total_final = montado["valor_total"]
+        total_pontos = montado["total_pontos"]
 
         if not lista_itens_tsx:
             return json.dumps({
@@ -275,19 +341,6 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
                 "itens_nao_reconhecidos": itens_nao_reconhecidos,
                 "itens_indisponiveis": itens_indisponiveis
             })
-
-        # Tipo de entrega: retirada se não houver endereço ou se o texto indicar retirada
-        eh_retirada = (not endereco_completo) or ("retirada" in str(endereco_completo).lower())
-        tipo_entrega = "RETIRADA" if eh_retirada else "ENTREGA"
-
-        # Taxa de entrega somada aqui pelo servidor (nunca pela IA de cabeça)
-        # — só quando é entrega de verdade.
-        taxa_entrega = 0.0
-        if tipo_entrega == "ENTREGA":
-            bot_cfg = obter_config_bot()
-            taxa_entrega = float(bot_cfg.get("taxa_entrega") or 0)
-
-        valor_total_final = round(valor_itens + taxa_entrega, 2)
 
         batch = db.batch()
         pedido_ref = db.collection('pedidos').document()
@@ -320,7 +373,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
             "itens_confirmados": [i["nome"] for i in lista_itens_tsx],
             "itens_nao_reconhecidos": itens_nao_reconhecidos,
             "itens_indisponiveis": itens_indisponiveis,
-            "valor_itens": round(valor_itens, 2),
+            "valor_itens": montado["valor_itens"],
             "taxa_entrega": taxa_entrega,
             "valor_total": valor_total_final
         })
@@ -665,6 +718,32 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         {
             "type": "function",
             "function": {
+                "name": "calcular_pedido",
+                "description": "Calcula uma PRÉVIA do pedido (itens reconhecidos, taxa de entrega, total) SEM registrar nada. Use pra mostrar o resumo e pedir confirmação do cliente antes de chamar 'registrar_pedido' de vez.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "itens": {
+                            "type": "array",
+                            "description": "Um item por entrada — nunca junte vários itens numa frase só.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "nome_produto": {"type": "string", "description": "Nome do item exatamente como veio de 'consultar_sabor' ou 'listar_cardapio'."},
+                                    "quantidade": {"type": "integer"}
+                                },
+                                "required": ["nome_produto", "quantidade"]
+                            }
+                        },
+                        "endereco_completo": {"type": "string", "description": "Endereço se for entrega, ou deixe vazio/mencione retirada se for retirada — decide se a taxa de entrega entra na conta."}
+                    },
+                    "required": ["itens"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "registrar_pedido",
                 "description": "Registra o pedido final após coletar todos os dados. O valor total (incluindo taxa de entrega) é calculado pelo sistema, não pela IA.",
                 "parameters": {
@@ -808,6 +887,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
           direto pro passo (d).
        d) Depois de saber a entrega, pergunta a forma de pagamento (PIX,
           Cartão, Dinheiro).
+       e) OBRIGATÓRIO antes de registrar de vez: chame 'calcular_pedido' com
+          os itens que o cliente pediu (não registra nada, só calcula) e
+          mostre um resumo — cada item, a taxa de entrega se houver, e o
+          "valor_total" que a função devolveu — perguntando algo como
+          "Confere? Posso fechar o pedido?". SÓ chame 'registrar_pedido'
+          depois que o cliente confirmar explicitamente (ex.: "sim",
+          "confere", "pode fechar"). Se ele apontar algo errado (quantidade,
+          item errado), corrija e chame 'calcular_pedido' de novo antes de
+          pedir confirmação outra vez — nunca registre com base numa
+          quantidade que você não confirmou com o cliente.
        NUNCA junte duas perguntas na mesma mensagem (ex.: "prefere entrega
        ou retirada? E qual forma de pagamento?" está ERRADO). Uma pergunta,
        espera a resposta, só depois a próxima.
@@ -835,7 +924,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
 
     4. FINALIZAÇÃO:
        - Use a função 'registrar_pedido' APENAS quando tiver: Itens, Forma de
-         Entrega e Forma de Pagamento definidos.
+         Entrega, Forma de Pagamento definidos E o cliente já ter confirmado
+         o resumo do passo (e) acima. Nunca pule direto pra 'registrar_pedido'
+         sem antes ter mostrado o resumo via 'calcular_pedido' e recebido um
+         "sim"/confirmação clara.
        - Se o cliente perguntar sobre um pedido que ELE JÁ FEZ (ex.: "qual o
          valor do meu pedido?", "pode descrever meu pedido?", "o que eu
          pedi mesmo?", "cadê meu pedido"), use a função
@@ -914,7 +1006,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 args = json.loads(tool_call.function.arguments)
                 
                 content = ""
-                if function_name == "consultar_sabor":
+                if function_name == "calcular_pedido":
+                    content = calcular_pedido(args.get("itens"), args.get("endereco_completo"))
+                elif function_name == "consultar_sabor":
                     content = json.dumps(consultar_sabor(args.get("sabor_cliente")))
                 elif function_name == "listar_cardapio":
                     content = listar_cardapio()
