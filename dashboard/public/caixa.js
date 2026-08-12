@@ -275,9 +275,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 comandasPendentes = [];
                 snap.forEach(doc => {
                     const data = doc.data();
-                    if (data.origem === "MESA") comandasPendentes.push({ id: doc.id, ...data });
+                    // MESA = comanda de mesa fechada pedindo pagamento; TOTEM = pedido
+                    // feito no autoatendimento, também esperando pagamento no caixa.
+                    if (data.origem === "MESA" || data.origem === "TOTEM") comandasPendentes.push({ id: doc.id, ...data });
                 });
-                comandasPendentes.sort((a, b) => Number(a.mesa_numero || 0) - Number(b.mesa_numero || 0));
+                comandasPendentes.sort((a, b) => Number(a.mesa_numero || a.senha || 0) - Number(b.mesa_numero || b.senha || 0));
                 renderComandasPendentes();
             }, err => console.error("Erro comandas pendentes:", err));
     }
@@ -290,7 +292,7 @@ document.addEventListener('DOMContentLoaded', () => {
             total.textContent = `${comandasPendentes.length} ${comandasPendentes.length === 1 ? 'aberta' : 'abertas'}`;
         }
         if (!comandasPendentes.length) {
-            lista.innerHTML = '<div class="empty-state">Nenhuma comanda enviada ao caixa.</div>';
+            lista.innerHTML = '<div class="empty-state">Nenhum pedido enviado ao caixa.</div>';
             return;
         }
         lista.innerHTML = comandasPendentes.map(p => {
@@ -303,9 +305,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }).join('');
             const disabled = sessaoAtual ? '' : 'disabled';
             const label = sessaoAtual ? 'Receber' : 'Abra o caixa';
+            const rotulo = p.origem === 'TOTEM' ? `Senha ${escapeHtml(p.senha || '-')}` : `Mesa ${escapeHtml(p.mesa_numero || '-')}`;
             return `<div class="mesa-pendente">
                 <div class="linha-topo">
-                    <span class="mesa-num">Mesa ${escapeHtml(p.mesa_numero || '-')}</span>
+                    <span class="mesa-num">${rotulo}</span>
                     <span class="valor">${money(p.valor_total)}</span>
                 </div>
                 <div class="meta">${qtd} item(ns) na comanda</div>
@@ -337,7 +340,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const pedido = comandasPendentes.find(p => p.id === pedidoId);
         if (!pedido) return;
         const total = Number(pedido.valor_total) || 0;
-        if (!confirm(`Receber Mesa ${pedido.mesa_numero}?\nTotal: ${money(total)}\nPagamento: ${formaRecebimento}`)) return;
+        const rotulo = pedido.origem === 'TOTEM' ? `Senha ${pedido.senha}` : `Mesa ${pedido.mesa_numero}`;
+        if (!confirm(`Receber ${rotulo}?\nTotal: ${money(total)}\nPagamento: ${formaRecebimento}`)) return;
 
         const chave = CHAVE_PAG[formaRecebimento] || "Dinheiro";
         const pedidoRef = db.collection(COL_PEDIDOS).doc(pedidoId);
@@ -345,8 +349,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const sessaoRef = db.collection(COL_SESSOES).doc(sessaoAtual.id);
         const batch = db.batch();
 
+        // Mesa: a comida já foi servida antes de fechar a comanda, então
+        // pagar = concluir. Totem: o cliente paga ANTES de a cozinha começar
+        // a preparar (igual totem de fast-food) — pagar manda pra cozinha.
+        const statusFinal = pedido.origem === 'TOTEM' ? 'PENDENTE_PREPARO' : 'CONCLUIDO';
+
         batch.update(pedidoRef, {
-            status: "CONCLUIDO",
+            status: statusFinal,
             forma_pagamento: formaRecebimento,
             caixa_sessao_id: sessaoAtual.id,
             pago_em: FieldValue.serverTimestamp()
@@ -356,7 +365,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tipo: "VENDA",
             valor: total,
             forma_pagamento: formaRecebimento,
-            descricao: `Recebimento mesa ${pedido.mesa_numero}`,
+            descricao: `Recebimento ${rotulo.toLowerCase()}`,
             pedido_id: pedidoId,
             operador: usuarioEmail,
             hora: FieldValue.serverTimestamp()
@@ -393,8 +402,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (window.GestorChefEstoque) {
             window.GestorChefEstoque.baixarDoPedido(db, pedidoId).then(avisarPratosDesativados).catch(() => {});
         }
-        flash(`Comanda da mesa ${pedido.mesa_numero} recebida - ${money(total)} (${formaRecebimento})`);
-        autoEmitirNFCe(pedidoId, { ...pedido, status: "CONCLUIDO", forma_pagamento: formaRecebimento });
+        flash(`${rotulo} recebida - ${money(total)} (${formaRecebimento})`);
+        autoEmitirNFCe(pedidoId, { ...pedido, status: statusFinal, forma_pagamento: formaRecebimento });
     }
     // URLs das Cloud Functions que criam a cobrança na maquininha (Point ou Stone).
     // Mesmo projeto/região das outras functions (WEBHOOK_URL não é acessível aqui,
@@ -498,9 +507,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let resp, data;
         try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (nomeProvedor === 'Stone') {
+                const user = firebase.auth().currentUser;
+                if (!user) throw new Error('Sessao expirada. Entre novamente no sistema.');
+                headers.Authorization = `Bearer ${await user.getIdToken()}`;
+            }
             resp = await fetch(criarCobrancaUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify({
                     amount: total,
                     externalReference: pedidoRef.id,
@@ -796,4 +811,3 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => d.remove(), 2600);
     }
 });
-

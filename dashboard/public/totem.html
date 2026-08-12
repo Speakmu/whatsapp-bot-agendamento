@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Autoatendimento | GestorChef</title>
+    <link rel="preconnect" href="https://www.gstatic.com">
+
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
+    <script src="/firebase-config.js"></script>
+    <script src="/emu.js"></script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; user-select: none; }
+        html, body { height: 100%; overflow: hidden; }
+        body {
+            font-family: 'Segoe UI', Roboto, system-ui, sans-serif;
+            background: var(--bg, #f4f6f9);
+            color: #2c3e50;
+            display: flex;
+            flex-direction: column;
+        }
+        :root { --marca: #ff5200; --bg: #f4f6f9; }
+
+        /* ---------- Topo ---------- */
+        header.topo {
+            background: var(--marca);
+            color: #fff;
+            padding: 18px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex: none;
+        }
+        header.topo .logo { display: flex; align-items: center; gap: 14px; }
+        header.topo .logo img { height: 52px; width: 52px; border-radius: 12px; object-fit: cover; background: #fff; }
+        header.topo h1 { font-size: 1.6rem; font-weight: 800; }
+        header.topo .relogio { font-size: 1.1rem; font-weight: 600; opacity: .92; }
+
+        /* ---------- Categorias ---------- */
+        nav.categorias {
+            flex: none;
+            display: flex;
+            gap: 10px;
+            padding: 16px 28px;
+            overflow-x: auto;
+            background: #fff;
+            border-bottom: 1px solid #e1e5ea;
+        }
+        nav.categorias button {
+            flex: none;
+            padding: 14px 26px;
+            border-radius: 999px;
+            border: 2px solid #e1e5ea;
+            background: #fff;
+            color: #2c3e50;
+            font-size: 1.05rem;
+            font-weight: 700;
+            cursor: pointer;
+        }
+        nav.categorias button.ativa { background: var(--marca); border-color: var(--marca); color: #fff; }
+
+        /* ---------- Grid de produtos ---------- */
+        main.produtos {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px 28px 160px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 20px;
+            align-content: start;
+        }
+        .produto-card {
+            background: #fff;
+            border: 1px solid #e1e5ea;
+            border-radius: 16px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            cursor: pointer;
+            transition: transform .1s ease;
+        }
+        .produto-card:active { transform: scale(.97); }
+        .produto-card .img { height: 140px; background: #eef2f7 center/cover no-repeat; display: flex; align-items: center; justify-content: center; color: #9aa5b1; font-size: .85rem; }
+        .produto-card .corpo { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+        .produto-card .nome { font-size: 1.05rem; font-weight: 700; line-height: 1.25; }
+        .produto-card .preco { font-size: 1.15rem; font-weight: 800; color: var(--marca); margin-top: auto; }
+        .empty-produtos { grid-column: 1/-1; text-align: center; color: #7f8c8d; padding: 60px 0; font-size: 1.1rem; }
+
+        /* ---------- Barra do carrinho ---------- */
+        .barra-carrinho {
+            position: fixed;
+            left: 0; right: 0; bottom: 0;
+            background: #fff;
+            border-top: 1px solid #e1e5ea;
+            padding: 16px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            box-shadow: 0 -6px 18px rgba(0,0,0,.06);
+        }
+        .barra-carrinho .resumo { font-size: 1.05rem; font-weight: 700; color: #2c3e50; }
+        .barra-carrinho .resumo span { color: var(--marca); }
+        .barra-carrinho button {
+            background: var(--marca);
+            color: #fff;
+            border: none;
+            padding: 16px 32px;
+            border-radius: 12px;
+            font-size: 1.15rem;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .barra-carrinho button:disabled { background: #c7ccd3; }
+
+        /* ---------- Modal genérico ---------- */
+        .overlay {
+            position: fixed; inset: 0;
+            background: rgba(20,25,32,.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 50;
+        }
+        .overlay.aberto { display: flex; }
+        .modal {
+            background: #fff;
+            border-radius: 20px;
+            width: 100%;
+            max-width: 560px;
+            max-height: 88vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .modal-head {
+            padding: 20px 24px;
+            border-bottom: 1px solid #e1e5ea;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .modal-head h2 { font-size: 1.3rem; }
+        .modal-head button.fechar {
+            background: #eef2f7; border: none; width: 40px; height: 40px; border-radius: 50%;
+            font-size: 1.2rem; cursor: pointer; color: #2c3e50;
+        }
+        .modal-corpo { padding: 20px 24px; overflow-y: auto; }
+        .modal-rodape { padding: 18px 24px; border-top: 1px solid #e1e5ea; display: flex; gap: 12px; }
+
+        /* Item do carrinho */
+        .carrinho-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f0f2f5; }
+        .carrinho-item .info { flex: 1; }
+        .carrinho-item .info .nome { font-weight: 700; font-size: 1rem; }
+        .carrinho-item .info .preco-unit { color: #7f8c8d; font-size: .85rem; }
+        .stepper { display: flex; align-items: center; gap: 10px; }
+        .stepper button {
+            width: 38px; height: 38px; border-radius: 50%; border: 2px solid #e1e5ea;
+            background: #fff; font-size: 1.2rem; font-weight: 800; cursor: pointer; color: var(--marca);
+        }
+        .stepper .qtd { min-width: 22px; text-align: center; font-weight: 800; }
+
+        .btn { border: none; border-radius: 12px; padding: 15px 22px; font-size: 1.05rem; font-weight: 800; cursor: pointer; }
+        .btn-primario { background: var(--marca); color: #fff; flex: 1; }
+        .btn-secundario { background: #eef2f7; color: #2c3e50; }
+
+        /* ---------- Tela de confirmação (senha) ---------- */
+        .tela-confirmacao {
+            position: fixed; inset: 0;
+            background: #fff;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 18px;
+            z-index: 60;
+            text-align: center;
+            padding: 24px;
+        }
+        .tela-confirmacao.aberta { display: flex; }
+        .tela-confirmacao .check { font-size: 4rem; }
+        .tela-confirmacao h2 { font-size: 1.6rem; color: #2c3e50; }
+        .tela-confirmacao .senha-numero {
+            font-size: 5.5rem;
+            font-weight: 900;
+            color: var(--marca);
+            line-height: 1;
+        }
+        .tela-confirmacao p { color: #7f8c8d; font-size: 1.1rem; max-width: 440px; }
+        .tela-confirmacao .btn-primario { max-width: 320px; margin-top: 12px; }
+
+        /* ---------- Cupom impresso ---------- */
+        #cupom-impressao { display: none; }
+        @media print {
+            body > *:not(#cupom-impressao) { display: none !important; }
+            #cupom-impressao {
+                display: block !important;
+                width: 72mm;
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+                color: #000;
+            }
+            #cupom-impressao h1 { font-size: 15px; text-align: center; margin-bottom: 4px; }
+            #cupom-impressao .senha-grande { font-size: 34px; text-align: center; font-weight: 900; margin: 10px 0; }
+            #cupom-impressao hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+            #cupom-impressao .linha { display: flex; justify-content: space-between; }
+            #cupom-impressao .total { font-weight: 900; font-size: 14px; }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="topo">
+        <div class="logo">
+            <img id="topo-logo" src="" alt="" style="display:none">
+            <h1 id="topo-nome">Autoatendimento</h1>
+        </div>
+        <div class="relogio" id="relogio">--:--</div>
+    </header>
+
+    <nav class="categorias" id="categorias"></nav>
+
+    <main class="produtos" id="produtos">
+        <div class="empty-produtos">Carregando cardápio...</div>
+    </main>
+
+    <div class="barra-carrinho">
+        <div class="resumo" id="carrinho-resumo">Nenhum item selecionado</div>
+        <button id="btn-ver-carrinho" disabled>Ver pedido</button>
+    </div>
+
+    <!-- Modal do carrinho -->
+    <div class="overlay" id="overlay-carrinho">
+        <div class="modal">
+            <div class="modal-head">
+                <h2>Seu pedido</h2>
+                <button class="fechar" id="fechar-carrinho">✕</button>
+            </div>
+            <div class="modal-corpo" id="lista-carrinho"></div>
+            <div class="modal-rodape">
+                <button class="btn btn-secundario" id="btn-continuar-comprando">Adicionar mais itens</button>
+                <button class="btn btn-primario" id="btn-confirmar-pedido">Confirmar pedido</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tela final: senha -->
+    <div class="tela-confirmacao" id="tela-confirmacao">
+        <div class="check">✅</div>
+        <h2>Pedido confirmado!</h2>
+        <div class="senha-numero" id="senha-numero">000</div>
+        <p>Guarde essa senha e dirija-se ao caixa para efetuar o pagamento. Seu pedido vai para a cozinha assim que o pagamento for confirmado.</p>
+        <button class="btn btn-primario" id="btn-novo-pedido">Fazer novo pedido</button>
+    </div>
+
+    <!-- Conteúdo exclusivo de impressão (cupom) -->
+    <div id="cupom-impressao"></div>
+
+    <script src="/totem.js"></script>
+</body>
+
+</html>
