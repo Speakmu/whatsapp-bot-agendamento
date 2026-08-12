@@ -71,6 +71,12 @@ def obter_config_bot():
 # (chat_history.json) foi removido por ser efêmero no deploy (Render)
 # e não funcionar com múltiplos workers do gunicorn.
 
+def primeiro_nome(nome):
+    """Pra falar com o cliente de forma mais natural (ex.: 'Oi Murilo!' em
+    vez de 'Oi Murilo Amorim!'). O nome completo continua sendo usado no
+    registro do pedido, só a forma de se dirigir ao cliente é encurtada."""
+    return str(nome or '').strip().split(' ')[0] or 'Cliente'
+
 def _disponivel_online(item):
     # disponivel = interruptor geral (balcão + online). disponivel_online
     # é um segundo interruptor, só pro app/WhatsApp — permite continuar
@@ -709,7 +715,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # 3. Definição do Contexto (Separado das Instruções)
     if nome_cliente:
         contexto_identificacao = f"CLIENTE IDENTIFICADO: Sim. Nome: {nome_cliente}."
-        instrucao_nome = f"Chame o cliente por '{nome_cliente}'. NÃO pergunte o nome dele novamente."
+        instrucao_nome = f"Chame o cliente só pelo primeiro nome, '{primeiro_nome(nome_cliente)}' (nunca o nome completo, soa mais natural). NÃO pergunte o nome dele novamente."
     else:
         contexto_identificacao = "CLIENTE NOVO: Nome desconhecido."
         instrucao_nome = "Descubra o nome do cliente antes de finalizar o pedido."
@@ -847,6 +853,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     1. IDENTIFICAÇÃO: {instrucao_nome}
        - Se o nome for desconhecido, avise sobre baixar o app para ganhar pontos.
        - Se o nome já for conhecido, apenas lembre-o de conferir os pontos no app.
+       - Sempre que for se dirigir ao cliente pelo nome (identificado ou se
+         ele informar o nome completo na conversa), use só o primeiro nome
+         — nunca o nome completo, soa mais natural e menos formal.
 
     2. APRESENTAÇÃO DE PRODUTOS:
        - Use 'consultar_sabor' SÓ quando o cliente disser o nome de um prato
@@ -1120,8 +1129,8 @@ def notificar_pronto():
         template = bot_cfg.get("mensagem_pronto") if tipo_servico != 'RETIRADA' else bot_cfg.get("mensagem_retirada")
         template = template or (BOT_CONFIG_DEFAULTS["mensagem_pronto"] if tipo_servico != 'RETIRADA' else BOT_CONFIG_DEFAULTS["mensagem_retirada"])
         mensagem = template.format(
-            nome_cliente=nome_cliente,
-            nome=nome_cliente,
+            nome_cliente=primeiro_nome(nome_cliente),
+            nome=primeiro_nome(nome_cliente),
             empresa=bot_cfg.get("nome_empresa") or BOT_CONFIG_DEFAULTS["nome_empresa"]
         )
 
