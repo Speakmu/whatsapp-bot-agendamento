@@ -30,14 +30,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---------- Marca (reaproveita a config já usada no app do cliente) ----------
+    // usaLogotipo: mesma regra do app mobile — mostra OU a logo OU o nome em
+    // texto, nunca os dois juntos (identidadeTipo === 'logo' é quem decide).
     DOC_APP_CFG.onSnapshot(snap => {
         const d = snap.exists ? (snap.data() || {}) : {};
         nomeLoja = d.nomeApp || 'Autoatendimento';
-        $('topo-nome').textContent = nomeLoja;
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
-        if (d.logoUrl) {
+
+        const usaLogotipo = d.identidadeTipo === 'logo' && !!d.logoUrl;
+        if (usaLogotipo) {
             $('topo-logo').src = d.logoUrl;
             $('topo-logo').style.display = '';
+            $('topo-nome').style.display = 'none';
+        } else {
+            $('topo-logo').style.display = 'none';
+            $('topo-nome').style.display = '';
+            $('topo-nome').textContent = nomeLoja;
         }
     }, () => {});
 
@@ -86,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const imgTag = p.imagem_url
                 ? `style="background-image:url('${escapeHtml(p.imagem_url)}')"`
                 : '';
-            const semImg = p.imagem_url ? '' : 'Sem foto';
+            const semImg = p.imagem_url ? '' : '🍽️';
             return `<div class="produto-card" data-id="${p.id}">
                 <div class="img" ${imgTag}>${semImg}</div>
                 <div class="corpo">
