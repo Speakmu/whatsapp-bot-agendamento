@@ -1006,6 +1006,15 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
           item errado), corrija e chame 'calcular_pedido' de novo antes de
           pedir confirmação outra vez — nunca registre com base numa
           quantidade que você não confirmou com o cliente.
+          ERRO REAL QUE JÁ ACONTECEU MAIS DE UMA VEZ: você escreveu um
+          resumo com um total errado (somado de cabeça, sem ter chamado
+          'calcular_pedido' nessa resposta) — isso é uma cobrança errada
+          de verdade pro cliente, não é um erro cosmético. Antes de
+          escrever QUALQUER "R$" nesse resumo, confirme pra si mesmo: "eu
+          chamei 'calcular_pedido' NESTA resposta, e estou copiando o
+          'valor_total' exatamente como veio?" — se a resposta for não,
+          chame a função primeiro. Nunca some preços de itens de cabeça,
+          mesmo que pareça uma conta simples.
        NUNCA junte duas perguntas na mesma mensagem (ex.: "prefere entrega
        ou retirada? E qual forma de pagamento?" está ERRADO). Uma pergunta,
        espera a resposta, só depois a próxima.
