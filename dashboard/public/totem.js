@@ -14,12 +14,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const COL_PEDIDOS = db.collection('pedidos');
     const DOC_CONTADOR = db.collection('totem_contador').doc('senha');
     const DOC_APP_CFG = db.collection('app_config').doc('geral');
+    const DOC_APP_DESTAQUES = db.collection('app_config').doc('destaques');
 
     let produtos = [];
     let categorias = [];
     let categoriaAtiva = 'Todos';
+    let buscaTexto = '';
     let carrinho = []; // [{ id, nome, nome_exibicao, preco, categoria, qtd }]
     let nomeLoja = 'Autoatendimento';
+    let bannerTexto = '';
 
     function money(v) {
         return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ',');
@@ -35,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
     DOC_APP_CFG.onSnapshot(snap => {
         const d = snap.exists ? (snap.data() || {}) : {};
         nomeLoja = d.nomeApp || 'Autoatendimento';
+        bannerTexto = d.bannerTexto || '';
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
 
         const usaLogotipo = d.identidadeTipo === 'logo' && !!d.logoUrl;
@@ -47,7 +51,24 @@ document.addEventListener('DOMContentLoaded', () => {
             $('topo-nome').style.display = '';
             $('topo-nome').textContent = nomeLoja;
         }
+        renderHero();
     }, () => {});
+
+    // ---------- Banner de destaque (reaproveita o hero do app do cliente) ----------
+    let heroUrl = '';
+    DOC_APP_DESTAQUES.onSnapshot(snap => {
+        const d = snap.exists ? (snap.data() || {}) : {};
+        heroUrl = d.heroUrl || '';
+        renderHero();
+    }, () => {});
+
+    function renderHero() {
+        const hero = $('hero');
+        if (!heroUrl) { hero.classList.remove('tem-imagem'); return; }
+        $('hero-img').src = heroUrl;
+        $('hero-texto').textContent = bannerTexto || '';
+        hero.classList.add('tem-imagem');
+    }
 
     // ---------- Relógio ----------
     function atualizarRelogio() {
@@ -71,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderCategorias() {
         $('categorias').innerHTML = categorias.map(cat => `
-            <button data-cat="${escapeHtml(cat)}" class="${cat === categoriaAtiva ? 'ativa' : ''}">${escapeHtml(cat)}</button>
+            <button class="cat-item ${cat === categoriaAtiva ? 'ativa' : ''}" data-cat="${escapeHtml(cat)}">${cat === 'Todos' ? 'Menu Principal' : escapeHtml(cat)}</button>
         `).join('');
         $('categorias').querySelectorAll('button').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -83,10 +104,19 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderProdutos() {
-        const lista = categoriaAtiva === 'Todos' ? produtos : produtos.filter(p => p.categoria === categoriaAtiva);
+        let lista = categoriaAtiva === 'Todos' ? produtos : produtos.filter(p => p.categoria === categoriaAtiva);
+        if (buscaTexto.trim()) {
+            const termo = buscaTexto.trim().toLowerCase();
+            lista = lista.filter(p => (p.nome_exibicao || p.nome || '').toLowerCase().includes(termo));
+        }
+
+        $('secao-titulo').textContent = buscaTexto.trim()
+            ? `Resultados para "${buscaTexto.trim()}"`
+            : (categoriaAtiva === 'Todos' ? 'Cardápio' : categoriaAtiva).toUpperCase();
+
         const wrap = $('produtos');
         if (!lista.length) {
-            wrap.innerHTML = '<div class="empty-produtos">Nenhum item disponível nesta categoria.</div>';
+            wrap.innerHTML = '<div class="empty-produtos">Nenhum item encontrado.</div>';
             return;
         }
         wrap.innerHTML = lista.map(p => {
@@ -97,9 +127,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const semImg = p.imagem_url ? '' : '🍽️';
             return `<div class="produto-card" data-id="${p.id}">
                 <div class="img" ${imgTag}>${semImg}</div>
-                <div class="corpo">
+                <div class="corpo-card">
                     <div class="nome">${escapeHtml(nome)}</div>
-                    <div class="preco">${money(p.preco)}</div>
+                    <div class="rodape-card">
+                        <span class="preco">${money(p.preco)}</span>
+                        <button class="btn-add" type="button" aria-label="Adicionar">+</button>
+                    </div>
                 </div>
             </div>`;
         }).join('');
@@ -107,6 +140,20 @@ document.addEventListener('DOMContentLoaded', () => {
             card.addEventListener('click', () => adicionarAoCarrinho(card.dataset.id));
         });
     }
+
+    // ---------- Busca ----------
+    $('btn-busca').addEventListener('click', () => {
+        $('busca-wrap').classList.toggle('aberta');
+        if ($('busca-wrap').classList.contains('aberta')) $('campo-busca').focus();
+    });
+    $('btn-filtrar').addEventListener('click', () => {
+        $('busca-wrap').classList.add('aberta');
+        $('campo-busca').focus();
+    });
+    $('campo-busca').addEventListener('input', (e) => {
+        buscaTexto = e.target.value;
+        renderProdutos();
+    });
 
     // ---------- Carrinho ----------
     function adicionarAoCarrinho(produtoId) {

@@ -26,50 +26,100 @@
 
         /* ---------- Topo ---------- */
         header.topo {
-            background: var(--marca);
-            color: #fff;
-            padding: 18px 28px;
+            background: #fff;
+            color: #1c2b22;
+            padding: 16px 28px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             flex: none;
-        }
-        header.topo .logo { display: flex; align-items: center; gap: 14px; }
-        header.topo .logo img { height: 52px; max-width: 200px; border-radius: 8px; object-fit: contain; background: #fff; padding: 4px; }
-        header.topo h1 { font-size: 1.6rem; font-weight: 800; }
-        header.topo .relogio { font-size: 1.1rem; font-weight: 600; opacity: .92; }
-
-        /* ---------- Categorias ---------- */
-        nav.categorias {
-            flex: none;
-            display: flex;
-            gap: 10px;
-            padding: 16px 28px;
-            overflow-x: auto;
-            background: #fff;
             border-bottom: 1px solid #e1e5ea;
         }
-        nav.categorias button {
+        header.topo .marca img { height: 44px; max-width: 200px; object-fit: contain; }
+        header.topo h1 { font-size: 1.35rem; font-weight: 800; color: var(--marca-escura, #17421f); }
+        header.topo .boas-vindas { font-size: .85rem; font-weight: 700; letter-spacing: .03em; color: #7f8c8d; text-transform: uppercase; margin-top: 2px; }
+        header.topo .topo-direita { display: flex; align-items: center; gap: 14px; }
+        header.topo .relogio { font-size: 1rem; font-weight: 700; color: #7f8c8d; }
+        header.topo .btn-busca {
+            width: 44px; height: 44px; border-radius: 50%; border: 1px solid #e1e5ea;
+            background: #fff; font-size: 1.15rem; cursor: pointer; color: #2c3e50;
+        }
+        .busca-wrap { flex: none; background: #fff; border-bottom: 1px solid #e1e5ea; padding: 0 28px; max-height: 0; overflow: hidden; transition: max-height .18s ease, padding .18s ease; }
+        .busca-wrap.aberta { max-height: 80px; padding: 14px 28px; }
+        .busca-wrap input {
+            width: 100%; padding: 13px 16px; border-radius: 12px; border: 2px solid #e1e5ea;
+            font-size: 1.05rem; background: #f7f9fb;
+        }
+
+        /* ---------- Banner de destaque ---------- */
+        .hero { flex: none; position: relative; margin: 18px 28px 0; border-radius: 18px; overflow: hidden; height: 190px; background: linear-gradient(135deg, var(--marca), var(--marca-escura, #17421f)); display: none; }
+        .hero.tem-imagem { display: block; }
+        .hero img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .hero-overlay {
+            position: absolute; left: 0; right: 0; bottom: 0;
+            background: linear-gradient(0deg, rgba(0,0,0,.62), rgba(0,0,0,0));
+            color: #fff; padding: 34px 22px 16px;
+            font-size: 1.25rem; font-weight: 800; letter-spacing: .01em;
+        }
+        .hero-dots { position: absolute; right: 16px; bottom: 14px; display: flex; gap: 6px; }
+        .hero-dots span { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.55); }
+        .hero-dots span.ativo { background: #fff; }
+
+        /* ---------- Corpo: sidebar + produtos ---------- */
+        .corpo { flex: 1; display: flex; min-height: 0; }
+
+        aside.sidebar {
             flex: none;
-            padding: 14px 26px;
-            border-radius: 999px;
-            border: 2px solid #e1e5ea;
+            width: 220px;
             background: #fff;
-            color: #2c3e50;
-            font-size: 1.05rem;
+            border-right: 1px solid #e1e5ea;
+            padding: 20px 14px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        aside.sidebar button.cat-item {
+            text-align: left;
+            padding: 14px 16px;
+            border-radius: 12px;
+            border: none;
+            background: transparent;
+            color: #445;
+            font-size: 1rem;
             font-weight: 700;
             cursor: pointer;
         }
-        nav.categorias button.ativa { background: var(--marca); border-color: var(--marca); color: #fff; }
+        aside.sidebar button.cat-item.ativa { background: var(--marca); color: #fff; }
+        aside.sidebar .btn-filtrar {
+            margin-top: 10px;
+            padding: 13px 16px;
+            border-radius: 12px;
+            border: 2px solid #e1e5ea;
+            background: #fff;
+            color: #2c3e50;
+            font-weight: 800;
+            font-size: .82rem;
+            letter-spacing: .04em;
+            cursor: pointer;
+        }
 
-        /* ---------- Grid de produtos ---------- */
         main.produtos {
             flex: 1;
             overflow-y: auto;
-            padding: 24px 28px 160px;
+            padding: 22px 28px 160px;
+        }
+        main.produtos h2.secao-titulo {
+            font-size: 1.05rem;
+            font-weight: 800;
+            letter-spacing: .03em;
+            color: #445;
+            margin-bottom: 16px;
+        }
+        .grid-produtos {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+            gap: 18px;
             align-content: start;
         }
         .produto-card {
@@ -85,7 +135,7 @@
         }
         .produto-card:active { transform: scale(.97); }
         .produto-card .img {
-            height: 140px;
+            height: 130px;
             flex: none;
             background-color: #f4ede4;
             background-position: center;
@@ -94,11 +144,17 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 2.4rem;
+            font-size: 2.2rem;
         }
-        .produto-card .corpo { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-        .produto-card .nome { font-size: 1.05rem; font-weight: 700; line-height: 1.25; }
-        .produto-card .preco { font-size: 1.2rem; font-weight: 800; color: var(--marca); margin-top: auto; }
+        .produto-card .corpo-card { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+        .produto-card .nome { font-size: .98rem; font-weight: 800; line-height: 1.25; text-transform: uppercase; }
+        .produto-card .rodape-card { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
+        .produto-card .preco { font-size: 1.1rem; font-weight: 800; color: var(--marca); }
+        .produto-card .btn-add {
+            width: 34px; height: 34px; border-radius: 50%; border: none;
+            background: var(--marca); color: #fff; font-size: 1.3rem; font-weight: 800;
+            cursor: pointer; flex: none; line-height: 1;
+        }
         .empty-produtos { grid-column: 1/-1; text-align: center; color: #7f8c8d; padding: 60px 0; font-size: 1.1rem; }
 
         /* ---------- Barra do carrinho ---------- */
@@ -107,23 +163,26 @@
             left: 0; right: 0; bottom: 0;
             background: #fff;
             border-top: 1px solid #e1e5ea;
-            padding: 16px 28px;
+            padding: 14px 28px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 16px;
             box-shadow: 0 -6px 18px rgba(0,0,0,.06);
         }
-        .barra-carrinho .resumo { font-size: 1.05rem; font-weight: 700; color: #2c3e50; }
-        .barra-carrinho .resumo span { color: var(--marca); }
+        .barra-carrinho .resumo { display: flex; flex-direction: column; gap: 2px; }
+        .barra-carrinho .resumo .rotulo { font-size: .72rem; font-weight: 800; letter-spacing: .06em; color: #9aa5b1; text-transform: uppercase; }
+        .barra-carrinho .resumo .valor { font-size: 1.1rem; font-weight: 800; color: #2c3e50; }
+        .barra-carrinho .resumo .valor span { color: var(--marca); }
         .barra-carrinho button {
             background: var(--marca);
             color: #fff;
             border: none;
-            padding: 16px 32px;
+            padding: 16px 34px;
             border-radius: 12px;
-            font-size: 1.15rem;
+            font-size: 1.05rem;
             font-weight: 800;
+            letter-spacing: .03em;
             cursor: pointer;
         }
         .barra-carrinho button:disabled { background: #c7ccd3; }
@@ -227,22 +286,47 @@
 
 <body>
     <header class="topo">
-        <div class="logo">
+        <div class="marca">
             <img id="topo-logo" src="" alt="" style="display:none">
             <h1 id="topo-nome">Autoatendimento</h1>
+            <div class="boas-vindas">Bem-vindo! Faça seu pedido</div>
         </div>
-        <div class="relogio" id="relogio">--:--</div>
+        <div class="topo-direita">
+            <span class="relogio" id="relogio">--:--</span>
+            <button class="btn-busca" id="btn-busca" type="button" title="Buscar">🔍</button>
+        </div>
     </header>
 
-    <nav class="categorias" id="categorias"></nav>
+    <div class="busca-wrap" id="busca-wrap">
+        <input type="text" id="campo-busca" placeholder="Buscar no cardápio...">
+    </div>
 
-    <main class="produtos" id="produtos">
-        <div class="empty-produtos">Carregando cardápio...</div>
-    </main>
+    <div class="hero" id="hero">
+        <img id="hero-img" src="" alt="">
+        <div class="hero-overlay" id="hero-texto"></div>
+        <div class="hero-dots"><span class="ativo"></span></div>
+    </div>
+
+    <div class="corpo">
+        <aside class="sidebar">
+            <nav id="categorias"></nav>
+            <button class="btn-filtrar" id="btn-filtrar" type="button">FILTRAR</button>
+        </aside>
+
+        <main class="produtos">
+            <h2 class="secao-titulo" id="secao-titulo">CARDÁPIO</h2>
+            <div class="grid-produtos" id="produtos">
+                <div class="empty-produtos">Carregando cardápio...</div>
+            </div>
+        </main>
+    </div>
 
     <div class="barra-carrinho">
-        <div class="resumo" id="carrinho-resumo">Nenhum item selecionado</div>
-        <button id="btn-ver-carrinho" disabled>Ver pedido</button>
+        <div class="resumo">
+            <span class="rotulo">Carrinho</span>
+            <span class="valor" id="carrinho-resumo">Nenhum item selecionado</span>
+        </div>
+        <button id="btn-ver-carrinho" disabled>FINALIZAR PEDIDO</button>
     </div>
 
     <!-- Modal do carrinho -->
