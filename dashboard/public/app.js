@@ -91,7 +91,10 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     const COLECAO_PEDIDOS = "pedidos";
     const COLECAO_CARDAPIO = "cardapio";
-    const ngrokUrl = "https://leann-southbound-vito.ngrok-free.dev"; //URL do ngrok
+    const COLECAO_ENTREGADORES = "entregadores";
+    // Backend real do bot no Render — antes apontava pra um túnel ngrok
+    // antigo e morto (as notificações de "pedido pronto" nunca chegavam).
+    const ngrokUrl = "https://whatsapp-bot-agendamento.onrender.com";
     const STATUS_ATIVOS_PEDIDOS = ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"];
     const STATUS_NAO_FATURA = new Set(["CANCELADO", "AGUARDANDO_PAGAMENTO", "AGUARDANDO_PIX"]);
     const moneyBR = (v) => "R$ " + (Number(v) || 0).toFixed(2).replace('.', ',');
@@ -125,6 +128,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let dataListenersStarted = false;
     let productFormReady = false;
     let menuListenerStarted = false;
+    let entregadoresAtivos = [];
 
     setupViewSwitching();
 
@@ -136,6 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 dataListenersStarted = true;
                 startOrderListener();
                 startOrdersTodayDashboard();
+                ouvirEntregadoresAtivos();
                 // Cardápio (com as fotos de cada item) só carrega quando a
                 // aba Cardápio é realmente aberta — antes rodava sempre,
                 // mesmo só olhando Pedidos, baixando dezenas de imagens à
@@ -155,6 +160,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (menuListenerStarted) return;
         menuListenerStarted = true;
         startMenuListener();
+    }
+
+    // Lista leve de entregadores ativos — só pro atalho "Despachar" no
+    // card de pedido (mesma coleção que o módulo Entregas já usa).
+    function ouvirEntregadoresAtivos() {
+        db.collection(COLECAO_ENTREGADORES).orderBy("nome").onSnapshot(snap => {
+            entregadoresAtivos = [];
+            snap.forEach(d => {
+                const data = d.data();
+                if (data.ativo !== false) entregadoresAtivos.push({ id: d.id, nome: data.nome });
+            });
+            // Re-renderiza as ações dos cards já na tela pra refletir a
+            // lista de entregadores mais recente (o pedido em si não mudou).
+            if (ordersList) {
+                ordersList.querySelectorAll('.order-card').forEach(card => {
+                    const acoes = card.querySelector('.order-actions[data-status]');
+                    if (acoes) acoes.innerHTML = createStatusButtons(acoes.dataset.status, card.id.replace('card-', ''), acoes.dataset.entrega === '1');
+                });
+                attachButtonListeners();
+            }
+        }, err => console.warn("Erro ao carregar entregadores:", err.message));
     }
     // Função para carregar e exibir o cardápio
     const selectedMenuIds = new Set();
@@ -1047,14 +1073,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <p><strong>Pagto:</strong> ${formaPagamento.toUpperCase()}</p>
                 <div class="${statusClass} status-tag" style="margin-top:10px;">${statusClean}</div>
             </div>
-            <div class="order-actions">
-                ${createStatusButtons(pedido.status, id)}
+            <div class="order-actions" data-status="${pedido.status}" data-entrega="${ehRetirada ? '0' : '1'}">
+                ${createStatusButtons(pedido.status, id, !ehRetirada)}
             </div>
         </div>
     `;
     }
 
-    function createStatusButtons(currentStatus, id) {
+    function createStatusButtons(currentStatus, id, ehEntrega) {
         let buttons = '';
         const flow = {
             // PIX confirma sozinho pelo webhook (AGUARDANDO_PIX -> PENDENTE_PREPARO).
@@ -1080,16 +1106,63 @@ document.addEventListener('DOMContentLoaded', () => {
             const btnClass = st === "CANCELADO" ? "btn-status btn-cancel" : "btn-status";
             buttons += `<button class="${btnClass}" data-id="${id}" data-status="${st}" data-label="${label}">${label}</button>`;
         });
+
+        // Atalho: pedido de entrega que já saiu pronto do balcão (comum em
+        // lanchonete) não precisa passar por "Enviar para Preparo" ->
+        // "Pronto p/ Entrega" -> ir em Entregas pra só então despachar —
+        // despacha direto daqui, pulando pra SAIU_PARA_ENTREGA de uma vez.
+        if (ehEntrega && (currentStatus === "PENDENTE_PREPARO" || currentStatus === "EM_PREPARO" || currentStatus === "PENDENTE_VALIDACAO")) {
+            const opcoes = entregadoresAtivos.map(e => `<option value="${e.id}">${e.nome}</option>`).join('');
+            buttons += `
+                <div class="despacho-rapido" style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+                    <select class="despacho-select" data-despacho-select="${id}" style="flex:1;padding:6px;border-radius:6px;border:1px solid #ddd;">
+                        ${opcoes || '<option value="">(sem entregador ativo)</option>'}
+                    </select>
+                    <button class="btn-status" data-despachar-direto="${id}" style="background:#2980b9;white-space:nowrap;">🛵 Despachar</button>
+                </div>`;
+        }
         return buttons;
+    }
+
+    async function despacharDireto(id) {
+        const sel = document.querySelector(`[data-despacho-select="${id}"]`);
+        const entId = sel ? sel.value : '';
+        if (!entId) { alert("Cadastre/ative um entregador em Entregas antes de despachar."); return; }
+        const entregador = entregadoresAtivos.find(e => e.id === entId);
+        if (!confirm(`Despachar pedido #${id.substring(0, 5)} já pronto com ${entregador ? entregador.nome : 'este entregador'}?`)) return;
+        try {
+            await db.collection(COLECAO_PEDIDOS).doc(id).update({
+                status: "SAIU_PARA_ENTREGA",
+                entregador_id: entId,
+                entregador_nome: entregador ? entregador.nome : '',
+                hora_saida: firebase.firestore.FieldValue.serverTimestamp()
+            });
+            const doc = await db.collection(COLECAO_PEDIDOS).doc(id).get();
+            const pedido = doc.data() || {};
+            fetch(`${ngrokUrl}/notificar_saiu`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    wa_id: pedido.telefone_cliente || pedido.wa_id || pedido.telefone,
+                    nome: pedido.nome_cliente || pedido.nome,
+                    evento: 'SAIU'
+                })
+            }).catch(() => { /* endpoint opcional no bot */ });
+        } catch (err) {
+            alert("Erro ao despachar: " + err.message);
+        }
     }
 
     function attachButtonListeners() {
         // Isso impede que os botões de navegação no header sejam afetados.
         if (ordersList) {
-            ordersList.querySelectorAll('.btn-status').forEach(btn => {
+            ordersList.querySelectorAll('.btn-status[data-status]').forEach(btn => {
                 // Remove listeners antigos para evitar duplicação (boa prática)
                 btn.removeEventListener('click', handleOrderStatusClick);
                 btn.addEventListener('click', handleOrderStatusClick);
+            });
+            ordersList.querySelectorAll('[data-despachar-direto]').forEach(btn => {
+                btn.onclick = () => despacharDireto(btn.dataset.despacharDireto);
             });
         }
     }
