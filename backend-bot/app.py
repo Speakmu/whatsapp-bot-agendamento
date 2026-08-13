@@ -255,7 +255,12 @@ def _montar_itens_pedido(itens, tipo_entrega):
                 itens_nao_reconhecidos.append(nome_pedido)
                 continue
 
-            melhor_match, pontuacao = process.extractOne(nome_pedido, nomes_cardapio)
+            # Sem acento dos dois lados (mesmo motivo do verificar_bairro_entrega):
+            # uma palavra comum acentuada entre vários itens (ex.: "pastéis")
+            # infla a pontuação de itens errados só por ela.
+            nomes_normalizados = [_normalizar_termo(n) for n in nomes_cardapio]
+            melhor_match_norm, pontuacao = process.extractOne(_normalizar_termo(nome_pedido), nomes_normalizados)
+            melhor_match = nomes_cardapio[nomes_normalizados.index(melhor_match_norm)]
             print(f"DEBUG: item do pedido '{nome_pedido}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
 
             if pontuacao < 70:
@@ -642,8 +647,12 @@ def consultar_sabor(sabor_cliente):
         termo_usuario = sabor_cliente.lower().replace("pizza", "").replace(" de ", " ").strip()
 
         # 3. BUSCA INTELIGENTE (Fuzzy Match)
-        # Encontra o nome no banco que mais se parece com o que o usuário digitou
-        melhor_match, pontuacao = process.extractOne(termo_usuario, nomes_no_banco)
+        # Encontra o nome no banco que mais se parece com o que o usuário digitou.
+        # Sem acento dos dois lados — mesmo motivo do verificar_bairro_entrega
+        # (uma palavra comum acentuada infla a pontuação de itens errados).
+        nomes_normalizados = [_normalizar_termo(n) for n in nomes_no_banco]
+        melhor_match_norm, pontuacao = process.extractOne(_normalizar_termo(termo_usuario), nomes_normalizados)
+        melhor_match = nomes_no_banco[nomes_normalizados.index(melhor_match_norm)]
 
         print(f"DEBUG: Sofia comparou '{termo_usuario}' com '{melhor_match}'. Pontuação: {pontuacao}")
 
@@ -697,14 +706,21 @@ def verificar_bairro_entrega(bairro_cliente):
     if not bairros:
         return {"status": "sem_lista_cadastrada"}
 
-    bairros_lower = [b.lower() for b in bairros]
-    melhor_match, pontuacao = process.extractOne(termo.lower(), bairros_lower)
+    # Compara sem acento dos dois lados — com acento, "são genaro" (a
+    # forma como o cliente costuma digitar) pontuava EMPATADO ou PIOR
+    # contra bairros errados tipo "São Judas Tadeu"/"Jardim São José"
+    # (a letra "ã" compartilhada infla a pontuação do scorer padrão do
+    # thefuzz) do que contra o bairro certo "San Genaro" — testado com a
+    # lista real: 86 vs 84, o errado "ganhando". Sem acento, "san genaro"
+    # sobe pra 90 e o falso positivo cai pra 86, com folga de verdade.
+    bairros_normalizados = [_normalizar_termo(b) for b in bairros]
+    melhor_match, pontuacao = process.extractOne(_normalizar_termo(termo), bairros_normalizados)
     print(f"DEBUG: bairro '{termo}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
 
     if pontuacao > 75:
         return {
             "status": "atende",
-            "bairro": bairros[bairros_lower.index(melhor_match)],
+            "bairro": bairros[bairros_normalizados.index(melhor_match)],
             "taxa_entrega": bot_cfg.get("taxa_entrega") or 0
         }
 
