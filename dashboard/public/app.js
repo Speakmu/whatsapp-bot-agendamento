@@ -129,6 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let productFormReady = false;
     let menuListenerStarted = false;
     let entregadoresAtivos = [];
+    let pedidosCache = {};
 
     setupViewSwitching();
 
@@ -991,6 +992,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 ordersList.innerHTML = "";
                 let pedidosHTML = '';
                 let totalAtivos = 0;
+                pedidosCache = {};
 
                 if (snapshot.empty) {
                     ordersList.innerHTML = "<p style='padding:20px;'>Nenhum pedido ativo no momento.</p>";
@@ -1001,6 +1003,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 snapshot.forEach(doc => {
                     const pedido = doc.data();
                     const pedidoId = doc.id;
+                    pedidosCache[pedidoId] = pedido;
 
                     let horaFormatada = "--:--";
                     if (pedido.hora_pedido && pedido.hora_pedido.toDate) {
@@ -1054,30 +1057,86 @@ document.addEventListener('DOMContentLoaded', () => {
             itensHTML = `<div>${textoAntigo}</div>`;
         }
 
+        const enderecoLinha = ehRetirada
+            ? ''
+            : `<div class="order-endereco">📍 ${pedido.bairro ? `<strong>${pedido.bairro}</strong> — ` : ''}${pedido.endereco || '-'}</div>`;
+
         return `
         <div class="order-card" id="card-${id}">
             <div class="order-header">
                 <span class="order-id">#${id.substring(0, 5)}</span>
+                ${badgeEntrega}
                 <span class="order-time">⏰ ${hora}</span>
             </div>
             <div class="order-details">
-                <p><strong>Cliente:</strong> ${pedido.nome_cliente || 'N/I'}</p>
-                <div style="margin: 10px 0;">
-                    <strong>Itens:</strong>
-                    <div style="background: #fff; padding: 8px; border-radius: 5px; border: 1px solid #ddd; color: #333;">
-                        ${itensHTML}
-                    </div>
+                <p class="order-cliente"><strong>${pedido.nome_cliente || 'N/I'}</strong></p>
+                <div class="order-itens">${itensHTML}</div>
+                ${enderecoLinha}
+                <div class="order-footer-info">
+                    <span>${formaPagamento.toUpperCase()}</span>
+                    <div class="${statusClass} status-tag">${statusClean}</div>
                 </div>
-                <p style="margin:6px 0;">${badgeEntrega}</p>
-                ${ehRetirada ? '' : `<p><strong>Endereço:</strong> ${pedido.endereco || '-'}</p>`}
-                <p><strong>Pagto:</strong> ${formaPagamento.toUpperCase()}</p>
-                <div class="${statusClass} status-tag" style="margin-top:10px;">${statusClean}</div>
             </div>
             <div class="order-actions" data-status="${pedido.status}" data-entrega="${ehRetirada ? '0' : '1'}">
+                <button type="button" class="btn-imprimir" data-imprimir="${id}" title="Imprimir pedido">🖨️</button>
                 ${createStatusButtons(pedido.status, id, !ehRetirada)}
             </div>
         </div>
     `;
+    }
+
+    function imprimirPedido(id) {
+        const pedido = pedidosCache && pedidosCache[id];
+        if (!pedido) return;
+        const ehRetirada = pedido.tipo_entrega
+            ? pedido.tipo_entrega === 'RETIRADA'
+            : (!pedido.endereco || /retirada/i.test(pedido.endereco));
+        const listaDeItens = pedido.itens || pedido.itens_pedido;
+        let linhasItens = '';
+        if (listaDeItens && Array.isArray(listaDeItens)) {
+            linhasItens = listaDeItens.map(item => {
+                const nome = item.nome || item.nome_exibicao || item;
+                const texto = (typeof nome === 'object') ? 'Item sem nome' : nome;
+                const qtd = item.quantidade ? `${item.quantidade}x ` : '';
+                return `<div class="linha">${qtd}${texto}</div>`;
+            }).join('');
+        } else {
+            linhasItens = `<div class="linha">${pedido.item_pedido || pedido.itens_pedido || 'Sem detalhes'}</div>`;
+        }
+        const formaPagamento = pedido.forma_pagamento ? pedido.forma_pagamento.replace(/_/g, ' ') : 'N/A';
+        const enderecoHtml = ehRetirada
+            ? '<div class="linha"><strong>RETIRADA NO LOCAL</strong></div>'
+            : `<div class="linha"><strong>Bairro:</strong> ${pedido.bairro || '-'}</div><div class="linha"><strong>Endereço:</strong> ${pedido.endereco || '-'}</div>`;
+        const janela = window.open('', '_blank', 'width=400,height=600');
+        janela.document.write(`
+            <html><head><title>Pedido #${id.substring(0, 5)}</title>
+            <style>
+                body { font-family: 'Courier New', monospace; font-size: 14px; padding: 10px; color: #000; }
+                h1 { font-size: 16px; text-align: center; margin: 0 0 6px; }
+                .linha { padding: 3px 0; border-bottom: 1px dashed #999; }
+                hr { border: none; border-top: 1px solid #000; margin: 8px 0; }
+                .total { font-weight: bold; font-size: 15px; }
+                .center { text-align: center; }
+            </style>
+            </head><body>
+                <h1>Pedido #${id.substring(0, 5)} — ${ehRetirada ? 'RETIRADA' : 'ENTREGA'}</h1>
+                <div class="linha"><strong>Cliente:</strong> ${pedido.nome_cliente || 'N/I'}</div>
+                ${pedido.telefone_cliente ? `<div class="linha"><strong>Tel:</strong> ${pedido.telefone_cliente}</div>` : ''}
+                <hr>
+                ${linhasItens}
+                <hr>
+                ${enderecoHtml}
+                <div class="linha"><strong>Pagamento:</strong> ${formaPagamento.toUpperCase()}</div>
+                ${pedido.observacao ? `<div class="linha"><strong>Obs:</strong> ${pedido.observacao}</div>` : ''}
+                <hr>
+                <div class="linha total">TOTAL: R$ ${Number(pedido.valor_total || 0).toFixed(2).replace('.', ',')}</div>
+                <hr>
+                <div class="center">${new Date().toLocaleString('pt-BR')}</div>
+            </body></html>
+        `);
+        janela.document.close();
+        janela.focus();
+        setTimeout(() => janela.print(), 300);
     }
 
     function createStatusButtons(currentStatus, id, ehEntrega) {
@@ -1163,6 +1222,9 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             ordersList.querySelectorAll('[data-despachar-direto]').forEach(btn => {
                 btn.onclick = () => despacharDireto(btn.dataset.despacharDireto);
+            });
+            ordersList.querySelectorAll('[data-imprimir]').forEach(btn => {
+                btn.onclick = () => imprimirPedido(btn.dataset.imprimir);
             });
         }
     }

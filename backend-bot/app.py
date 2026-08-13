@@ -368,7 +368,7 @@ def calcular_pedido(id_usuario, itens, tipo_entrega=None):
         print(f"ERRO ao calcular pedido: {e}")
         return json.dumps({"status": "erro", "motivo": "Erro interno."})
 
-def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, tipo_entrega=None, telefone=None, id_usuario_cache=None):
+def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, tipo_entrega=None, telefone=None, id_usuario_cache=None, bairro=None):
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
 
     # Segunda checagem de horário: cobre o caso raro de a conversa ter
@@ -442,6 +442,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
             "origem": "WHATSAPP",
             "data_formatada": agora_br.strftime('%d/%m/%Y %H:%M:%S'),
             "endereco": endereco_completo,
+            "bairro": bairro or None,
             "tipo_entrega": tipo_entrega,
             "forma_pagamento": forma_pagamento.upper(),
             "hora_pedido": agora_br,
@@ -958,6 +959,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                             "description": "OBRIGATÓRIO e explícito — nunca deduza pelo texto do endereço, mesmo que pareça óbvio."
                         },
                         "endereco_completo": {"type": "string", "description": "Se for ENTREGA: rua e número de verdade (não só o bairro). Se for RETIRADA, pode deixar vazio ou escrever 'Retirada no balcão'."},
+                        "bairro": {"type": "string", "description": "Se for ENTREGA: o nome do bairro exatamente como 'verificar_bairro_entrega' confirmou (campo \"bairro\" do retorno) — fica separado do endereço pro painel/impressão mostrarem sozinho. Deixe vazio se for RETIRADA."},
                         "forma_pagamento": {"type": "string"},
                         "observacao": {"type": "string"}
                     },
@@ -1217,6 +1219,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          aconteceu de o pedido ser registrado só com o bairro (ex.:
          "endereco_completo": "São Judas Tadeu"), sem rua nem número, e o
          entregador não tem como achar a casa com isso.
+       - Se for ENTREGA, mande TAMBÉM o parâmetro "bairro" (separado do
+         endereço) com o nome exato que 'verificar_bairro_entrega' devolveu
+         no campo "bairro" — o painel/impressão da loja mostra o bairro
+         separado pro entregador, então esse campo não pode ficar vazio
+         numa entrega de verdade.
        - Se o cliente perguntar sobre um pedido que ELE JÁ FEZ (ex.: "qual o
          valor do meu pedido?", "pode descrever meu pedido?", "o que eu
          pedi mesmo?", "cadê meu pedido"), use a função
@@ -1319,6 +1326,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         valor_total=args.get("valor_total"),
                         observacao=args.get("observacao", "Nenhuma"),
                         endereco_completo=args.get("endereco_completo"),
+                        bairro=args.get("bairro"),
                         forma_pagamento=args.get("forma_pagamento"),
                         tipo_entrega=args.get("tipo_entrega"),
                         telefone=wa_id,
