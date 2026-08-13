@@ -992,10 +992,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        c) SÓ quando o cliente disser que não quer mais nada (ex.: "não",
           "só isso", "é só isso mesmo", "pode fechar"), você pergunta a
           forma de entrega (Entrega ou Retirada) — EXCETO se ele já deixou
-          isso claro antes (ver abaixo, sobre bairro). Nesse caso pule
-          direto pro passo (d).
-       d) Depois de saber a entrega, pergunta a forma de pagamento (PIX,
-          Cartão, Dinheiro).
+          isso claro antes (ver abaixo, sobre bairro).
+       c2) Se for ENTREGA: depois de confirmar que a loja atende o bairro
+          (função 'verificar_bairro_entrega'), pergunte especificamente o
+          ENDEREÇO COMPLETO — rua e número (e complemento, se tiver) — numa
+          pergunta própria, tipo "Qual o endereço completo? (rua e número)".
+          Bairro sozinho NUNCA é endereço suficiente pra registrar o
+          pedido — "endereco_completo" tem que ter rua/número de verdade,
+          não só o nome do bairro que o cliente já mencionou antes. Só
+          depois de o cliente responder isso vá pro passo (d). Se for
+          RETIRADA, pule direto pro passo (d).
+       d) Depois de saber o endereço (ou que é retirada), pergunta a forma
+          de pagamento (PIX, Cartão, Dinheiro).
        e) OBRIGATÓRIO antes de registrar de vez: chame 'calcular_pedido' com
           os itens que o cliente pediu (não registra nada, só calcula) e
           mostre um resumo — cada item, a taxa de entrega se houver, e o
@@ -1062,9 +1070,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          situações.
        - IMPORTANTE: se o cliente já perguntou/mencionou um bairro pra
          entrega, ele JÁ deixou claro que quer "Entrega" — NUNCA pergunte
-         "entrega ou retirada?" depois disso, seria redundante. Só falta
-         confirmar o endereço completo (rua/número) e a forma de pagamento,
-         cada um em sua própria pergunta.
+         "entrega ou retirada?" depois disso, seria redundante. Pule direto
+         pro passo (c2): ainda falta pedir o endereço completo (rua/número)
+         numa pergunta própria — o nome do bairro sozinho não é suficiente.
 
        IMPORTANTE SOBRE PIX:
        - Se for "PIX AGORA": Chave e {chave_pix}. Aguarde o comprovante.
@@ -1076,6 +1084,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          o resumo do passo (e) acima. Nunca pule direto pra 'registrar_pedido'
          sem antes ter mostrado o resumo via 'calcular_pedido' e recebido um
          "sim"/confirmação clara.
+       - Se for ENTREGA, o parâmetro "endereco_completo" da função tem que
+         ser o endereço de verdade (rua e número) que o cliente te passou
+         no passo (c2) — NUNCA mande só o nome do bairro nesse campo. Já
+         aconteceu de o pedido ser registrado só com o bairro (ex.:
+         "endereco_completo": "São Judas Tadeu"), sem rua nem número, e o
+         entregador não tem como achar a casa com isso.
        - Se o cliente perguntar sobre um pedido que ELE JÁ FEZ (ex.: "qual o
          valor do meu pedido?", "pode descrever meu pedido?", "o que eu
          pedi mesmo?", "cadê meu pedido"), use a função
