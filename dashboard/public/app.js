@@ -124,6 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let viewSwitchingReady = false;
     let dataListenersStarted = false;
     let productFormReady = false;
+    let menuListenerStarted = false;
 
     setupViewSwitching();
 
@@ -135,7 +136,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 dataListenersStarted = true;
                 startOrderListener();
                 startOrdersTodayDashboard();
-                startMenuListener();
+                // Cardápio (com as fotos de cada item) só carrega quando a
+                // aba Cardápio é realmente aberta — antes rodava sempre,
+                // mesmo só olhando Pedidos, baixando dezenas de imagens à
+                // toa numa conexão mais lenta.
+                if (viewFromHash() === 'cardapio') garantirMenuListener();
             }
             if (!productFormReady) {
                 productFormReady = true;
@@ -145,6 +150,12 @@ document.addEventListener('DOMContentLoaded', () => {
             window.location.href = '/login.html';
         }
     });
+
+    function garantirMenuListener() {
+        if (menuListenerStarted) return;
+        menuListenerStarted = true;
+        startMenuListener();
+    }
     // Função para carregar e exibir o cardápio
     const selectedMenuIds = new Set();
     let currentMenuView = [];
@@ -685,6 +696,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---  LÓGICA DE NAVEGAÇÃO (Troca de Visualização) ---
     // Mostra a view escolhida (navegação agora vem da barra lateral)
     function mostrarView(view) {
+        if (view === 'cardapio' && dataListenersStarted) garantirMenuListener();
         const views = { pedidos: ordersView, cardapio: menuView, relatorios: reportsView };
         Object.values(views).forEach(v => { if (v) v.style.display = 'none'; });
         (views[view] || ordersView).style.display = 'block';

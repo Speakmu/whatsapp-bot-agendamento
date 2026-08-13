@@ -5,17 +5,25 @@
 // o "esqueleto" da página.
 //
 // Duas estratégias diferentes por tipo de arquivo:
-// - Código próprio (HTML/JS/CSS deste domínio): network-first — tenta a rede
-//   e atualiza o cache com a resposta mais nova, só cai pro cache se a rede
-//   falhar de verdade (offline). Evita servir versão desatualizada depois
-//   de um deploy.
+// - Código próprio (HTML/JS/CSS deste domínio): stale-while-revalidate —
+//   responde NA HORA com o que já está salvo (sem esperar rede nenhuma) e
+//   atualiza o cache por trás pra próxima vez; só espera a rede de verdade
+//   se ainda não tem nada salvo. Era "network-first" antes, mas o Network
+//   do DevTools mostrou esse plano saindo bem caro: as conexões do
+//   Firestore em tempo real (o "channel" de long-polling) ficam abertas
+//   por muito tempo e disputam com os arquivos estáticos o número limitado
+//   de conexões simultâneas que o navegador permite por site — um
+//   styles.css de poucos KB ficava preso na fila por quase 1 minuto atrás
+//   delas. Pequeno preço: depois de um deploy, a 1ª abertura ainda pode
+//   servir a versão anterior por uma fração de segundo até o cache
+//   atualizar — bem melhor que travar a tela por um minuto.
 // - SDK do Firebase no gstatic.com: cache-first. A URL já tem a versão presa
 //   (8.6.8) — o conteúdo dela NUNCA muda, então baixar de novo a cada reload
 //   só adiciona demora sem nenhum ganho de atualização. Cada página do
 //   painel carrega esse SDK de novo (o shell e o iframe de dentro, cada um
 //   com seu próprio <script>), então essa troca sozinha já evita várias
 //   rodadas de rede desnecessárias por navegação.
-const CACHE = 'pdv-static-v3';
+const CACHE = 'pdv-static-v4';
 const GSTATIC_FIREBASE_PREFIX = 'https://www.gstatic.com/firebasejs/8.6.8/';
 
 // Pré-cache: sem isso, o Service Worker só guarda um arquivo depois que ele é
@@ -107,14 +115,20 @@ self.addEventListener('fetch', (event) => {
     }
 
     event.respondWith(
-        fetch(event.request)
-            .then(resp => {
-                if (resp && resp.ok) {
-                    const copy = resp.clone();
-                    caches.open(CACHE).then(cache => cache.put(event.request, copy)).catch(() => {});
-                }
-                return resp;
-            })
-            .catch(async () => (await caches.match(event.request)) || Response.error())
+        caches.match(event.request).then(cached => {
+            const atualizarEmSegundoPlano = fetch(event.request)
+                .then(resp => {
+                    if (resp && resp.ok) {
+                        const copy = resp.clone();
+                        caches.open(CACHE).then(cache => cache.put(event.request, copy)).catch(() => {});
+                    }
+                    return resp;
+                })
+                .catch(() => cached || Response.error());
+            // Já tem versão salva? Responde com ela na hora, sem esperar a
+            // rede — a atualização acontece em segundo plano, pra próxima
+            // vez. Só espera a rede de verdade na primeiríssima visita.
+            return cached || atualizarEmSegundoPlano;
+        })
     );
 });
