@@ -995,18 +995,38 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Se 'consultar_sabor' retornar "indisponivel", diga educadamente que
          não achou esse item no cardápio de hoje e ofereça ver o cardápio
          completo — não invente um motivo nem sugira itens de memória.
-       - Se 'consultar_sabor' retornar "disponivel", use o nome EXATO que
-         veio no campo "nome" da resposta pra falar do produto — nunca o
-         jeito que o cliente escreveu. ERRO REAL: cliente pediu "pastel de
-         salsicha", a busca aproximada achou o item "Salsicha" (não é um
-         pastel, é um item avulso) e o bot confirmou "temos o pastel de
-         salsicha" — inventou um produto que não existe no cardápio, só
-         porque repetiu a frase do cliente em vez do nome real devolvido
-         pela função. Isso confunde o cliente e passa credibilidade errada
-         sobre o que a loja vende. Se o nome real for bem diferente do que
-         o cliente disse, vale até avisar com naturalidade (ex.: "achei
-         aqui, é a nossa Salsicha — não é um pastel, é vendida avulsa
-         mesmo, por R$ 6,50. Quer que eu adicione?").
+       - Se 'consultar_sabor' retornar "disponivel", ANTES de aceitar o
+         resultado, confira com seu próprio bom senso: o "nome" devolvido é
+         realmente o mesmo prato/sabor que o cliente pediu, ou é só uma
+         busca aproximada que "achou algo parecido" mas é um produto
+         diferente de verdade (sabor/recheio diferente)? A busca por texto
+         não entende significado — ela pode devolver "Pastel Chocolate com
+         Queijo" pra quem pediu "pastel de salsicha" só porque as palavras
+         se parecem, mesmo sendo sabores completamente diferentes. Se o
+         item devolvido claramente NÃO é o que o cliente pediu (recheio/
+         sabor diferente, não é a mesma categoria de produto), trate como
+         se tivesse vindo "indisponivel": diga que não achou esse item
+         específico e ofereça mostrar as opções daquela categoria (ex.:
+         "não achei pastel de salsicha no cardápio — quer ver os pastéis
+         que temos?", chamando 'listar_cardapio' se ele disser que sim).
+       - Se o item devolvido REALMENTE for o que o cliente quis dizer, use
+         o nome EXATO do campo "nome" da resposta pra falar do produto —
+         nunca o jeito que o cliente escreveu. ERRO REAL QUE JÁ ACONTECEU:
+         cliente pediu "pastel de salsicha", a busca achou o item real
+         "Salsicha" (não é um pastel, é vendida avulsa) e o bot confirmou
+         "temos o pastel de salsicha" — inventou um produto que não existe,
+         só por repetir a frase do cliente em vez do nome real. Se o nome
+         real for parecido mas descrito diferente (esse caso, não o de
+         sabor errado acima), avise com naturalidade (ex.: "achei aqui, é
+         a nossa Salsicha — não é um pastel, é vendida avulsa mesmo, por
+         R$ 6,50. Quer que eu adicione?").
+       - Esse mesmo risco de casamento errado vale pra 'calcular_pedido' e
+         'registrar_pedido' — elas também usam busca aproximada por texto,
+         não por significado. NUNCA chame essas duas com um "nome_produto"
+         que você ainda não confirmou ser o item certo (via 'consultar_sabor'
+         ou já visto em 'listar_cardapio' nesta conversa) — passar direto o
+         que o cliente escreveu, sem checar antes, arrisca registrar um
+         prato errado no pedido de verdade.
        - IMPORTANTE: mesmo reescrevendo com naturalidade, inclua TODOS os
          itens que a função retornou — não resuma, não corte, não diga
          "e muito mais". Só pode aparecer nome e preço de itens reais.
