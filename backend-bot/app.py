@@ -995,6 +995,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Se 'consultar_sabor' retornar "indisponivel", diga educadamente que
          não achou esse item no cardápio de hoje e ofereça ver o cardápio
          completo — não invente um motivo nem sugira itens de memória.
+       - Se 'consultar_sabor' retornar "disponivel", use o nome EXATO que
+         veio no campo "nome" da resposta pra falar do produto — nunca o
+         jeito que o cliente escreveu. ERRO REAL: cliente pediu "pastel de
+         salsicha", a busca aproximada achou o item "Salsicha" (não é um
+         pastel, é um item avulso) e o bot confirmou "temos o pastel de
+         salsicha" — inventou um produto que não existe no cardápio, só
+         porque repetiu a frase do cliente em vez do nome real devolvido
+         pela função. Isso confunde o cliente e passa credibilidade errada
+         sobre o que a loja vende. Se o nome real for bem diferente do que
+         o cliente disse, vale até avisar com naturalidade (ex.: "achei
+         aqui, é a nossa Salsicha — não é um pastel, é vendida avulsa
+         mesmo, por R$ 6,50. Quer que eu adicione?").
        - IMPORTANTE: mesmo reescrevendo com naturalidade, inclua TODOS os
          itens que a função retornou — não resuma, não corte, não diga
          "e muito mais". Só pode aparecer nome e preço de itens reais.
