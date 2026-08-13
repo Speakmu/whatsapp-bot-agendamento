@@ -315,11 +315,19 @@ def _montar_itens_pedido(itens, tipo_entrega):
         "total_pontos": total_pontos
     }
 
-def calcular_pedido(itens, tipo_entrega=None):
+def calcular_pedido(id_usuario, itens, tipo_entrega=None):
     """Prévia do pedido (não grava nada) — mostra pro cliente exatamente os
     itens reconhecidos, a taxa de entrega e o total ANTES de confirmar de
     vez com 'registrar_pedido'. Existe pra evitar o bot fechar um pedido
-    sem o cliente ter chance de corrigir uma quantidade errada antes."""
+    sem o cliente ter chance de corrigir uma quantidade errada antes.
+
+    Guarda o resultado do casamento (itens já resolvidos, não os nomes
+    crus) em 'historico_conversas/{id}.ultimo_calculo' — 'registrar_pedido'
+    reaproveita isso em vez de rodar a busca aproximada de novo do zero.
+    Sem isso, já aconteceu de o cálculo achar um item (ex.: "Coca Cola Lata
+    Zero 350ml") e o registro, buscando de novo, achar outro parecido mas
+    diferente (ex.: "Coca Cola Zero lata 600ml") — o cliente confirma um
+    valor e o pedido de verdade sai com outro."""
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
     try:
         montado = _montar_itens_pedido(itens, tipo_entrega)
@@ -330,6 +338,23 @@ def calcular_pedido(itens, tipo_entrega=None):
                 "itens_nao_reconhecidos": montado["itens_nao_reconhecidos"],
                 "itens_indisponiveis": montado["itens_indisponiveis"]
             })
+
+        if id_usuario:
+            try:
+                db.collection("historico_conversas").document(id_usuario).set({
+                    "ultimo_calculo": {
+                        "itens": montado["lista_itens_tsx"],
+                        "valor_itens": montado["valor_itens"],
+                        "taxa_entrega": montado["taxa_entrega"],
+                        "valor_total": montado["valor_total"],
+                        "tipo_entrega": montado["tipo_entrega"],
+                        "total_pontos": montado["total_pontos"],
+                        "calculado_em": datetime.now(timezone.utc)
+                    }
+                }, merge=True)
+            except Exception as e:
+                print(f"Erro ao cachear ultimo_calculo: {e}")
+
         return json.dumps({
             "status": "ok",
             "itens_confirmados": [i["nome"] for i in montado["lista_itens_tsx"]],
@@ -343,7 +368,7 @@ def calcular_pedido(itens, tipo_entrega=None):
         print(f"ERRO ao calcular pedido: {e}")
         return json.dumps({"status": "erro", "motivo": "Erro interno."})
 
-def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, tipo_entrega=None, telefone=None):
+def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, tipo_entrega=None, telefone=None, id_usuario_cache=None):
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
 
     # Segunda checagem de horário: cobre o caso raro de a conversa ter
@@ -366,7 +391,35 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
         user_doc = user_query[0] if user_query else None
         usuario_id = user_doc.id if user_doc else f"wa_{wa_id}"
 
-        montado = _montar_itens_pedido(itens, tipo_entrega)
+        # Reaproveita o casamento que 'calcular_pedido' já fez (se foi feito
+        # há pouco tempo pra essa mesma conversa) em vez de rodar a busca
+        # aproximada de novo do zero — garante que o pedido registrado é
+        # EXATAMENTE o que o cliente confirmou, nunca um item parecido mas
+        # diferente escolhido numa segunda rodada de fuzzy match.
+        montado = None
+        hist_ref = db.collection("historico_conversas").document(id_usuario_cache) if id_usuario_cache else None
+        if hist_ref:
+            try:
+                hist_doc = hist_ref.get()
+                cache = (hist_doc.to_dict() or {}).get("ultimo_calculo") if hist_doc.exists else None
+                calculado_em = cache.get("calculado_em") if cache else None
+                if cache and cache.get("itens") and calculado_em and (datetime.now(timezone.utc) - calculado_em) < timedelta(minutes=30):
+                    montado = {
+                        "lista_itens_tsx": cache["itens"],
+                        "itens_nao_reconhecidos": [],
+                        "itens_indisponiveis": [],
+                        "valor_itens": cache.get("valor_itens", 0),
+                        "taxa_entrega": cache.get("taxa_entrega", 0),
+                        "valor_total": cache.get("valor_total", 0),
+                        "tipo_entrega": cache.get("tipo_entrega") or "RETIRADA",
+                        "total_pontos": cache.get("total_pontos", 0)
+                    }
+                    hist_ref.update({"ultimo_calculo": firestore.DELETE_FIELD})
+            except Exception as e:
+                print(f"Erro ao reaproveitar ultimo_calculo: {e}")
+
+        if montado is None:
+            montado = _montar_itens_pedido(itens, tipo_entrega)
         lista_itens_tsx = montado["lista_itens_tsx"]
         itens_nao_reconhecidos = montado["itens_nao_reconhecidos"]
         itens_indisponiveis = montado["itens_indisponiveis"]
@@ -1247,7 +1300,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 
                 content = ""
                 if function_name == "calcular_pedido":
-                    content = calcular_pedido(args.get("itens"), args.get("tipo_entrega"))
+                    content = calcular_pedido(id_usuario, args.get("itens"), args.get("tipo_entrega"))
                 elif function_name == "consultar_sabor":
                     content = json.dumps(consultar_sabor(args.get("sabor_cliente")))
                 elif function_name == "listar_cardapio":
@@ -1268,7 +1321,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         endereco_completo=args.get("endereco_completo"),
                         forma_pagamento=args.get("forma_pagamento"),
                         tipo_entrega=args.get("tipo_entrega"),
-                        telefone=wa_id
+                        telefone=wa_id,
+                        id_usuario_cache=id_usuario
                     )
 
                 # Sinaliza no painel de Atendimento quando o bot bate numa
