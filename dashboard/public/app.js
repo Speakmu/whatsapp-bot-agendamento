@@ -1067,6 +1067,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="order-id">#${id.substring(0, 5)}</span>
                 ${badgeEntrega}
                 <span class="order-time">⏰ ${hora}</span>
+                <button type="button" class="btn-imprimir" data-imprimir="${id}" title="Imprimir pedido">🖨️</button>
             </div>
             <div class="order-details">
                 <p class="order-cliente"><strong>${pedido.nome_cliente || 'N/I'}</strong></p>
@@ -1078,7 +1079,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>
             <div class="order-actions" data-status="${pedido.status}" data-entrega="${ehRetirada ? '0' : '1'}">
-                <button type="button" class="btn-imprimir" data-imprimir="${id}" title="Imprimir pedido">🖨️</button>
                 ${createStatusButtons(pedido.status, id, !ehRetirada)}
             </div>
         </div>
@@ -1170,11 +1170,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // lanchonete) não precisa passar por "Enviar para Preparo" ->
         // "Pronto p/ Entrega" -> ir em Entregas pra só então despachar —
         // despacha direto daqui, pulando pra SAIU_PARA_ENTREGA de uma vez.
+        buttons = `<div class="order-actions-row">${buttons}</div>`;
+
         if (ehEntrega && (currentStatus === "PENDENTE_PREPARO" || currentStatus === "EM_PREPARO" || currentStatus === "PENDENTE_VALIDACAO")) {
             const opcoes = entregadoresAtivos.map(e => `<option value="${e.id}">${e.nome}</option>`).join('');
             buttons += `
-                <div class="despacho-rapido" style="display:flex;gap:6px;align-items:center;margin-top:6px;">
-                    <select class="despacho-select" data-despacho-select="${id}" style="flex:1;padding:6px;border-radius:6px;border:1px solid #ddd;">
+                <div class="despacho-rapido">
+                    <select class="despacho-select" data-despacho-select="${id}">
                         ${opcoes || '<option value="">(sem entregador ativo)</option>'}
                     </select>
                     <button class="btn-status" data-despachar-direto="${id}" style="background:#2980b9;white-space:nowrap;">🛵 Despachar</button>

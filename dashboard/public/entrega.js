@@ -34,6 +34,10 @@ document.addEventListener('DOMContentLoaded', () => {
         ouvirEntregadores();
         ouvirPedidos();
         contarEntreguesHoje();
+        $('check-todos-rota').addEventListener('change', (e) => {
+            document.querySelectorAll('.chk-rota').forEach(chk => chk.checked = e.target.checked);
+        });
+        $('btn-imprimir-rota').addEventListener('click', imprimirRotaSelecionada);
     });
 
     // ---------- Entregadores ----------
@@ -144,7 +148,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const saida = p.hora_saida && p.hora_saida.toDate
             ? p.hora_saida.toDate().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--';
         return `<div class="ped rota">
-            <div class="ped-top"><span class="ped-id">#${p.id.substring(0, 5)}</span>
+            <div class="ped-top">
+                <span><input type="checkbox" class="chk-rota" data-id="${p.id}"><span class="ped-id">#${p.id.substring(0, 5)}</span></span>
                 <span class="ped-meta">${escapeHtml(p.nome_cliente || 'Cliente')}</span></div>
             <div class="ped-end">📍 ${escapeHtml(p.endereco || '')}</div>
             <div class="ped-meta">🛵 ${escapeHtml(p.entregador_nome || 'Entregador')} • saiu ${saida}</div>
@@ -182,6 +187,68 @@ document.addEventListener('DOMContentLoaded', () => {
             if (window.GestorChefEstoque) window.GestorChefEstoque.baixarDoPedido(db, id).then(avisarPratosDesativados).catch(() => {});
             contarEntreguesHoje();
         } catch (err) { alert("Erro: " + err.message); }
+    }
+
+    function itensTextoPedido(p) {
+        const lista = p.itens || p.itens_pedido;
+        if (lista && Array.isArray(lista)) {
+            return lista.map(item => {
+                const nome = item.nome || item.nome_exibicao || item;
+                const texto = (typeof nome === 'object') ? 'Item sem nome' : nome;
+                const qtd = item.quantidade ? `${item.quantidade}x ` : '';
+                return `${qtd}${escapeHtml(texto)}`;
+            }).join(', ');
+        }
+        return escapeHtml(p.item_pedido || lista || 'Sem detalhes');
+    }
+
+    // Imprime numa folha só a relação dos pedidos selecionados em "Em rota",
+    // agrupados por entregador — pra loja entregar uma lista organizada ao
+    // moto boy em vez de um cupom avulso por pedido.
+    function imprimirRotaSelecionada() {
+        const ids = Array.from(document.querySelectorAll('.chk-rota:checked')).map(chk => chk.dataset.id);
+        if (!ids.length) { alert("Selecione ao menos um pedido em rota."); return; }
+        const selecionados = pedidos.filter(p => ids.includes(p.id) && p.status === 'SAIU_PARA_ENTREGA');
+
+        const porEntregador = {};
+        selecionados.forEach(p => {
+            const nome = p.entregador_nome || 'Sem entregador';
+            (porEntregador[nome] = porEntregador[nome] || []).push(p);
+        });
+
+        const secoes = Object.keys(porEntregador).sort().map(nome => {
+            const paradas = porEntregador[nome].map((p, i) => `
+                <div class="parada">
+                    <div class="parada-cab"><strong>${i + 1}. #${p.id.substring(0, 5)}</strong> — ${escapeHtml(p.nome_cliente || 'Cliente')}</div>
+                    ${p.bairro ? `<div>Bairro: <strong>${escapeHtml(p.bairro)}</strong></div>` : ''}
+                    <div>Endereço: ${escapeHtml(p.endereco || '-')}</div>
+                    <div>Itens: ${itensTextoPedido(p)}</div>
+                    <div>Pagamento: ${escapeHtml((p.forma_pagamento || '-').replace(/_/g, ' ').toUpperCase())} — Total: R$ ${Number(p.valor_total || 0).toFixed(2).replace('.', ',')}</div>
+                </div>`).join('');
+            return `<h2>🛵 ${escapeHtml(nome)} (${porEntregador[nome].length} parada${porEntregador[nome].length > 1 ? 's' : ''})</h2>${paradas}`;
+        }).join('<hr>');
+
+        const janela = window.open('', '_blank', 'width=500,height=700');
+        janela.document.write(`
+            <html><head><title>Relação de entregas</title>
+            <style>
+                body { font-family:'Courier New', monospace; font-size:13px; padding:14px; color:#000; }
+                h1 { font-size:16px; text-align:center; margin-bottom:4px; }
+                h2 { font-size:14px; margin:14px 0 8px; border-bottom:1px solid #000; padding-bottom:4px; }
+                .parada { padding:6px 0; border-bottom:1px dashed #999; }
+                .parada-cab { margin-bottom:3px; }
+                hr { border:none; border-top:2px solid #000; margin:10px 0; }
+                .center { text-align:center; }
+            </style>
+            </head><body>
+                <h1>Relação de entregas</h1>
+                <div class="center">${new Date().toLocaleString('pt-BR')}</div>
+                ${secoes}
+            </body></html>
+        `);
+        janela.document.close();
+        janela.focus();
+        setTimeout(() => janela.print(), 300);
     }
 
     function notificarBot(pedido, evento) {

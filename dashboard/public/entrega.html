@@ -41,7 +41,8 @@
 
         .ped { border:1px solid var(--line); border-left:6px solid var(--warn); border-radius:10px; padding:12px; margin-bottom:12px; }
         .ped.rota { border-left-color:var(--blue); }
-        .ped-top { display:flex; justify-content:space-between; align-items:baseline; }
+        .ped-top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+        .ped-top .chk-rota { margin-right:4px; }
         .ped-id { font-weight:800; }
         .ped-end { color:var(--txt); margin:6px 0; font-size:.95rem; }
         .ped-meta { color:var(--muted); font-size:.85rem; margin-bottom:8px; }
@@ -81,7 +82,13 @@
                 <h2>Pedidos para entrega</h2>
                 <h3 style="font-size:.9rem;color:var(--muted);margin:6px 0;">⏳ Aguardando despacho</h3>
                 <div id="lista-aguardando"></div>
-                <h3 style="font-size:.9rem;color:var(--muted);margin:14px 0 6px;">🛵 Em rota</h3>
+                <div style="display:flex;align-items:center;gap:10px;margin:14px 0 6px;flex-wrap:wrap;">
+                    <h3 style="font-size:.9rem;color:var(--muted);margin:0;">🛵 Em rota</h3>
+                    <label style="font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:4px;margin-left:auto;">
+                        <input type="checkbox" id="check-todos-rota"> Selecionar todos
+                    </label>
+                    <button class="btn btn-laranja" id="btn-imprimir-rota" style="padding:6px 12px;font-size:.8rem;">🖨️ Imprimir selecionados</button>
+                </div>
                 <div id="lista-rota"></div>
             </div>
 

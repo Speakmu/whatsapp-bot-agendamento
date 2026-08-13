@@ -101,11 +101,11 @@ body {
 }
 .order-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, .08); }
 .order-header {
-    display: flex; justify-content: space-between; align-items: center; gap: 6px;
+    display: flex; justify-content: flex-start; align-items: center; gap: 6px;
     border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 6px;
 }
 .order-id { font-weight: 800; font-size: .95rem; color: var(--accent); }
-.order-time { font-size: .75rem; color: var(--muted); white-space: nowrap; }
+.order-time { font-size: .75rem; color: var(--muted); white-space: nowrap; margin-left: auto; }
 .order-details p { margin-bottom: 3px; font-size: .85rem; }
 .order-details strong { color: var(--secondary-color); }
 .order-cliente { font-size: .9rem; margin-bottom: 4px; }
@@ -140,7 +140,12 @@ body {
 
 .order-actions {
     margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line);
-    display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+    display: flex; flex-direction: column; gap: 6px;
+}
+.order-actions-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.despacho-rapido { display: flex; gap: 6px; align-items: center; }
+.despacho-rapido .despacho-select {
+    flex: 1; min-width: 0; padding: 6px; border-radius: 6px; border: 1px solid var(--line); font-size: .78rem;
 }
 
 /* ---------- Botões ---------- */
