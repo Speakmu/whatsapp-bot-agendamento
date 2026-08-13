@@ -1097,8 +1097,7 @@ document.addEventListener('DOMContentLoaded', () => {
             linhasItens = listaDeItens.map(item => {
                 const nome = item.nome || item.nome_exibicao || item;
                 const texto = (typeof nome === 'object') ? 'Item sem nome' : nome;
-                const qtd = item.quantidade ? `${item.quantidade}x ` : '';
-                return `<div class="linha">${qtd}${texto}</div>`;
+                return `<div class="linha">${texto}</div>`;
             }).join('');
         } else {
             linhasItens = `<div class="linha">${pedido.item_pedido || pedido.itens_pedido || 'Sem detalhes'}</div>`;

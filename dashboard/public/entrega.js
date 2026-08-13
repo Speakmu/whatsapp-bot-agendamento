@@ -195,8 +195,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return lista.map(item => {
                 const nome = item.nome || item.nome_exibicao || item;
                 const texto = (typeof nome === 'object') ? 'Item sem nome' : nome;
-                const qtd = item.quantidade ? `${item.quantidade}x ` : '';
-                return `${qtd}${escapeHtml(texto)}`;
+                return escapeHtml(texto);
             }).join(', ');
         }
         return escapeHtml(p.item_pedido || lista || 'Sem detalhes');
