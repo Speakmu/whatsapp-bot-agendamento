@@ -33,8 +33,14 @@ BOT_CONFIG_DEFAULTS = {
     "nome_empresa": "Lileamar Salgados",
     "chave_pix": "abc1231234567",
     "modelo": "gpt-4o",
-    "max_historico_contexto": 12,
-    "max_historico_salvar": 15,
+    # Fechar um pedido hoje passa por bem mais etapas do que antes (confirmar
+    # bairro, pedir endereço completo, forma de pagamento, resumo antes de
+    # fechar) — uma conversa real já passou de 17 mensagens antes do cliente
+    # confirmar o pedido. Com o limite antigo (12/15) as primeiras mensagens,
+    # onde os itens foram escolhidos, saíam da memória antes de chegar no
+    # fechamento — o bot "esquecia" o carrinho de verdade, não só parecia.
+    "max_historico_contexto": 24,
+    "max_historico_salvar": 30,
     "mensagem_inicial": "Ola! Como posso ajudar?",
     "mensagem_erro": "Desculpe, tive um probleminha aqui. Pode repetir?",
     "mensagem_inativo": "No momento o atendimento automatico esta pausado. Em breve nossa equipe responde por aqui.",
@@ -57,13 +63,13 @@ def obter_config_bot():
         print(f"Erro ao ler configuracao do bot: {e}")
 
     try:
-        cfg["max_historico_contexto"] = max(2, min(30, int(cfg.get("max_historico_contexto") or 12)))
+        cfg["max_historico_contexto"] = max(2, min(50, int(cfg.get("max_historico_contexto") or 24)))
     except Exception:
-        cfg["max_historico_contexto"] = 12
+        cfg["max_historico_contexto"] = 24
     try:
-        cfg["max_historico_salvar"] = max(cfg["max_historico_contexto"], min(40, int(cfg.get("max_historico_salvar") or 15)))
+        cfg["max_historico_salvar"] = max(cfg["max_historico_contexto"], min(60, int(cfg.get("max_historico_salvar") or 30)))
     except Exception:
-        cfg["max_historico_salvar"] = 15
+        cfg["max_historico_salvar"] = 30
     return cfg
 # --- FUNÇÕES DE APOIO ---
 # OBS: o histórico de conversa agora é persistido 100% no Firestore

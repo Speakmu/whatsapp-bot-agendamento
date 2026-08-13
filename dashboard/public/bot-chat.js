@@ -25,6 +25,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let pollConversas = null;
     let pollMensagens = null;
     let cardapioCache = [];
+    // Trava simples contra duplo-clique: o clique não dá feedback imediato
+    // (precisa gravar no Firestore + mandar WhatsApp antes de sumir da
+    // tela), e um segundo clique nesse meio-tempo mandava a mesma mensagem
+    // duas vezes pro cliente.
+    let acaoAtencaoEmAndamento = false;
 
     // Mesma normalização usada no backend (minúsculo, sem espaço sobrando,
     // sem acento) — pra bater com a mesma chave que o bot vai consultar.
@@ -148,6 +153,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderAtencaoBox(dados) {
+        // Não redesenha por cima de uma ação em andamento (o poll de 10s
+        // recarrega a conversa mesmo enquanto o clique anterior ainda está
+        // sendo processado) — isso re-habilitaria os botões antes da hora.
+        if (acaoAtencaoEmAndamento) return;
         const box = $('atencao-box');
         if (!dados.precisa_atencao || !dados.tipo_atencao) {
             box.style.display = 'none';
@@ -214,7 +223,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function responderBairro(bairroCliente, atende) {
-        if (!conversaAtualId) return;
+        if (!conversaAtualId || acaoAtencaoEmAndamento) return;
+        acaoAtencaoEmAndamento = true;
+        desabilitarBotoesAtencao('Enviando...');
         try {
             await COL_BAIRROS_APRENDIZADO.doc(normalizarTermo(bairroCliente)).set({
                 bairro_original: bairroCliente,
@@ -233,13 +244,17 @@ document.addEventListener('DOMContentLoaded', () => {
             await carregarMensagens();
         } catch (err) {
             alert('Erro ao responder bairro: ' + err.message);
+        } finally {
+            acaoAtencaoEmAndamento = false;
         }
     }
 
     async function vincularItem(nomeProduto, itemId) {
-        if (!conversaAtualId) return;
+        if (!conversaAtualId || acaoAtencaoEmAndamento) return;
         const item = cardapioCache.find(p => p.id === itemId);
         if (!item) return;
+        acaoAtencaoEmAndamento = true;
+        desabilitarBotoesAtencao('Enviando...');
         try {
             await COL_ITENS_APRENDIZADO.doc(normalizarTermo(nomeProduto)).set({
                 apelido_original: nomeProduto,
@@ -257,6 +272,21 @@ document.addEventListener('DOMContentLoaded', () => {
             await carregarMensagens();
         } catch (err) {
             alert('Erro ao vincular item: ' + err.message);
+        } finally {
+            acaoAtencaoEmAndamento = false;
+        }
+    }
+
+    function desabilitarBotoesAtencao(texto) {
+        const box = $('atencao-box');
+        if (!box) return;
+        box.querySelectorAll('button, select').forEach(el => { el.disabled = true; });
+        const acoes = box.querySelector('.atencao-acoes');
+        if (acoes && texto) {
+            const aviso = document.createElement('span');
+            aviso.style.cssText = 'font-size:.82rem;color:var(--muted);margin-left:6px;';
+            aviso.textContent = texto;
+            acoes.appendChild(aviso);
         }
     }
 
