@@ -188,12 +188,20 @@ from thefuzz import process, fuzz # <--- Adicione 'fuzz' aqui
 
 # ... (restante do código) ...
 
-def _montar_itens_pedido(itens, endereco_completo):
+def _montar_itens_pedido(itens, tipo_entrega):
     """Casa cada item pedido (nome + quantidade) contra o cardápio via busca
     aproximada e calcula o total — usada tanto por 'calcular_pedido' (só
     prévia, não escreve nada) quanto por 'registrar_pedido' (grava de
     verdade), pra garantir que o valor mostrado na confirmação seja
     exatamente o mesmo que vai pro pedido real.
+
+    'tipo_entrega' é sempre "ENTREGA" ou "RETIRADA", informado explicitamente
+    pela IA — nunca adivinhado a partir do texto do endereço. Antes a
+    função tentava inferir isso olhando se "endereco_completo" vinha vazio
+    ou continha a palavra "retirada": se a IA chamasse 'calcular_pedido' sem
+    passar o endereço (o parâmetro não era obrigatório), um pedido de
+    entrega de verdade virava RETIRADA sozinho e a taxa de entrega sumia do
+    resumo mostrado pro cliente — bug real, não só de prompt.
 
     Antes o código tentava re-interpretar uma frase inteira escrita pela IA
     (ex.: "2 pastéis de carne e queijo e 2 enroladinhos..."), comparando
@@ -274,9 +282,7 @@ def _montar_itens_pedido(itens, endereco_completo):
         valor_itens += preco_total_item
         total_pontos += int(dados.get('pontos_fidelidade', 0)) * qtd
 
-    # Tipo de entrega: retirada se não houver endereço ou se o texto indicar retirada
-    eh_retirada = (not endereco_completo) or ("retirada" in str(endereco_completo).lower())
-    tipo_entrega = "RETIRADA" if eh_retirada else "ENTREGA"
+    tipo_entrega = "RETIRADA" if str(tipo_entrega or "").strip().upper() == "RETIRADA" else "ENTREGA"
 
     # Taxa de entrega somada aqui pelo servidor (nunca pela IA de cabeça)
     # — só quando é entrega de verdade.
@@ -298,14 +304,14 @@ def _montar_itens_pedido(itens, endereco_completo):
         "total_pontos": total_pontos
     }
 
-def calcular_pedido(itens, endereco_completo=None):
+def calcular_pedido(itens, tipo_entrega=None):
     """Prévia do pedido (não grava nada) — mostra pro cliente exatamente os
     itens reconhecidos, a taxa de entrega e o total ANTES de confirmar de
     vez com 'registrar_pedido'. Existe pra evitar o bot fechar um pedido
     sem o cliente ter chance de corrigir uma quantidade errada antes."""
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
     try:
-        montado = _montar_itens_pedido(itens, endereco_completo)
+        montado = _montar_itens_pedido(itens, tipo_entrega)
         if not montado["lista_itens_tsx"]:
             return json.dumps({
                 "status": "erro",
@@ -326,7 +332,7 @@ def calcular_pedido(itens, endereco_completo=None):
         print(f"ERRO ao calcular pedido: {e}")
         return json.dumps({"status": "erro", "motivo": "Erro interno."})
 
-def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, telefone=None):
+def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, tipo_entrega=None, telefone=None):
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
 
     # Segunda checagem de horário: cobre o caso raro de a conversa ter
@@ -349,7 +355,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
         user_doc = user_query[0] if user_query else None
         usuario_id = user_doc.id if user_doc else f"wa_{wa_id}"
 
-        montado = _montar_itens_pedido(itens, endereco_completo)
+        montado = _montar_itens_pedido(itens, tipo_entrega)
         lista_itens_tsx = montado["lista_itens_tsx"]
         itens_nao_reconhecidos = montado["itens_nao_reconhecidos"]
         itens_indisponiveis = montado["itens_indisponiveis"]
@@ -838,9 +844,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                 "required": ["nome_produto", "quantidade"]
                             }
                         },
-                        "endereco_completo": {"type": "string", "description": "Endereço se for entrega, ou deixe vazio/mencione retirada se for retirada — decide se a taxa de entrega entra na conta."}
+                        "tipo_entrega": {
+                            "type": "string",
+                            "enum": ["ENTREGA", "RETIRADA"],
+                            "description": "OBRIGATÓRIO e explícito — nunca deduza pelo texto do endereço. Se ainda não sabe se é entrega ou retirada, não chame esta função ainda."
+                        }
                     },
-                    "required": ["itens"]
+                    "required": ["itens", "tipo_entrega"]
                 }
             }
         },
@@ -867,11 +877,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         },
                         "valor_total": {"type": "number", "description": "Sua estimativa do total (só os itens, sem taxa) — o sistema recalcula e pode corrigir."},
                         "telefone": {"type": "string"},
-                        "endereco_completo": {"type": "string"},
+                        "tipo_entrega": {
+                            "type": "string",
+                            "enum": ["ENTREGA", "RETIRADA"],
+                            "description": "OBRIGATÓRIO e explícito — nunca deduza pelo texto do endereço, mesmo que pareça óbvio."
+                        },
+                        "endereco_completo": {"type": "string", "description": "Se for ENTREGA: rua e número de verdade (não só o bairro). Se for RETIRADA, pode deixar vazio ou escrever 'Retirada no balcão'."},
                         "forma_pagamento": {"type": "string"},
                         "observacao": {"type": "string"}
                     },
-                    "required": ["nome_cliente", "itens", "valor_total", "endereco_completo", "forma_pagamento"]
+                    "required": ["nome_cliente", "itens", "valor_total", "tipo_entrega", "endereco_completo", "forma_pagamento"]
                 }
             }
         },
@@ -1005,10 +1020,15 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        d) Depois de saber o endereço (ou que é retirada), pergunta a forma
           de pagamento (PIX, Cartão, Dinheiro).
        e) OBRIGATÓRIO antes de registrar de vez: chame 'calcular_pedido' com
-          os itens que o cliente pediu (não registra nada, só calcula) e
-          mostre um resumo — cada item, a taxa de entrega se houver, e o
-          "valor_total" que a função devolveu — perguntando algo como
-          "Confere? Posso fechar o pedido?". SÓ chame 'registrar_pedido'
+          os itens que o cliente pediu E o "tipo_entrega" (ENTREGA ou
+          RETIRADA) que você já confirmou nos passos (c)/(c2) — nunca deixe
+          esse campo de fora nem deixe a função adivinhar: um pedido de
+          entrega sem "tipo_entrega": "ENTREGA" explícito já saiu como
+          retirada, e a taxa de entrega sumiu do total mostrado pro
+          cliente. (Não registra nada, só calcula.) Mostre um resumo — cada
+          item, a taxa de entrega se houver, e o "valor_total" que a função
+          devolveu — perguntando algo como "Confere? Posso fechar o
+          pedido?". SÓ chame 'registrar_pedido'
           depois que o cliente confirmar explicitamente (ex.: "sim",
           "confere", "pode fechar"). Se ele apontar algo errado (quantidade,
           item errado), corrija e chame 'calcular_pedido' de novo antes de
@@ -1173,7 +1193,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 
                 content = ""
                 if function_name == "calcular_pedido":
-                    content = calcular_pedido(args.get("itens"), args.get("endereco_completo"))
+                    content = calcular_pedido(args.get("itens"), args.get("tipo_entrega"))
                 elif function_name == "consultar_sabor":
                     content = json.dumps(consultar_sabor(args.get("sabor_cliente")))
                 elif function_name == "listar_cardapio":
@@ -1193,6 +1213,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         observacao=args.get("observacao", "Nenhuma"),
                         endereco_completo=args.get("endereco_completo"),
                         forma_pagamento=args.get("forma_pagamento"),
+                        tipo_entrega=args.get("tipo_entrega"),
                         telefone=wa_id
                     )
 
