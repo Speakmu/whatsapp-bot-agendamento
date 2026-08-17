@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { onRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 initializeApp();
@@ -12,9 +13,23 @@ const db = getFirestore();
 // Configure com: firebase functions:secrets:set MERCADOPAGO_ACCESS_TOKEN
 const MERCADOPAGO_ACCESS_TOKEN = defineSecret("MERCADOPAGO_ACCESS_TOKEN");
 
-// Secret Key da Stone (TEF), gerada no portal da Stone pelo próprio cliente.
-// Configure com: firebase functions:secrets:set STONE_SECRET_KEY
-const STONE_SECRET_KEY = defineSecret("STONE_SECRET_KEY");
+const GESTORCHEF_ADMIN_EMAIL = "lileamarloja04@gmail.com";
+
+async function exigirUsuario(req) {
+    const header = String(req.headers.authorization || '');
+    if (!header.startsWith('Bearer ')) {
+        throw Object.assign(new Error('Autenticacao obrigatoria.'), { status: 401 });
+    }
+    return getAuth().verifyIdToken(header.slice(7));
+}
+
+async function exigirAdmin(req) {
+    const token = await exigirUsuario(req);
+    if (String(token.email || '').toLowerCase() !== GESTORCHEF_ADMIN_EMAIL) {
+        throw Object.assign(new Error('Apenas o administrador pode alterar a integracao Stone.'), { status: 403 });
+    }
+    return token;
+}
 
 // URL fixa da função de webhook abaixo (região padrão us-central1, mesmo projeto).
 const WEBHOOK_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/mercadoPagoWebhook";
@@ -31,7 +46,10 @@ export const processarPagamentoDireto = onRequest(
     }
 
     try {
-        const accessToken = MERCADOPAGO_ACCESS_TOKEN.value();
+        // .trim() defensivo: secret configurada via --data-file costuma vir com
+        // uma quebra de linha no final, e um header "Authorization" com \n
+        // quebra o fetch do Node com "Invalid character in header content".
+        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
         if (!accessToken) {
             console.error("MERCADOPAGO_ACCESS_TOKEN não configurado.");
             return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
@@ -82,7 +100,7 @@ export const processarPagamentoDireto = onRequest(
 
     } catch (error) {
         console.error("ERRO DETALHADO:", error.response?.data || error.message);
-        return res.status(error.response?.status || 500).json(error.response?.data || { message: error.message });
+        return res.status(error.status || error.response?.status || 500).json(error.response?.data || { message: error.message });
     }
 });
 
@@ -101,7 +119,7 @@ export const criarCobrancaPoint = onRequest(
     }
 
     try {
-        const accessToken = MERCADOPAGO_ACCESS_TOKEN.value();
+        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
         if (!accessToken) {
             console.error("MERCADOPAGO_ACCESS_TOKEN não configurado.");
             return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
@@ -209,38 +227,104 @@ async function tratarNotificacaoPoint(paymentIntentId, accessToken) {
     await confirmarCartaoAprovado(pedidoDoc, pedido, 'Point', estado);
 }
 
-// Cria uma cobrança na maquininha Stone (Pagar.me Orders API) — mesmo papel do
+// Salva a credencial do Connect em uma coleção sem acesso pelo navegador.
+export const configurarStoneConnect = onRequest(async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        return res.status(204).send('');
+    }
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
+
+    try {
+        await exigirAdmin(req);
+        const stoneCode = String(req.body?.stoneCode || '').trim();
+        const serial = String(req.body?.stoneDeviceSerial || '').trim();
+        const serviceRefererName = String(req.body?.stoneServiceRefererName || '').trim();
+        const secretKey = String(req.body?.stoneSecretKey || '').trim();
+
+        if (!/^\d{1,9}$/.test(stoneCode)) {
+            return res.status(400).json({ message: 'Informe um StoneCode valido, com ate 9 digitos.' });
+        }
+        if (!serial) return res.status(400).json({ message: 'Informe o numero de serie da POS Stone.' });
+        if (!serviceRefererName) {
+            return res.status(400).json({ message: 'Informe o ServiceRefererName fornecido na homologacao do Connect 2.0.' });
+        }
+
+        const secretRef = db.collection('integracao_secrets').doc('stone_connect');
+        const atual = await secretRef.get();
+        if (!secretKey && !atual.exists) {
+            await db.collection('configuracoes').doc('pagamentos').set({
+                stoneSecretKey: FieldValue.delete()
+            }, { merge: true });
+            return res.status(400).json({ message: 'Informe a Secret Key do Connect 2.0. A chave TEF nao e compativel.' });
+        }
+        if (secretKey && !secretKey.startsWith('sk_')) {
+            await db.collection('configuracoes').doc('pagamentos').set({
+                stoneSecretKey: FieldValue.delete()
+            }, { merge: true });
+            return res.status(400).json({ message: 'A chave informada nao e uma Secret Key do Connect 2.0 (prefixo sk_). Solicite a credencial do Connect a Stone.' });
+        }
+
+        const batch = db.batch();
+        batch.set(db.collection('configuracoes').doc('pagamentos'), {
+            provedorCartao: 'stone',
+            stoneCode,
+            stoneDeviceSerial: serial,
+            stoneServiceRefererName: serviceRefererName,
+            stoneSecretConfigured: true,
+            stoneSecretKey: FieldValue.delete(),
+            atualizado_em: FieldValue.serverTimestamp()
+        }, { merge: true });
+        if (secretKey) {
+            batch.set(secretRef, { secretKey, atualizado_em: FieldValue.serverTimestamp() }, { merge: true });
+        }
+        await batch.commit();
+        return res.status(200).json({ configured: true });
+    } catch (error) {
+        console.error('Erro ao configurar Stone Connect:', error.message);
+        return res.status(error.status || 500).json({ message: error.message });
+    }
+});
+
+// Cria uma cobrança na maquininha Stone (Connect 2.0 / Pagar.me Orders API) — mesmo papel do
 // criarCobrancaPoint acima, mas para o terminal físico Stone do cliente.
 // Chamada pelo dashboard (caixa.js) quando o provedor configurado é "stone".
 export const criarCobrancaStone = onRequest(
-    { secrets: [STONE_SECRET_KEY] },
     async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
 
     if (req.method === 'OPTIONS') {
         res.set('Access-Control-Allow-Methods', 'POST');
-        res.set('Access-Control-Allow-Headers', 'Content-Type');
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
         return res.status(204).send('');
     }
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
 
     try {
-        const secretKey = STONE_SECRET_KEY.value();
-        if (!secretKey) {
-            console.error("STONE_SECRET_KEY não configurado.");
-            return res.status(500).json({ message: "Configuração de pagamento (Stone) ausente no servidor." });
-        }
-
+        await exigirUsuario(req);
         const { amount, externalReference, description } = req.body;
-        if (!amount || !externalReference) {
+        if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || !externalReference) {
             return res.status(400).json({ message: "Informe amount e externalReference." });
         }
 
-        // Número de série do terminal fica na config (pode mudar se a maquininha
-        // for trocada) — não é segredo, só identifica o equipamento físico.
         const configSnap = await db.collection('configuracoes').doc('pagamentos').get();
-        const serial = configSnap.exists ? configSnap.data()?.stoneDeviceSerial : null;
+        const cfg = configSnap.exists ? (configSnap.data() || {}) : {};
+        const serial = cfg.stoneDeviceSerial || null;
         if (!serial) {
-            return res.status(500).json({ message: "Terminal Stone não configurado (stoneDeviceSerial ausente)." });
+            return res.status(500).json({ message: "Terminal Stone não configurado (número de série ausente)." });
+        }
+
+        const refererName = String(cfg.stoneServiceRefererName || '').trim();
+        if (!refererName) {
+            return res.status(500).json({ message: "Stone Connect nao homologado (ServiceRefererName ausente)." });
+        }
+
+        const secretSnap = await db.collection('integracao_secrets').doc('stone_connect').get();
+        const secretKey = secretSnap.exists ? String(secretSnap.data()?.secretKey || '').trim() : '';
+        if (!secretKey) {
+            return res.status(500).json({ message: "Secret Key do Stone Connect nao configurada no servidor." });
         }
 
         const amountCentavos = Math.round(Number(amount) * 100);
@@ -249,6 +333,7 @@ export const criarCobrancaStone = onRequest(
         const response = await axios.post(
             'https://api.pagar.me/core/v5/orders/',
             {
+                code: externalReference,
                 closed: false,
                 items: [{
                     amount: amountCentavos,
@@ -264,14 +349,14 @@ export const criarCobrancaStone = onRequest(
                     print_order_receipt: false,
                 },
             },
-            { headers: { Authorization: authHeader, 'Content-Type': 'application/json' } }
+            { headers: { Authorization: authHeader, ServiceRefererName: refererName, 'Content-Type': 'application/json' } }
         );
 
         return res.status(200).json(response.data);
 
     } catch (error) {
         console.error("Erro ao criar cobrança Stone:", error.response?.data || error.message);
-        return res.status(error.response?.status || 500).json(error.response?.data || { message: error.message });
+        return res.status(error.status || error.response?.status || 500).json(error.response?.data || { message: error.message });
     }
 });
 
@@ -333,7 +418,7 @@ export const mercadoPagoWebhook = onRequest(
     try {
         const paymentId = req.query['data.id'] || req.body?.data?.id || req.query.id;
         const topic = req.query.topic || req.query.type || req.body?.type;
-        const accessToken = MERCADOPAGO_ACCESS_TOKEN.value();
+        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
 
         if (topic === 'point_integration_ipn') {
             if (!paymentId) return res.status(200).send('ignorado');
