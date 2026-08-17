@@ -1529,7 +1529,13 @@ function AppCliente() {
         `https://api.mercadopago.com/v1/payment_methods/search?public_key=${clientConfig.mercadoPagoPublicKey}&bin=${bin}`
       );
       const pmData = await responsePM.json();
-      const paymentMethodId = pmData?.results?.[0]?.id;
+      // O results[0] nem sempre é o cartão — pra esse BIN a API pode listar
+      // "Mercado Crédito"/Pix/saldo antes da bandeira de verdade. Filtra
+      // explicitamente por crédito/débito ativo.
+      const metodoCartao = (pmData?.results || []).find(
+        (r: any) => (r.payment_type_id === 'credit_card' || r.payment_type_id === 'debit_card') && r.status === 'active'
+      );
+      const paymentMethodId = metodoCartao?.id;
       if (!paymentMethodId) {
         throw new Error("Não foi possível identificar a bandeira do cartão.");
       }
