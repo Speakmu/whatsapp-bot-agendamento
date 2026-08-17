@@ -45,6 +45,21 @@ const BRAND_WHITE = '#ffffff';
 const BRAND_NAME = 'Lileamar Salgados';
 const BRAND_LOGO = require('../assets/images/lileamar-logo.jpeg');
 
+// Identifica o payment_method_id (visa/master/...) pelo prefixo do número —
+// o endpoint payment_methods/search?bin= do Mercado Pago não filtra de
+// verdade com essa credencial (testado: devolve o catálogo inteiro, sempre
+// os mesmos 79 resultados, com ou sem o parâmetro bin), então a bandeira
+// tem que ser detectada localmente antes de cobrar via API direta.
+function detectarPaymentMethodId(numero: string): string | null {
+  const n = numero.replace(/\D/g, '');
+  if (/^4/.test(n)) return 'visa';
+  if (/^5[1-5]/.test(n) || /^2(2[2-9]|[3-6]\d|7[01])/.test(n)) return 'master';
+  if (/^3[47]/.test(n)) return 'amex';
+  if (/^(4011|4312|4389|4514|4573|6277|6362|6363|650[35]|6516|6550)/.test(n)) return 'elo';
+  if (/^(606282|3841|637)/.test(n)) return 'hipercard';
+  return null;
+}
+
 // Estilos de identidade configuráveis no GestorChef (Marketing & App)
 const FONT_STYLE_MAP: Record<string, { fontFamily?: string; fontWeight?: any; fontStyle?: any }> = {
   italico: { fontFamily: Platform.OS === 'ios' ? 'Snell Roundhand' : 'serif', fontStyle: 'italic', fontWeight: '700' },
@@ -1519,26 +1534,14 @@ function AppCliente() {
         throw new Error("Mês da validade inválido.");
       }
 
-      // --- PASSO A0: Identificar a bandeira pelo BIN (6 primeiros dígitos) ---
+      // --- PASSO A0: Identificar a bandeira pelo número do cartão ---
       // O Mercado Pago exige payment_method_id (visa/master/...) pra cobrar
       // via API direta — sem isso o pagamento é recusado com um erro sem
       // status_detail, que aparecia como "Motivo: undefined" pro cliente.
       const numeroLimpo = dadosCartaoEnviados.numero.replace(/\s/g, '');
-      const bin = numeroLimpo.slice(0, 6);
-      const responsePM = await fetch(
-        `https://api.mercadopago.com/v1/payment_methods/search?public_key=${clientConfig.mercadoPagoPublicKey}&bin=${bin}`
-      );
-      const pmData = await responsePM.json();
-      // O results[0] nem sempre é o cartão — pra esse BIN a API pode listar
-      // "Mercado Crédito"/Pix/saldo antes da bandeira de verdade. Filtra
-      // explicitamente por crédito/débito ativo.
-      const metodoCartao = (pmData?.results || []).find(
-        (r: any) => (r.payment_type_id === 'credit_card' || r.payment_type_id === 'debit_card') && r.status === 'active'
-      );
-      const paymentMethodId = metodoCartao?.id;
+      const paymentMethodId = detectarPaymentMethodId(numeroLimpo);
       if (!paymentMethodId) {
-        console.error("Nenhum metodo de cartao pro BIN:", bin, JSON.stringify(pmData));
-        throw new Error(`Não foi possível identificar a bandeira do cartão (BIN ${bin} não reconhecido pelo Mercado Pago).`);
+        throw new Error("Não foi possível identificar a bandeira do cartão pelo número informado.");
       }
 
       // --- PASSO A: Gerar Token do Cartão ---
