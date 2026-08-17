@@ -1205,6 +1205,9 @@ function AppCliente() {
     validade: '',
     cvv: ''
   });
+  // Opt-in explícito pra guardar os dados do cartão no aparelho (SecureStore)
+  // e pré-preencher da próxima vez — antes salvava sempre, sem perguntar.
+  const [salvarCartao, setSalvarCartao] = useState(true);
 
   const calcularSubtotal = () =>
     carrinho.reduce((acc, item) => acc + (Number(item.preco) || 0), 0);
@@ -1636,13 +1639,19 @@ function AppCliente() {
         }
         // 3. Salva os dados locais (Segurança e Cache)
         await SecureStore.setItemAsync('endereco_salvo', endereco);
-        const dadosParaSalvar = {
-          numero: dadosCartaoEnviados.numero,
-          nomeTitular: dadosCartaoEnviados.nomeTitular,
-          cpf: dadosCartaoEnviados.cpf,
-          validade: dadosCartaoEnviados.validade
-        };
-        await SecureStore.setItemAsync('dados_cartao', JSON.stringify(dadosParaSalvar));
+        // Cartão só é salvo se o cliente marcou a opção no modal — antes
+        // salvava sempre, sem pedir permissão.
+        if (salvarCartao) {
+          const dadosParaSalvar = {
+            numero: dadosCartaoEnviados.numero,
+            nomeTitular: dadosCartaoEnviados.nomeTitular,
+            cpf: dadosCartaoEnviados.cpf,
+            validade: dadosCartaoEnviados.validade
+          };
+          await SecureStore.setItemAsync('dados_cartao', JSON.stringify(dadosParaSalvar));
+        } else {
+          await SecureStore.deleteItemAsync('dados_cartao');
+        }
 
         // 4. Registra o pedido no Firestore
         try {
@@ -2363,7 +2372,21 @@ function AppCliente() {
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.btnModal, { backgroundColor: BRAND_GREEN, marginTop: 25, width: '100%', alignItems: 'center' }]}
+                  onPress={() => setSalvarCartao(!salvarCartao)}
+                  style={{
+                    marginTop: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    padding: 12, borderWidth: 1, borderColor: salvarCartao ? BRAND_GREEN : '#ddd',
+                    borderRadius: 8, backgroundColor: salvarCartao ? '#eafaf1' : '#fff', width: '100%'
+                  }}
+                >
+                  <Text style={{ fontWeight: '600', color: '#2d3436' }}>💳 Salvar dados do cartão</Text>
+                  <Text style={{ fontWeight: 'bold', color: salvarCartao ? BRAND_GREEN : '#999' }}>
+                    {salvarCartao ? 'Ativado ✓' : 'Desativado'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.btnModal, { backgroundColor: BRAND_GREEN, marginTop: 15, width: '100%', alignItems: 'center' }]}
                   onPress={() => {
                     setModalCartaoVisivel(false);
                     processarPagamentoAPI(dadosCartao);
