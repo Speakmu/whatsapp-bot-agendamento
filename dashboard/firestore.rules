@@ -71,6 +71,13 @@ service cloud.firestore {
     match /configuracoes/{id} {
       allow read, write: if request.auth != null;
     }
+    // configuracoes/bot tem campos que o app do cliente precisa ler sem
+    // login (horario_funcionamento, bairros_entrega, taxa_entrega) — o app
+    // nunca autentica no Firebase Auth, só guarda o perfil num doc próprio.
+    // Escrita continua só pro painel (regra acima, combinada por OR).
+    match /configuracoes/bot {
+      allow read: if true;
+    }
     match /historico_conversas/{id} {
       allow read, write: if request.auth != null;
     }
