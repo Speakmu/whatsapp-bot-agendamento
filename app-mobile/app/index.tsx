@@ -1516,6 +1516,21 @@ function AppCliente() {
         throw new Error("Mês da validade inválido.");
       }
 
+      // --- PASSO A0: Identificar a bandeira pelo BIN (6 primeiros dígitos) ---
+      // O Mercado Pago exige payment_method_id (visa/master/...) pra cobrar
+      // via API direta — sem isso o pagamento é recusado com um erro sem
+      // status_detail, que aparecia como "Motivo: undefined" pro cliente.
+      const numeroLimpo = dadosCartaoEnviados.numero.replace(/\s/g, '');
+      const bin = numeroLimpo.slice(0, 6);
+      const responsePM = await fetch(
+        `https://api.mercadopago.com/v1/payment_methods/search?public_key=${clientConfig.mercadoPagoPublicKey}&bin=${bin}`
+      );
+      const pmData = await responsePM.json();
+      const paymentMethodId = pmData?.results?.[0]?.id;
+      if (!paymentMethodId) {
+        throw new Error("Não foi possível identificar a bandeira do cartão.");
+      }
+
       // --- PASSO A: Gerar Token do Cartão ---
       const responseToken = await fetch(`https://api.mercadopago.com/v1/card_tokens?public_key=${clientConfig.mercadoPagoPublicKey}`, {
         method: 'POST',
@@ -1548,6 +1563,7 @@ function AppCliente() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: tokenData.id,
+          payment_method_id: paymentMethodId,
           item: {
             title: `Pedido ${nomeAppExibicao}`,
             total: parseFloat(calcularTotal()),
@@ -1663,7 +1679,7 @@ function AppCliente() {
         }
 
       } else {
-        Alert.alert("Pagamento Recusado", `Motivo: ${resultado.status_detail || resultado.status}`);
+        Alert.alert("Pagamento Recusado", `Motivo: ${resultado.status_detail || resultado.status || resultado.message || 'não foi possível processar o cartão.'}`);
       }
 
     } catch (error: any) {
