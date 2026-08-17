@@ -247,6 +247,15 @@ const SecaoSacola = ({
     cpf: ''
   });
 
+  // Seletor de bairro (modal com busca) — lista pode ter dezenas de bairros,
+  // então em vez de chips preenchendo a tela toda, mostra um campo tipo
+  // dropdown que abre uma lista pesquisável.
+  const [modalBairroVisivel, setModalBairroVisivel] = useState(false);
+  const [buscaBairro, setBuscaBairro] = useState('');
+  const bairrosFiltrados = bairrosEntrega.filter((b: string) =>
+    b.toLowerCase().includes(buscaBairro.trim().toLowerCase())
+  );
+
   return (
 
     <View style={{ flex: 1 }}>
@@ -312,21 +321,15 @@ const SecaoSacola = ({
                 {bairrosEntrega.length > 0 && (
                   <>
                     <Text style={[styles.labelInput, { marginTop: 16 }]}>Bairro</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {bairrosEntrega.map(b => (
-                        <TouchableOpacity
-                          key={b}
-                          onPress={() => setBairro(b)}
-                          style={{
-                            paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20,
-                            borderWidth: 1, borderColor: bairro === b ? corMarca : '#ddd',
-                            backgroundColor: bairro === b ? corMarca : '#fff'
-                          }}
-                        >
-                          <Text style={{ color: bairro === b ? '#fff' : '#2d3436', fontWeight: '600', fontSize: 13 }}>{b}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
+                    <TouchableOpacity
+                      onPress={() => { setBuscaBairro(''); setModalBairroVisivel(true); }}
+                      style={[styles.inputCheckout, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}
+                    >
+                      <Text style={{ color: bairro ? '#2d3436' : '#999', fontSize: 15 }}>
+                        {bairro || 'Selecione o bairro'}
+                      </Text>
+                      <Text style={{ color: '#999' }}>▾</Text>
+                    </TouchableOpacity>
                     {taxaEntrega > 0 && (
                       <Text style={{ fontSize: 12, color: '#888', marginTop: 6 }}>
                         Taxa de entrega: R$ {taxaEntrega.toFixed(2)}
@@ -492,6 +495,54 @@ const SecaoSacola = ({
           )}
         </View>
       )}
+
+      <Modal
+        visible={modalBairroVisivel}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setModalBairroVisivel(false)}
+      >
+        <View style={styles.overlayModal}>
+          <View style={[styles.cardModal, { maxHeight: '75%', padding: 16 }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={styles.tituloCheckout}>Selecione o bairro</Text>
+              <TouchableOpacity onPress={() => setModalBairroVisivel(false)}>
+                <Text style={{ fontSize: 16, fontWeight: 'bold', color: '#2d3436' }}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={styles.inputCheckout}
+              value={buscaBairro}
+              onChangeText={setBuscaBairro}
+              placeholder="Buscar bairro..."
+              autoFocus
+            />
+            <FlatList
+              data={bairrosFiltrados}
+              keyExtractor={(item) => item}
+              style={{ marginTop: 8 }}
+              keyboardShouldPersistTaps="handled"
+              ListEmptyComponent={
+                <Text style={{ color: '#999', textAlign: 'center', padding: 16 }}>Nenhum bairro encontrado.</Text>
+              }
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  onPress={() => { setBairro(item); setModalBairroVisivel(false); }}
+                  style={{
+                    paddingVertical: 12, paddingHorizontal: 4,
+                    borderBottomWidth: 1, borderBottomColor: '#eee',
+                    backgroundColor: bairro === item ? '#f5f5f5' : 'transparent'
+                  }}
+                >
+                  <Text style={{ fontSize: 15, color: bairro === item ? corMarca : '#2d3436', fontWeight: bairro === item ? '700' : '400' }}>
+                    {item}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
