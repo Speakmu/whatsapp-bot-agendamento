@@ -32,7 +32,7 @@ import {
   SafeAreaProvider,
   useSafeAreaInsets
 } from 'react-native-safe-area-context';
-import { finalizarPedido } from '../services/pedidoService';
+import { finalizarPedido, checarDisponibilidadeCarrinho } from '../services/pedidoService';
 import { firebaseConfig } from '../firebaseConfig';
 import { clientConfig } from '../clientConfig';
 
@@ -113,6 +113,10 @@ interface SacolaProps {
   setTelefone: (t: string) => void;
   endereco: string;
   setEndereco: (t: string) => void;
+  bairro: string;
+  setBairro: (t: string) => void;
+  bairrosEntrega: string[];
+  taxaEntrega: number;
   metodoPagamento: string;
   setMetodoPagamento: (t: string) => void;
   tipoEntrega: string;
@@ -219,7 +223,8 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus }: PedidosProp
 // --- COMPONENTE SEÇÃO SACOLA (MEMORIZADO) ---
 const SecaoSacola = ({
   carrinho, setCarrinho, nome, setNome, telefone, setTelefone,
-  endereco, setEndereco, metodoPagamento, setMetodoPagamento,
+  endereco, setEndereco, bairro, setBairro, bairrosEntrega = [], taxaEntrega = 0,
+  metodoPagamento, setMetodoPagamento,
   tipoEntrega, setTipoEntrega,
   calcularTotal, carregandoLogin, insets, styles, usuarioId,
   setAbaAtiva, finalizarPedido,
@@ -304,13 +309,38 @@ const SecaoSacola = ({
 
             {tipoEntrega === 'entrega' && (
               <>
-                <Text style={[styles.labelInput, { marginTop: 16 }]}>Endereço Completo</Text>
+                {bairrosEntrega.length > 0 && (
+                  <>
+                    <Text style={[styles.labelInput, { marginTop: 16 }]}>Bairro</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {bairrosEntrega.map(b => (
+                        <TouchableOpacity
+                          key={b}
+                          onPress={() => setBairro(b)}
+                          style={{
+                            paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20,
+                            borderWidth: 1, borderColor: bairro === b ? corMarca : '#ddd',
+                            backgroundColor: bairro === b ? corMarca : '#fff'
+                          }}
+                        >
+                          <Text style={{ color: bairro === b ? '#fff' : '#2d3436', fontWeight: '600', fontSize: 13 }}>{b}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                    {taxaEntrega > 0 && (
+                      <Text style={{ fontSize: 12, color: '#888', marginTop: 6 }}>
+                        Taxa de entrega: R$ {taxaEntrega.toFixed(2)}
+                      </Text>
+                    )}
+                  </>
+                )}
+                <Text style={[styles.labelInput, { marginTop: 16 }]}>Rua e número</Text>
                 <TextInput
                   style={[styles.inputCheckout, { height: 60 }]}
                   value={endereco}
                   onChangeText={setEndereco}
                   multiline
-                  placeholder="Rua, número, bairro..."
+                  placeholder="Rua, número, complemento..."
                 />
               </>
             )}
@@ -403,6 +433,14 @@ const SecaoSacola = ({
               </Text>
             </View>
           )}
+          {tipoEntrega === 'entrega' && taxaEntrega > 0 && (
+            <View style={[styles.linhaTotal, { marginBottom: 4 }]}>
+              <Text style={{ fontSize: 14, color: '#888' }}>Taxa de entrega</Text>
+              <Text style={{ fontSize: 14, color: '#888', fontWeight: '600' }}>
+                + R$ {taxaEntrega.toFixed(2)}
+              </Text>
+            </View>
+          )}
           <View style={styles.linhaTotal}>
             <Text style={{ fontSize: 16 }}>Total do pedido</Text>
             <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#2d3436' }}>
@@ -429,12 +467,16 @@ const SecaoSacola = ({
                   );
                   return;
                 }
+                if (tipoEntrega === 'entrega' && bairrosEntrega.length > 0 && !bairro) {
+                  Alert.alert('Bairro', 'Selecione o bairro da entrega.');
+                  return;
+                }
                 if (metodoPagamento === 'cartao') {
                   setModalCartaoVisivel(true);
                 } else if (metodoPagamento === 'pix') {
                   processarPagamentoPix();
                 } else {
-                  finalizarPedido({ carrinho, usuarioId, nome, telefone, endereco, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados });
+                  finalizarPedido({ carrinho, usuarioId, nome, telefone, endereco, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados });
                 }
               }}
             >
@@ -1054,14 +1096,19 @@ function AppCliente() {
     return () => unsub();
   }, []);
 
-  // --- Horário de funcionamento (compartilhado com o bot do WhatsApp) ---
+  // --- Horário de funcionamento + bairros/taxa de entrega (mesma config do bot do WhatsApp) ---
   const [horarioCfg, setHorarioCfg] = useState<any>(null);
   const [lojaFechada, setLojaFechada] = useState(false);
   const [horarioTexto, setHorarioTexto] = useState('');
+  const [bairro, setBairro] = useState('');
+  const [bairrosEntrega, setBairrosEntrega] = useState<string[]>([]);
+  const [taxaEntrega, setTaxaEntrega] = useState(0);
   useEffect(() => {
     const unsub = onSnapshot(doc(dbModular, 'configuracoes', 'bot'), (s: any) => {
       const d = s && s.exists() ? (s.data() || {}) : {};
       setHorarioCfg(d.horario_funcionamento || null);
+      setBairrosEntrega(Array.isArray(d.bairros_entrega) ? d.bairros_entrega : []);
+      setTaxaEntrega(Number(d.taxa_entrega) || 0);
     }, () => { });
     return () => unsub();
   }, []);
@@ -1136,8 +1183,11 @@ function AppCliente() {
   const pontosUsados = () =>
     valorPorPonto > 0 ? Math.round(calcularDescontoResgate() / valorPorPonto) : 0;
 
+  // Taxa de entrega soma no total pago de verdade (inclusive PIX/cartão) —
+  // igual ao bot, que sempre inclui taxa_entrega no valor_total do pedido.
   const calcularTotal = () =>
-    Math.max(0, calcularSubtotal() - calcularDesconto() - calcularDescontoResgate()).toFixed(2);
+    Math.max(0, calcularSubtotal() - calcularDesconto() - calcularDescontoResgate()
+      + (tipoEntrega === 'entrega' ? taxaEntrega : 0)).toFixed(2);
 
   const aplicarCupom = async () => {
     const code = (cupom || '').trim().toUpperCase();
@@ -1259,9 +1309,14 @@ function AppCliente() {
   };
 
   const processarPagamentoPix = async () => {
-    // 0. Endereço obrigatório apenas em entrega
+    // 0. Endereço/bairro obrigatórios apenas em entrega
     if (tipoEntrega === 'entrega' && (!endereco || endereco.trim() === '')) {
       Alert.alert("Atenção", "Preencha o endereço de entrega antes de pagar.");
+      setAbaAtiva('sacola');
+      return;
+    }
+    if (tipoEntrega === 'entrega' && bairrosEntrega.length > 0 && !bairro) {
+      Alert.alert("Atenção", "Selecione o bairro da entrega.");
       setAbaAtiva('sacola');
       return;
     }
@@ -1274,6 +1329,9 @@ function AppCliente() {
     }
 
     if (carrinho.length === 0) return;
+
+    const disponivelOk = await checarDisponibilidadeCarrinho(carrinho, setCarrinho);
+    if (!disponivelOk) return;
 
     setCarregandoLogin(true);
 
@@ -1333,6 +1391,8 @@ function AppCliente() {
           telefone_cliente: telefone,
           tipo_entrega: tipoEntrega === 'retirada' ? 'RETIRADA' : 'ENTREGA',
           endereco: tipoEntrega === 'retirada' ? 'Retirada no balcão' : endereco,
+          bairro: tipoEntrega === 'retirada' ? null : (bairro || null),
+          taxa_entrega: tipoEntrega === 'entrega' ? taxaEntrega : 0,
           itens: itensFormatados, // 🔥 Lista agrupada e formatada
           valor_total: calcularTotal(),
           forma_pagamento: 'PIX', // 🔥 CORREÇÃO: Mudado de CARTAO para PIX
@@ -1382,6 +1442,14 @@ function AppCliente() {
       setAbaAtiva('sacola');
       return;
     }
+    if (tipoEntrega === 'entrega' && bairrosEntrega.length > 0 && !bairro) {
+      Alert.alert("Atenção", "Selecione o bairro da entrega.");
+      setAbaAtiva('sacola');
+      return;
+    }
+    const disponivelOk = await checarDisponibilidadeCarrinho(carrinho, setCarrinho);
+    if (!disponivelOk) return;
+
     setCarregandoLogin(true);
     try {
       // 2. Validade tolerante: aceita "MM/AA" ou "MMAA" (ex.: 11/30 ou 1130)
@@ -1518,6 +1586,8 @@ function AppCliente() {
             telefone_cliente: telefone,
             tipo_entrega: tipoEntrega === 'retirada' ? 'RETIRADA' : 'ENTREGA',
             endereco: tipoEntrega === 'retirada' ? 'Retirada no balcão' : endereco,
+            bairro: tipoEntrega === 'retirada' ? null : (bairro || null),
+            taxa_entrega: tipoEntrega === 'entrega' ? taxaEntrega : 0,
             itens: itensFormatados,
             valor_total: calcularTotal(),
             pontos_gerados: totalPontosGanhos,
@@ -2019,6 +2089,10 @@ function AppCliente() {
                 setTelefone={setTelefone}
                 endereco={endereco}
                 setEndereco={setEndereco}
+                bairro={bairro}
+                setBairro={setBairro}
+                bairrosEntrega={bairrosEntrega}
+                taxaEntrega={taxaEntrega}
                 metodoPagamento={metodoPagamento}
                 setMetodoPagamento={setMetodoPagamento}
                 tipoEntrega={tipoEntrega}
