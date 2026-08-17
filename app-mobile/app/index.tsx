@@ -1537,7 +1537,8 @@ function AppCliente() {
       );
       const paymentMethodId = metodoCartao?.id;
       if (!paymentMethodId) {
-        throw new Error("Não foi possível identificar a bandeira do cartão.");
+        console.error("Nenhum metodo de cartao pro BIN:", bin, JSON.stringify(pmData));
+        throw new Error(`Não foi possível identificar a bandeira do cartão (BIN ${bin} não reconhecido pelo Mercado Pago).`);
       }
 
       // --- PASSO A: Gerar Token do Cartão ---
@@ -1562,8 +1563,9 @@ function AppCliente() {
       const tokenData = await responseToken.json();
 
       if (!tokenData.id) {
-        console.error("Erro MP Token:", tokenData);
-        throw new Error("Dados do cartão recusados pelo Mercado Pago.");
+        console.error("Erro MP Token:", JSON.stringify(tokenData));
+        const msgToken = tokenData?.message || tokenData?.cause?.[0]?.description || 'dados do cartão recusados.';
+        throw new Error(`Cartão recusado pelo Mercado Pago: ${msgToken}`);
       }
 
       // --- PASSO B: Processar Pagamento na Cloud Function ---
