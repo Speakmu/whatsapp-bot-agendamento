@@ -68,7 +68,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const hero = $('hero');
         if (!heroUrl) { hero.classList.remove('tem-imagem'); return; }
         $('hero-img').src = heroUrl;
-        $('hero-texto').textContent = bannerTexto || '';
+        // Sem texto do banner aqui de propósito: bannerTexto costuma anunciar
+        // cupom de desconto ("use o código X"), mas o totem não tem onde o
+        // cliente digitar cupom — mostrar isso só confunde. Fica só a imagem.
+        $('hero-texto').textContent = '';
         hero.classList.add('tem-imagem');
     }
 
@@ -170,6 +173,17 @@ document.addEventListener('DOMContentLoaded', () => {
             card.addEventListener('click', () => adicionarAoCarrinho(card.dataset.id));
         });
     }
+
+    // ---------- Sair (equipe) ----------
+    // Ícone discreto no cabeçalho — o totem não tem login/menu nenhum de
+    // propósito (é tela pública), então isso é só um jeito da equipe voltar
+    // pro painel sem precisar fechar o navegador. Confirmação evita que um
+    // toque acidental do cliente derrube o totem no meio de um pedido.
+    $('btn-sair-totem').addEventListener('click', () => {
+        if (confirm('Sair do totem e voltar pro painel?')) {
+            window.location.href = '/login.html';
+        }
+    });
 
     // ---------- Busca ----------
     $('btn-busca').addEventListener('click', () => {
