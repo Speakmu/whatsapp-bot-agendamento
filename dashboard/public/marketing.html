@@ -175,6 +175,21 @@
                 </div>
             </div>
 
+            <div class="box">
+                <h2>🖥️ Totem — tela de boas-vindas</h2>
+                <div class="sub">Imagem de fundo da tela inicial do totem de autoatendimento ("Faça seu Pedido aqui!"). A tela do cardápio do totem já usa o mesmo banner configurado acima — só essa tela inicial precisa de uma imagem própria. Use uma imagem vertical (retrato), já que o totem fica na posição de tela cheia em pé.</div>
+                <div class="campo"><label>Imagem de fundo</label>
+                    <input type="file" id="totem-bv-file" accept="image/*">
+                    <small style="display:block; color:var(--muted); font-size:.78rem; margin-top:5px;">
+                        Resolução ideal: retrato (ex.: 1080×1920px) — a tela do totem fica na vertical.
+                    </small>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <img id="totem-bv-preview" src="" style="display:none; max-height:140px; max-width:100%; border:1px solid var(--line); border-radius:8px; padding:4px; background:#fff;">
+                    <button type="button" class="btn btn-rm" id="totem-bv-remover" style="display:none;">Remover imagem</button>
+                </div>
+            </div>
+
             <div class="box" data-grupo="topo">
                 <h2>🥇 Destaque — Topo</h2>
                 <div class="sub">Primeira vitrine exibida no app, antes do cardápio completo.</div>

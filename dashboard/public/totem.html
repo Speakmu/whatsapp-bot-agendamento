@@ -239,6 +239,78 @@
         .btn-primario { background: var(--marca); color: #fff; flex: 1; }
         .btn-secundario { background: #eef2f7; color: #2c3e50; }
 
+        /* ---------- Tela de boas-vindas (ociosa) ---------- */
+        .tela-boas-vindas {
+            position: fixed; inset: 0;
+            background: linear-gradient(160deg, var(--marca), var(--marca-escura, #17421f));
+            background-size: cover;
+            background-position: center;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            text-align: center;
+            z-index: 100;
+            cursor: pointer;
+            padding: 0 24px 64px;
+        }
+        .tela-boas-vindas.aberta { display: flex; }
+        .tela-boas-vindas.tem-imagem { background-image: var(--bv-img); }
+        .tela-boas-vindas h1 {
+            font-size: 2.6rem;
+            font-weight: 900;
+            color: #fff;
+            text-shadow: 0 2px 14px rgba(0,0,0,.45);
+            margin-bottom: 28px;
+        }
+        .tela-boas-vindas .pill {
+            background: #fff;
+            color: var(--marca-escura, #17421f);
+            font-weight: 800;
+            font-size: 1.15rem;
+            letter-spacing: .03em;
+            padding: 18px 40px;
+            border-radius: 40px;
+            animation: pulsar 1.6s ease-in-out infinite;
+        }
+        @keyframes pulsar { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+
+        /* ---------- Tela: comer aqui ou levar ---------- */
+        .tela-consumo {
+            position: fixed; inset: 0;
+            background: #fff;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 34px;
+            z-index: 90;
+            text-align: center;
+            padding: 24px;
+        }
+        .tela-consumo.aberta { display: flex; }
+        .tela-consumo h2 { font-size: 1.9rem; color: #2c3e50; font-weight: 800; }
+        .tela-consumo .opcoes { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
+        .tela-consumo .opcao {
+            width: 240px;
+            padding: 40px 24px;
+            border-radius: 22px;
+            border: 2px solid #e1e5ea;
+            background: #fff;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+        }
+        .tela-consumo .opcao:active { transform: scale(.97); }
+        .tela-consumo .opcao .icone { font-size: 3rem; }
+        .tela-consumo .opcao .rotulo { font-size: 1.15rem; font-weight: 800; color: #2c3e50; }
+        .tela-consumo .voltar {
+            background: none; border: none; color: #7f8c8d; font-size: .95rem;
+            font-weight: 700; cursor: pointer; text-decoration: underline;
+        }
+
         /* ---------- Tela de confirmação (senha) ---------- */
         .tela-confirmacao {
             position: fixed; inset: 0;
@@ -285,6 +357,28 @@
 </head>
 
 <body>
+    <!-- Tela 1: boas-vindas / ociosa -->
+    <div class="tela-boas-vindas aberta" id="tela-boas-vindas">
+        <h1>Faça seu Pedido aqui!</h1>
+        <div class="pill">Toque na tela para iniciar</div>
+    </div>
+
+    <!-- Tela 2: comer aqui ou levar -->
+    <div class="tela-consumo" id="tela-consumo">
+        <h2>Como vai ser hoje?</h2>
+        <div class="opcoes">
+            <button class="opcao" type="button" data-consumo="LOCAL">
+                <span class="icone">🍽️</span>
+                <span class="rotulo">Comer aqui</span>
+            </button>
+            <button class="opcao" type="button" data-consumo="RETIRADA">
+                <span class="icone">🥡</span>
+                <span class="rotulo">Levar</span>
+            </button>
+        </div>
+        <button class="voltar" id="btn-voltar-boas-vindas" type="button">← Voltar</button>
+    </div>
+
     <header class="topo">
         <div class="marca">
             <img id="topo-logo" src="" alt="" style="display:none">

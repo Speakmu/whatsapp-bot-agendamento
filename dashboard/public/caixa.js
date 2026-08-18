@@ -305,7 +305,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }).join('');
             const disabled = sessaoAtual ? '' : 'disabled';
             const label = sessaoAtual ? 'Receber' : 'Abra o caixa';
-            const rotulo = p.origem === 'TOTEM' ? `Senha ${escapeHtml(p.senha || '-')}` : `Mesa ${escapeHtml(p.mesa_numero || '-')}`;
+            const consumoTotem = p.tipo_consumo === 'LOCAL' ? ' · Comer aqui' : (p.origem === 'TOTEM' ? ' · Levar' : '');
+            const rotulo = p.origem === 'TOTEM' ? `Senha ${escapeHtml(p.senha || '-')}${consumoTotem}` : `Mesa ${escapeHtml(p.mesa_numero || '-')}`;
             return `<div class="mesa-pendente">
                 <div class="linha-topo">
                     <span class="mesa-num">${rotulo}</span>
@@ -340,7 +341,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const pedido = comandasPendentes.find(p => p.id === pedidoId);
         if (!pedido) return;
         const total = Number(pedido.valor_total) || 0;
-        const rotulo = pedido.origem === 'TOTEM' ? `Senha ${pedido.senha}` : `Mesa ${pedido.mesa_numero}`;
+        const consumoTotem = pedido.tipo_consumo === 'LOCAL' ? ' (Comer aqui)' : (pedido.origem === 'TOTEM' ? ' (Levar)' : '');
+        const rotulo = pedido.origem === 'TOTEM' ? `Senha ${pedido.senha}${consumoTotem}` : `Mesa ${pedido.mesa_numero}`;
         if (!confirm(`Receber ${rotulo}?\nTotal: ${money(total)}\nPagamento: ${formaRecebimento}`)) return;
 
         const chave = CHAVE_PAG[formaRecebimento] || "Dinheiro";

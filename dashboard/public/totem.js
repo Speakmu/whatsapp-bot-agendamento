@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let carrinho = []; // [{ id, nome, nome_exibicao, preco, categoria, qtd }]
     let nomeLoja = 'Autoatendimento';
     let bannerTexto = '';
+    let tipoConsumo = null; // 'LOCAL' | 'RETIRADA' — escolhido na tela 2
 
     function money(v) {
         return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ',');
@@ -60,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const d = snap.exists ? (snap.data() || {}) : {};
         heroUrl = d.heroUrl || '';
         renderHero();
+        renderBoasVindas(d.totemBoasVindasUrl || '');
     }, () => {});
 
     function renderHero() {
@@ -69,6 +71,34 @@ document.addEventListener('DOMContentLoaded', () => {
         $('hero-texto').textContent = bannerTexto || '';
         hero.classList.add('tem-imagem');
     }
+
+    // ---------- Imagem de fundo da tela de boas-vindas (tela 1) ----------
+    function renderBoasVindas(url) {
+        const tela = $('tela-boas-vindas');
+        if (!url) { tela.classList.remove('tem-imagem'); return; }
+        tela.style.setProperty('--bv-img', `url('${url}')`);
+        tela.classList.add('tem-imagem');
+    }
+
+    // ---------- Navegação entre telas 1 → 2 → 3 ----------
+    function irParaConsumo() {
+        $('tela-boas-vindas').classList.remove('aberta');
+        $('tela-consumo').classList.add('aberta');
+    }
+    function voltarBoasVindas() {
+        tipoConsumo = null;
+        $('tela-consumo').classList.remove('aberta');
+        $('tela-boas-vindas').classList.add('aberta');
+    }
+    function irParaCardapio(consumo) {
+        tipoConsumo = consumo;
+        $('tela-consumo').classList.remove('aberta');
+    }
+    $('tela-boas-vindas').addEventListener('click', irParaConsumo);
+    $('btn-voltar-boas-vindas').addEventListener('click', voltarBoasVindas);
+    document.querySelectorAll('.tela-consumo .opcao').forEach(btn => {
+        btn.addEventListener('click', () => irParaCardapio(btn.dataset.consumo));
+    });
 
     // ---------- Relógio ----------
     function atualizarRelogio() {
@@ -269,6 +299,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 itens: itensPedido,
                 nome_cliente: `Totem #${senha}`,
                 tipo_entrega: 'RETIRADA',
+                tipo_consumo: tipoConsumo || 'RETIRADA',
                 endereco: 'Retirada no balcão',
                 forma_pagamento: null,
                 valor_total: valorTotal,
@@ -315,9 +346,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const linhas = itens.map(i =>
             `<div class="linha"><span>${escapeHtml(i.nome)}</span><span>${money(i.preco)}</span></div>`
         ).join('');
+        const rotuloConsumo = tipoConsumo === 'LOCAL' ? 'COMER AQUI' : 'LEVAR';
         $('cupom-impressao').innerHTML = `
             <h1>${escapeHtml(nomeLoja)}</h1>
-            <div style="text-align:center">Autoatendimento</div>
+            <div style="text-align:center">Autoatendimento — ${rotuloConsumo}</div>
             <div class="senha-grande">SENHA ${String(senha).padStart(3, '0')}</div>
             <hr>
             ${linhas}
@@ -336,6 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderCategorias();
         renderProdutos();
         $('tela-confirmacao').classList.remove('aberta');
+        voltarBoasVindas();
     });
 
     // Reset automático de segurança: se o cliente sumir sem tocar em "Novo
@@ -350,4 +383,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     observerReset.observe($('tela-confirmacao'), { attributes: true, attributeFilter: ['class'] });
+
+    // Reset por inatividade geral: se o cliente abandonar o totem no meio da
+    // navegação (tela 2 ou catálogo, com ou sem itens no carrinho), volta
+    // sozinho pra tela de boas-vindas depois de um tempo parado, senão o
+    // totem fica "preso" na sessão do cliente anterior.
+    let inatividadeTimer = null;
+    function reiniciarInatividade() {
+        clearTimeout(inatividadeTimer);
+        if ($('tela-boas-vindas').classList.contains('aberta')) return;
+        inatividadeTimer = setTimeout(() => {
+            carrinho = [];
+            categoriaAtiva = 'Todos';
+            atualizarBarraCarrinho();
+            renderCategorias();
+            renderProdutos();
+            $('overlay-carrinho').classList.remove('aberto');
+            voltarBoasVindas();
+        }, 90000);
+    }
+    ['click', 'touchstart'].forEach(evento => document.addEventListener(evento, reiniciarInatividade));
 });

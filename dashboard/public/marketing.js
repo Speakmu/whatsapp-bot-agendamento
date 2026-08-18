@@ -97,6 +97,22 @@ document.addEventListener('DOMContentLoaded', () => {
             $('hero-preview').style.display = 'none';
             $('hero-remover').style.display = 'none';
         });
+        $('totem-bv-file').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            totemBvFileSelecionado = file;
+            $('totem-bv-preview').src = URL.createObjectURL(file);
+            $('totem-bv-preview').style.display = 'inline-block';
+            $('totem-bv-remover').style.display = 'inline-block';
+        });
+        $('totem-bv-remover').addEventListener('click', () => {
+            totemBvFileSelecionado = null;
+            totemBvUrlAtual = '';
+            $('totem-bv-file').value = '';
+            $('totem-bv-preview').src = '';
+            $('totem-bv-preview').style.display = 'none';
+            $('totem-bv-remover').style.display = 'none';
+        });
     });
 
     function setupTabs() {
@@ -275,6 +291,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let produtosCardapio = [];
     let heroFileSelecionado = null; // arquivo novo escolhido, aguardando upload no "Salvar"
     let heroUrlAtual = '';          // heroUrl já salvo no Firestore
+    let totemBvFileSelecionado = null; // idem, pra imagem de fundo da tela de boas-vindas do totem
+    let totemBvUrlAtual = '';
     const destaquesState = {
         topo: { titulo: '', cor: '#e74c3c', limite: 6, produtosIds: [] },
         meio: { titulo: '', cor: '#f39c12', limite: 6, produtosIds: [] },
@@ -293,6 +311,13 @@ document.addEventListener('DOMContentLoaded', () => {
             $('hero-preview').src = heroUrlAtual;
             $('hero-preview').style.display = 'inline-block';
             $('hero-remover').style.display = 'inline-block';
+        }
+
+        totemBvUrlAtual = doc.totemBoasVindasUrl || '';
+        if (totemBvUrlAtual) {
+            $('totem-bv-preview').src = totemBvUrlAtual;
+            $('totem-bv-preview').style.display = 'inline-block';
+            $('totem-bv-remover').style.display = 'inline-block';
         }
 
         const idsValidos = new Set(produtosCardapio.map(p => p.id));
@@ -398,6 +423,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 heroFileSelecionado = null;
             }
 
+            if (totemBvFileSelecionado) {
+                btn.textContent = 'Enviando imagem do totem...';
+                const storageRef = firebase.storage().ref();
+                const fileName = `marca/${Date.now()}_${totemBvFileSelecionado.name}`;
+                const fileRef = storageRef.child(fileName);
+                const snapshot = await fileRef.put(totemBvFileSelecionado);
+                totemBvUrlAtual = await snapshot.ref.getDownloadURL();
+                totemBvFileSelecionado = null;
+            }
+
             const grupos = DESTAQUES_GRUPOS.map(chave => {
                 const box = document.querySelector(`.box[data-grupo="${chave}"]`);
                 const st = destaquesState[chave];
@@ -410,7 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     produtosIds: st.produtosIds.slice(0, limite)
                 };
             });
-            await DESTAQUES.set({ heroUrl: heroUrlAtual || '', grupos }, { merge: true });
+            await DESTAQUES.set({ heroUrl: heroUrlAtual || '', totemBoasVindasUrl: totemBvUrlAtual || '', grupos }, { merge: true });
             flash('Destaques salvos.');
         } catch (e) {
             alert('Erro: ' + e.message);
