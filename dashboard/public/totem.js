@@ -22,7 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let buscaTexto = '';
     let carrinho = []; // [{ id, nome, nome_exibicao, preco, categoria, qtd }]
     let nomeLoja = 'Autoatendimento';
-    let bannerTexto = '';
     let tipoConsumo = null; // 'LOCAL' | 'RETIRADA' — escolhido na tela 2
 
     function money(v) {
@@ -39,7 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
     DOC_APP_CFG.onSnapshot(snap => {
         const d = snap.exists ? (snap.data() || {}) : {};
         nomeLoja = d.nomeApp || 'Autoatendimento';
-        bannerTexto = d.bannerTexto || '';
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
 
         const usaLogotipo = d.identidadeTipo === 'logo' && !!d.logoUrl;
@@ -52,28 +50,15 @@ document.addEventListener('DOMContentLoaded', () => {
             $('topo-nome').style.display = '';
             $('topo-nome').textContent = nomeLoja;
         }
-        renderHero();
     }, () => {});
 
-    // ---------- Banner de destaque (reaproveita o hero do app do cliente) ----------
-    let heroUrl = '';
+    // Banner de destaque (hero) do app do cliente NÃO aparece aqui de
+    // propósito — o totem é presencial, sem cupom pra digitar, então o
+    // banner promocional (foco em campanhas/cupons do app) fica só no app.
     DOC_APP_DESTAQUES.onSnapshot(snap => {
         const d = snap.exists ? (snap.data() || {}) : {};
-        heroUrl = d.heroUrl || '';
-        renderHero();
         renderBoasVindas(d.totemBoasVindasUrl || '');
     }, () => {});
-
-    function renderHero() {
-        const hero = $('hero');
-        if (!heroUrl) { hero.classList.remove('tem-imagem'); return; }
-        $('hero-img').src = heroUrl;
-        // Sem texto do banner aqui de propósito: bannerTexto costuma anunciar
-        // cupom de desconto ("use o código X"), mas o totem não tem onde o
-        // cliente digitar cupom — mostrar isso só confunde. Fica só a imagem.
-        $('hero-texto').textContent = '';
-        hero.classList.add('tem-imagem');
-    }
 
     // ---------- Imagem de fundo da tela de boas-vindas (tela 1) ----------
     function renderBoasVindas(url) {
