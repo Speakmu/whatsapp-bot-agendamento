@@ -85,7 +85,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const db = firebase.firestore();
     const auth = firebase.auth();
 
-    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+    // SESSION (não LOCAL): fechar o navegador tem que exigir login de novo.
+    firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION)
         .catch((error) => {
             console.error("Erro de persistência:", error);
         });

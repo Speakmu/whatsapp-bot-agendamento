@@ -320,7 +320,10 @@
             if (window.firebase && firebase.apps && firebase.apps.length === 0 && window.__FIREBASE_CONFIG__) {
                 firebase.initializeApp(window.__FIREBASE_CONFIG__);
             }
-            firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+            // SESSION (não LOCAL): fechar o navegador tem que exigir login de
+            // novo — isso é só a sessão de auth, não mexe na persistência
+            // offline do Firestore (enablePersistence logo abaixo).
+            firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(() => {});
             // Sem isso, a config de exibição e as permissões só existem em
             // memória: reabrir o admin.html offline (sem ter passado por
             // carregarAcesso antes nesta sessão) rejeita a consulta e derruba

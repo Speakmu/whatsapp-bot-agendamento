@@ -2,7 +2,9 @@
 const firebaseConfig = window.__FIREBASE_CONFIG__;
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(error => {
+// SESSION (não LOCAL): a sessão não pode sobreviver a fechar o navegador —
+// fechar e abrir de novo tem que pedir login, não entrar sozinho.
+auth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(error => {
     console.error('Erro de persistencia:', error);
 });
 
