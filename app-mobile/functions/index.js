@@ -168,7 +168,18 @@ export const criarCobrancaPoint = onRequest(
 // Compartilhado pelos dois provedores para não duplicar a lógica de fechamento.
 async function confirmarCartaoAprovado(pedidoDoc, pedido, origemLabel, estadoBruto) {
     const statusFinal = pedido.status_pos_pagamento || 'CONCLUIDO';
-    await pedidoDoc.ref.update({ status: statusFinal, gateway_state: estadoBruto });
+    // nfce_pendente entra na fila do fiscalRetryScheduler (roda a cada 20min,
+    // sem depender de nenhuma aba do dashboard aberta) — cobre tanto cartão do
+    // app do cliente quanto cartão de balcão aprovado com o caixa fechado. Só
+    // marca quando o pedido já está CONCLUIDO — se foi mandado pra cozinha
+    // (status_pos_pagamento = PENDENTE_PREPARO), a emissão fica pro momento em
+    // que o pedido realmente for concluído (mesmo padrão do resto do sistema).
+    const ehDinheiro = String(pedido.forma_pagamento || '').toLowerCase().includes('dinheiro');
+    await pedidoDoc.ref.update({
+        status: statusFinal,
+        gateway_state: estadoBruto,
+        ...(!ehDinheiro && statusFinal === 'CONCLUIDO' ? { nfce_pendente: true } : {}),
+    });
 
     if (pedido.caixa_sessao_id) {
         const chave = { "Dinheiro": "Dinheiro", "PIX": "PIX", "Cartão": "Cartao" }[pedido.forma_pagamento] || "Cartao";

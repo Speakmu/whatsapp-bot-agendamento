@@ -185,6 +185,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 hora_entrega: FieldValue.serverTimestamp()
             });
             if (window.GestorChefEstoque) window.GestorChefEstoque.baixarDoPedido(db, id).then(avisarPratosDesativados).catch(() => {});
+            // Emissão fiscal: confirmar a entrega É a confirmação de pagamento
+            // pra pedidos sem gateway (bot/app-dinheiro-na-entrega). Marca pra
+            // fila do backend (fiscalRetryScheduler) processar. Dinheiro nunca
+            // emite sozinho (mesma regra do Caixa/PDV).
+            const p = pedidos.find(x => x.id === id) || {};
+            const ehDinheiro = String(p.forma_pagamento || '').toLowerCase().includes('dinheiro');
+            if (!ehDinheiro) {
+                db.collection(COL_PEDIDOS).doc(id).update({ nfce_pendente: true }).catch(() => {});
+            }
             contarEntreguesHoje();
         } catch (err) { alert("Erro: " + err.message); }
     }

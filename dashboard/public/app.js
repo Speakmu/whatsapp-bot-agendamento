@@ -1249,6 +1249,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     window.GestorChefEstoque.baixarDoPedido(db, id).then(avisarPratosDesativados).catch(() => {});
                 }
 
+                // 1c. Emissão fiscal: pedidos do bot/app/totem não têm confirmação de
+                // gateway como o balcão — a conclusão manual aqui É a confirmação de
+                // pagamento. Marca pra fila do backend (fiscalRetryScheduler) processar,
+                // sem depender desta aba continuar aberta. Dinheiro nunca emite sozinho
+                // (mesma regra do Caixa/PDV).
+                if (novoStatus === "CONCLUIDO") {
+                    const snapFiscal = await db.collection(COLECAO_PEDIDOS).doc(id).get();
+                    const pedidoFiscal = snapFiscal.data() || {};
+                    const ehDinheiro = String(pedidoFiscal.forma_pagamento || '').toLowerCase().includes('dinheiro');
+                    if (!ehDinheiro) {
+                        db.collection(COLECAO_PEDIDOS).doc(id).update({ nfce_pendente: true }).catch(() => {});
+                    }
+                }
+
                 // 2. Verifica se o status aciona a notificação
                 // DICA: Verifique se no seu HTML o status é exatamente este
                 if (novoStatus === "PRONTO_PARA_ENTREGA" || novoStatus === "PRONTO_ENTREGA") {

@@ -213,7 +213,9 @@
     async function emitirAutomatico(pedidoId, pedido) {
         // Venda em dinheiro nunca emite sozinha (só PIX/Cartão). Quem quiser
         // uma NFC-e de uma venda em dinheiro emite manualmente na tela Fiscal.
-        if (String(pedido.forma_pagamento || '').trim().toLowerCase() === 'dinheiro') return null;
+        // Usa includes() (não igualdade exata) pra cobrir variações que vêm do
+        // bot/app, ex.: "DINHEIRO NA ENTREGA", "Entrega/Dinheiro".
+        if (String(pedido.forma_pagamento || '').toLowerCase().includes('dinheiro')) return null;
         let cfg;
         try { cfg = await getConfig(); } catch { return null; }
         if (!cfg || !cfg.ativo) return null;
