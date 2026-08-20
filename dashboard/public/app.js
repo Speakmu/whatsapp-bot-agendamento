@@ -104,6 +104,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const logoutButton = document.getElementById('logout-button');
     const ordersList = document.getElementById('orders-list');
     const totalPedidosSpan = document.getElementById('total-pedidos');
+    // Paginação client-side da lista de pedidos ativos (mesma lista já recebida
+    // pelo listener em tempo real — não faz nova consulta ao Firestore).
+    const PEDIDOS_POR_PAGINA = 15;
+    let pedidosPaginaAtual = 1;
+    let ultimosPedidosOrdenados = [];
 
     // Elementos da Troca de Tela
     const ordersView = document.getElementById('pedidos-ativos');
@@ -971,58 +976,97 @@ document.addEventListener('DOMContentLoaded', () => {
     function startOrderListener() {//mostra os pedidos em tempo real
         if (!ordersList) return;
 
+        // Toca som só a partir do segundo snapshot em diante — o primeiro
+        // sempre traz os pedidos já existentes (mesmo sem cache local, ex.:
+        // aba recém-aberta), e cada um deles chega como docChange "added"
+        // só por ser a primeira vez que o listener os vê. Sem essa flag, o
+        // som tocava toda vez que a tela era carregada.
+        let primeiroSnapshotPedidos = true;
+
         db.collection(COLECAO_PEDIDOS)
             .where("status", "in", STATUS_ATIVOS_PEDIDOS)
             .orderBy("status", "asc")
             .orderBy("hora_pedido", "desc")
             .onSnapshot(snapshot => {
 
-                // --- LÓGICA DO SOM ---
-                // snapshot.docChanges() identifica o que mudou desde a última atualização
-                snapshot.docChanges().forEach(change => {
-                    // Se o tipo for "added", significa que um novo pedido caiu no sistema
-                    if (change.type === "added") {
-                        // O metadata.fromCache garante que não toque o som ao carregar a página (pedidos antigos)
-                        if (!snapshot.metadata.fromCache) {
-                            somNotificacao.play().catch(e => console.log("Aguardando interação do usuário para tocar som."));
-                        }
+                if (!primeiroSnapshotPedidos) {
+                    const temPedidoNovo = snapshot.docChanges().some(change => change.type === "added");
+                    if (temPedidoNovo) {
+                        somNotificacao.play().catch(e => console.log("Aguardando interação do usuário para tocar som."));
                     }
-                });
-                // ---------------------
-
-                ordersList.innerHTML = "";
-                let pedidosHTML = '';
-                let totalAtivos = 0;
-                pedidosCache = {};
-
-                if (snapshot.empty) {
-                    ordersList.innerHTML = "<p style='padding:20px;'>Nenhum pedido ativo no momento.</p>";
-                    if (totalPedidosSpan) totalPedidosSpan.textContent = 0;
-                    return;
                 }
+                primeiroSnapshotPedidos = false;
+
+                pedidosCache = {};
+                ultimosPedidosOrdenados = [];
 
                 snapshot.forEach(doc => {
                     const pedido = doc.data();
-                    const pedidoId = doc.id;
-                    pedidosCache[pedidoId] = pedido;
+                    pedidosCache[doc.id] = pedido;
 
                     let horaFormatada = "--:--";
                     if (pedido.hora_pedido && pedido.hora_pedido.toDate) {
                         horaFormatada = pedido.hora_pedido.toDate().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                     }
 
-                    pedidosHTML += createOrderCard(pedido, pedidoId, horaFormatada);
-                    totalAtivos++;
+                    ultimosPedidosOrdenados.push({ pedido, pedidoId: doc.id, horaFormatada });
                 });
 
-                ordersList.innerHTML = pedidosHTML;
-                if (totalPedidosSpan) totalPedidosSpan.textContent = totalAtivos;
+                // Se a lista encolheu (pedidos concluídos/cancelados saíram) e a
+                // página atual ficou vazia, volta pra última página que ainda tem algo.
+                const totalPaginas = Math.max(1, Math.ceil(ultimosPedidosOrdenados.length / PEDIDOS_POR_PAGINA));
+                if (pedidosPaginaAtual > totalPaginas) pedidosPaginaAtual = totalPaginas;
 
-                attachButtonListeners();
+                renderizarListaPedidos();
 
             }, error => {
                 console.error("Erro no Firestore:", error);
             });
+    }
+
+    function renderizarListaPedidos() {
+        if (!ordersList) return;
+
+        if (!ultimosPedidosOrdenados.length) {
+            ordersList.innerHTML = "<p style='padding:20px;'>Nenhum pedido ativo no momento.</p>";
+            if (totalPedidosSpan) totalPedidosSpan.textContent = 0;
+            return;
+        }
+
+        const totalAtivos = ultimosPedidosOrdenados.length;
+        const totalPaginas = Math.max(1, Math.ceil(totalAtivos / PEDIDOS_POR_PAGINA));
+        if (pedidosPaginaAtual < 1) pedidosPaginaAtual = 1;
+        if (pedidosPaginaAtual > totalPaginas) pedidosPaginaAtual = totalPaginas;
+
+        const inicio = (pedidosPaginaAtual - 1) * PEDIDOS_POR_PAGINA;
+        const pagina = ultimosPedidosOrdenados.slice(inicio, inicio + PEDIDOS_POR_PAGINA);
+
+        const pedidosHTML = pagina
+            .map(({ pedido, pedidoId, horaFormatada }) => createOrderCard(pedido, pedidoId, horaFormatada))
+            .join('');
+
+        ordersList.innerHTML = pedidosHTML + renderPaginacaoPedidos(totalAtivos, totalPaginas);
+        if (totalPedidosSpan) totalPedidosSpan.textContent = totalAtivos;
+
+        attachButtonListeners();
+        attachPaginacaoListeners();
+    }
+
+    function renderPaginacaoPedidos(totalAtivos, totalPaginas) {
+        if (totalPaginas <= 1) return '';
+        return `
+        <div class="pedidos-paginacao" style="display:flex;align-items:center;justify-content:center;gap:12px;padding:16px 0;">
+            <button type="button" class="btn-status" data-pag-prev ${pedidosPaginaAtual <= 1 ? 'disabled' : ''}>◀ Anterior</button>
+            <span>Página ${pedidosPaginaAtual} de ${totalPaginas} (${totalAtivos} pedidos)</span>
+            <button type="button" class="btn-status" data-pag-next ${pedidosPaginaAtual >= totalPaginas ? 'disabled' : ''}>Próxima ▶</button>
+        </div>`;
+    }
+
+    function attachPaginacaoListeners() {
+        const btnPrev = ordersList.querySelector('[data-pag-prev]');
+        const btnNext = ordersList.querySelector('[data-pag-next]');
+        if (btnPrev) btnPrev.onclick = () => { pedidosPaginaAtual--; renderizarListaPedidos(); };
+        if (btnNext) btnNext.onclick = () => { pedidosPaginaAtual++; renderizarListaPedidos(); };
     }
     //Mostra os cards de pedidos
     function createOrderCard(pedido, id, hora) {
@@ -1148,7 +1192,11 @@ document.addEventListener('DOMContentLoaded', () => {
             "PENDENTE_VALIDACAO": ["EM_PREPARO", "CANCELADO"],
             "PENDENTE_PREPARO": ["EM_PREPARO", "CANCELADO"],
             "EM_PREPARO": ["PRONTO_PARA_ENTREGA"],
-            "PRONTO_PARA_ENTREGA": ["CONCLUIDO"]
+            "PRONTO_PARA_ENTREGA": ["CONCLUIDO"],
+            // Faltava esse passo: pedido despachado (via "Despachar"/tela de
+            // Entregas) ficava parado aqui pra sempre, sem nenhum botão pra
+            // fechar o pedido depois que a entrega era confirmada.
+            "SAIU_PARA_ENTREGA": ["CONCLUIDO"]
         };
 
         // Rótulos amigáveis: o texto do botão é independente do nome técnico do status
