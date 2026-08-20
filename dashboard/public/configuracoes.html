@@ -87,6 +87,11 @@
             <summary><div><h2>Pagamentos (Cart&atilde;o na maquininha)</h2><div class="sub">Integra&ccedil;&atilde;o com a maquininha f&iacute;sica para cobran&ccedil;a autom&aacute;tica no Caixa. As chaves de acesso ficam protegidas no servidor &mdash; aqui s&oacute; o provedor ativo e o identificador do terminal.</div></div><span class="chevron">&#9656;</span></summary>
             <div class="box-body">
             <div class="campo">
+                <label class="exib-item" style="font-weight:600;"><input type="checkbox" id="pag-maquininha-ativa" checked> Maquininha ativa</label>
+                <small>Quando desligada, o Caixa registra as vendas no Cart&atilde;o normalmente (sem tentar conectar na maquininha) &mdash; a forma de pagamento continua sendo Cart&atilde;o nos relat&oacute;rios, s&oacute; que lan&ccedil;ada manualmente.</small>
+            </div>
+            <div id="pag-campos-maquininha">
+            <div class="campo">
                 <label>Provedor da maquininha</label>
                 <select id="pag-provedor">
                     <option value="mercadopago">Mercado Pago (Point)</option>
@@ -115,7 +120,6 @@
                 <input id="pag-stone-secret" type="password" placeholder="sk_..." autocomplete="off">
                 <small>Esta chave come&ccedil;a com <code>sk_</code>. Chaves criadas como TEF n&atilde;o funcionam em uma POS independente. Deixe em branco para manter a chave j&aacute; salva.</small>
             </div>
-            <div class="acoes"><button class="btn btn-salvar" id="salvar-pagamentos">Salvar configura&ccedil;&otilde;es de pagamento</button></div>
             <div class="campo" id="campo-teste-stone" style="margin-top:16px; border-top:1px solid var(--line); padding-top:16px;">
                 <label>Testar conex&atilde;o com a maquininha Stone</label>
                 <small>N&atilde;o existe um &quot;ping&quot; silencioso. O teste cria um pedido real de R$ 0,01 pelo Connect 2.0. A POS precisa estar habilitada pela Stone e com o aplicativo Pagamento em &quot;Aguardando Pagamentos&quot;.</small>
@@ -124,6 +128,8 @@
                 </div>
                 <div id="pag-teste-resultado" class="muted-box" style="margin-top:10px; display:none;"></div>
             </div>
+            </div>
+            <div class="acoes"><button class="btn btn-salvar" id="salvar-pagamentos">Salvar configura&ccedil;&otilde;es de pagamento</button></div>
             </div>
         </details>
 

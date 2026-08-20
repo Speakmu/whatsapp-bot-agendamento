@@ -413,13 +413,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const CRIAR_COBRANCA_POINT_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaPoint";
     const CRIAR_COBRANCA_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaStone";
     let provedorPagamentoCartao = "mercadopago";
+    let maquininhaAtiva = true;
     db.collection('configuracoes').doc('pagamentos').onSnapshot(snap => {
-        provedorPagamentoCartao = (snap.exists && snap.data()?.provedorCartao) || "mercadopago";
+        const d = snap.exists ? snap.data() : null;
+        provedorPagamentoCartao = d?.provedorCartao || "mercadopago";
+        maquininhaAtiva = d?.maquininhaAtiva !== false;
     }, err => console.warn('Erro ao ler provedor de pagamento:', err.message));
 
     async function finalizarVenda() {
         if (!sessaoAtual || !carrinho.length) return;
-        if (formaPagamento === "Cartão") {
+        // Com a maquininha desativada, o Cartão segue o mesmo caminho manual de
+        // Dinheiro/PIX abaixo: forma_pagamento continua "Cartão" (conta certo nos
+        // relatórios), só não tenta acionar nenhum terminal físico.
+        if (formaPagamento === "Cartão" && maquininhaAtiva) {
             return provedorPagamentoCartao === "stone" ? finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_STONE_URL, "Stone") : finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_POINT_URL, "Point");
         }
 

@@ -132,7 +132,11 @@ export const criarCobrancaPoint = onRequest(
 
         // device_id fica na config (não é segredo, mas evita expor detalhe de infra no client).
         const configSnap = await db.collection('configuracoes').doc('pagamentos').get();
-        const deviceId = configSnap.exists ? configSnap.data()?.pointDeviceId : null;
+        const cfgPoint = configSnap.exists ? (configSnap.data() || {}) : {};
+        if (cfgPoint.maquininhaAtiva === false) {
+            return res.status(409).json({ message: "Integração com a maquininha está desativada nas configurações." });
+        }
+        const deviceId = cfgPoint.pointDeviceId;
         if (!deviceId) {
             return res.status(500).json({ message: "Terminal Point não configurado (pointDeviceId ausente)." });
         }
@@ -311,6 +315,9 @@ export const criarCobrancaStone = onRequest(
 
         const configSnap = await db.collection('configuracoes').doc('pagamentos').get();
         const cfg = configSnap.exists ? (configSnap.data() || {}) : {};
+        if (cfg.maquininhaAtiva === false) {
+            return res.status(409).json({ message: "Integração com a maquininha está desativada nas configurações." });
+        }
         const serial = cfg.stoneDeviceSerial || null;
         if (!serial) {
             return res.status(500).json({ message: "Terminal Stone não configurado (número de série ausente)." });

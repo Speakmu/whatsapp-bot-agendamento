@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('salvar-geral').addEventListener('click', salvarGeral);
         $('salvar-pagamentos').addEventListener('click', salvarPagamentos);
         $('pag-provedor').addEventListener('change', aplicarVisibilidadeProvedor);
+        $('pag-maquininha-ativa').addEventListener('change', aplicarVisibilidadeMaquininha);
         $('testar-stone').addEventListener('click', testarMaquininhaStone);
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
         $('salvar-usuario').addEventListener('click', salvarUsuario);
@@ -152,6 +153,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function aplicarVisibilidadeMaquininha() {
+        $('pag-campos-maquininha').style.display = $('pag-maquininha-ativa').checked ? 'block' : 'none';
+    }
+
     function aplicarVisibilidadeProvedor() {
         const stone = $('pag-provedor').value === 'stone';
         $('campo-point').style.display = stone ? 'none' : 'block';
@@ -229,7 +234,9 @@ document.addEventListener('DOMContentLoaded', () => {
             $('pag-stone-secret').value = '';
             $('pag-stone-secret').placeholder = d.stoneSecretConfigured ? 'Chave Connect salva no servidor' : 'sk_...';
             $('pag-provedor').value = d.provedorCartao || 'mercadopago';
+            $('pag-maquininha-ativa').checked = d.maquininhaAtiva !== false;
             aplicarVisibilidadeProvedor();
+            aplicarVisibilidadeMaquininha();
         } catch (err) {
             console.warn('pagamentos:', err.message);
         }
@@ -237,8 +244,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function salvarPagamentos() {
         try {
-            if ($('pag-provedor').value === 'stone') await salvarStoneConnect();
+            const maquininhaAtiva = $('pag-maquininha-ativa').checked;
+            if (maquininhaAtiva && $('pag-provedor').value === 'stone') await salvarStoneConnect();
             await DOC_PAGAMENTOS.set({
+                maquininhaAtiva,
                 provedorCartao: $('pag-provedor').value,
                 pointDeviceId: $('pag-point-device').value.trim(),
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
