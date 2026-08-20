@@ -54,6 +54,7 @@ export const finalizarPedido = async ({
     usuarioId,
     nome,
     telefone,
+    cpf,
     endereco,
     bairro,
     taxaEntrega = 0,
@@ -100,6 +101,9 @@ export const finalizarPedido = async ({
                      metodoPagamento === 'cartao' ? 'Cartão' : 'Entrega/Dinheiro',
 
         valor_total: calcularTotal(),
+        // CPF do cliente (necessário pra emitir NFC-e não presencial); dinheiro
+        // não emite nota automática, mas fica disponível pra emissão manual.
+        cpf_cliente: String(cpf || '').replace(/\D/g, '') || null,
         status: 'PENDENTE_PREPARO',
         hora_pedido: firebase.firestore.FieldValue.serverTimestamp(),
 

@@ -335,11 +335,12 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
       // de novo, uma nota que seria autorizada em poucos segundos ficaria marcada
       // erroneamente como REJEITADA.
       if ((result.cStat === '103' || result.cStat === '105') && result.nRec) {
+        const nRec = result.nRec;
         for (let tentativa = 1; tentativa <= 2; tentativa++) {
           await new Promise(resolve => setTimeout(resolve, 1500));
           try {
             result = await transport.retAutorizacao(
-              result.nRec, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, 8000,
+              nRec, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, 8000,
             );
           } catch {
             break; // sem resposta na consulta rápida — mantém o último resultado conhecido
@@ -409,11 +410,12 @@ export async function transmitirNfceContingencia(
   // emissão normal — sem isso, uma contingência que a SEFAZ só está demorando
   // pra processar seria marcada como REJEITADA por engano.
   if ((result.cStat === '103' || result.cStat === '105') && result.nRec) {
+    const nRec = result.nRec;
     for (let tentativa = 1; tentativa <= 2; tentativa++) {
       await new Promise(resolve => setTimeout(resolve, 1500));
       try {
         result = await transport.retAutorizacao(
-          result.nRec, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, 8000,
+          nRec, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, 8000,
         );
       } catch {
         break;

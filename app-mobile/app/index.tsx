@@ -127,6 +127,7 @@ interface SacolaProps {
   setNome: (t: string) => void;
   telefone: string;
   setTelefone: (t: string) => void;
+  cpf: string;
   endereco: string;
   setEndereco: (t: string) => void;
   bairro: string;
@@ -238,7 +239,7 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus }: PedidosProp
 };
 // --- COMPONENTE SEÇÃO SACOLA (MEMORIZADO) ---
 const SecaoSacola = ({
-  carrinho, setCarrinho, nome, setNome, telefone, setTelefone,
+  carrinho, setCarrinho, nome, setNome, telefone, setTelefone, cpf,
   endereco, setEndereco, bairro, setBairro, bairrosEntrega = [], taxaEntrega = 0,
   metodoPagamento, setMetodoPagamento,
   tipoEntrega, setTipoEntrega,
@@ -495,7 +496,7 @@ const SecaoSacola = ({
                 } else if (metodoPagamento === 'pix') {
                   processarPagamentoPix();
                 } else {
-                  finalizarPedido({ carrinho, usuarioId, nome, telefone, endereco, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados });
+                  finalizarPedido({ carrinho, usuarioId, nome, telefone, cpf, endereco, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados });
                 }
               }}
             >
@@ -1493,6 +1494,10 @@ function AppCliente() {
           itens: itensFormatados, // 🔥 Lista agrupada e formatada
           valor_total: calcularTotal(),
           forma_pagamento: 'PIX', // 🔥 CORREÇÃO: Mudado de CARTAO para PIX
+          // CPF do cliente (já usado no pagamento acima) — necessário pra emitir
+          // NFC-e: operação não presencial (indPres=4) exige destinatário
+          // identificado, senão a SEFAZ rejeita a nota (schema/regra fiscal).
+          cpf_cliente: cpfLimpo,
           pagamento_id: resultado.id,
           status: 'AGUARDANDO_PIX', // 🔥 CORREÇÃO: Começa como aguardando o pagamento
           pontos_a_creditar: pontosDoPedido(carrinho), // creditado pelo webhook quando o MP confirmar o pagamento
@@ -1707,6 +1712,10 @@ function AppCliente() {
             valor_total: calcularTotal(),
             pontos_gerados: totalPontosGanhos,
             forma_pagamento: 'CARTAO',
+            // CPF do cliente (já usado no pagamento acima) — necessário pra emitir
+            // NFC-e: operação não presencial (indPres=4) exige destinatário
+            // identificado, senão a SEFAZ rejeita a nota (schema/regra fiscal).
+            cpf_cliente: cpfFinal,
             pagamento_id: resultado.id,
             status: 'PENDENTE_PREPARO',
             hora_pedido: serverTimestamp(),
@@ -2203,6 +2212,7 @@ function AppCliente() {
                 setNome={setNome}
                 telefone={telefone}
                 setTelefone={setTelefone}
+                cpf={cpf}
                 endereco={endereco}
                 setEndereco={setEndereco}
                 bairro={bairro}
