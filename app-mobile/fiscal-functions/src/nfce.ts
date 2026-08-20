@@ -401,9 +401,27 @@ export async function transmitirNfceContingencia(
   const cred = carregarCred(cert);
   const endpoints = getSefazEndpoints(uf, tpAmb === '1' ? 'PRODUCAO' : 'HOMOLOGACAO');
 
-  const result = await transport.authorize(
+  let result = await transport.authorize(
     req.xmlAssinado, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, '1',
   );
+
+  // Mesmo tratamento de cStat 103/105 (lote recebido/em processamento) da
+  // emissão normal — sem isso, uma contingência que a SEFAZ só está demorando
+  // pra processar seria marcada como REJEITADA por engano.
+  if ((result.cStat === '103' || result.cStat === '105') && result.nRec) {
+    for (let tentativa = 1; tentativa <= 2; tentativa++) {
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      try {
+        result = await transport.retAutorizacao(
+          result.nRec, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, 8000,
+        );
+      } catch {
+        break;
+      }
+      if (result.cStat !== '103' && result.cStat !== '105') break;
+    }
+  }
+
   const autorizada = result.cStat === '100';
   return {
     status: autorizada ? 'AUTORIZADA' : 'REJEITADA',

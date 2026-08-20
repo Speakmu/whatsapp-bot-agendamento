@@ -418,8 +418,24 @@
             });
             return data;
         }
-        await notaRef.update({ cStat: data.cStat || null, motivo: data.motivo || data.error || null });
-        throw new Error(`Transmissão não autorizada (${data.cStat || '-'}): ${data.motivo || data.error || 'erro'}`);
+        // Se a SEFAZ respondeu com um cStat, ela processou e rejeitou de vez — não
+        // adianta ficar reenviando o MESMO XML já assinado (o problema está no
+        // conteúdo/assinatura dele, reenviar sempre dá o mesmo erro). Libera o
+        // pedido pra uma emissão nova do zero (número novo, XML novo, assinado
+        // com o código atual) em vez de deixar a nota presa em CONTINGENCIA pra
+        // sempre. Sem cStat (falha de rede/comunicação) mantém em CONTINGENCIA —
+        // aí sim vale tentar "Transmitir" de novo depois.
+        if (data.cStat) {
+            await notaRef.update({
+                status: 'ERRO', cStat: data.cStat, motivo: data.motivo || data.error || null, contingencia: false,
+            });
+            if (nota.pedido_id) {
+                db().collection('pedidos').doc(nota.pedido_id).set({ nfce_pendente: true }, { merge: true }).catch(() => {});
+            }
+            throw new Error(`Transmissão rejeitada pela SEFAZ (${data.cStat}): ${data.motivo || 'erro'}. Uma nova emissão (número novo) foi liberada para este pedido.`);
+        }
+        await notaRef.update({ motivo: data.motivo || data.error || null });
+        throw new Error(`Falha ao transmitir: ${data.motivo || data.error || 'erro'}`);
     }
 
     // ---------- Cancelamento (evento 110111) ----------

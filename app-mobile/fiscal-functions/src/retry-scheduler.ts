@@ -207,8 +207,18 @@ async function transmitirNotaEmContingencia(
         danfeBase64: resultado.danfeBase64 || nota.danfeBase64 || null,
         transmitida_em: admin.firestore.FieldValue.serverTimestamp(),
       });
+    } else if (resultado.cStat) {
+      // SEFAZ processou e rejeitou de vez — reenviar o MESMO XML já assinado de
+      // novo (próximo ciclo do cron) nunca vai funcionar, o problema está no
+      // conteúdo dele. Libera o pedido pra uma emissão nova do zero em vez de
+      // deixar a nota presa em CONTINGENCIA pra sempre.
+      await ref.update({ status: 'ERRO', cStat: resultado.cStat, motivo: resultado.motivo || null, contingencia: false });
+      if (nota.pedido_id) {
+        await db().collection('pedidos').doc(nota.pedido_id).set({ nfce_pendente: true }, { merge: true }).catch(() => {});
+      }
     } else {
-      await ref.update({ cStat: resultado.cStat || null, motivo: resultado.motivo || null });
+      // Falha de comunicação (sem cStat) — mantém em CONTINGENCIA, vale tentar de novo.
+      await ref.update({ motivo: resultado.motivo || null });
     }
   } catch (err: any) {
     await ref.update({ motivo: err?.message || String(err) });
