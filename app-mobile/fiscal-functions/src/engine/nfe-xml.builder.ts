@@ -274,16 +274,16 @@ export class NfeXmlBuilder {
     // ── emit ─────────────────────────────────────────────
     const emit = infNFe.ele('emit');
     emit.ele('CNPJ').txt(input.emitter.cnpj.replace(/\D/g, ''));
-    emit.ele('xNome').txt(input.emitter.xNome);
-    if (input.emitter.xFant) emit.ele('xFant').txt(input.emitter.xFant);
+    emit.ele('xNome').txt(this.sanitizeNfeText(input.emitter.xNome));
+    if (input.emitter.xFant) emit.ele('xFant').txt(this.sanitizeNfeText(input.emitter.xFant));
 
     const enderEmit = emit.ele('enderEmit');
-    enderEmit.ele('xLgr').txt(input.emitter.xLgr);
+    enderEmit.ele('xLgr').txt(this.sanitizeNfeText(input.emitter.xLgr));
     enderEmit.ele('nro').txt(input.emitter.nro);
-    if (input.emitter.xCpl) enderEmit.ele('xCpl').txt(input.emitter.xCpl);
-    enderEmit.ele('xBairro').txt(input.emitter.xBairro);
+    if (input.emitter.xCpl) enderEmit.ele('xCpl').txt(this.sanitizeNfeText(input.emitter.xCpl));
+    enderEmit.ele('xBairro').txt(this.sanitizeNfeText(input.emitter.xBairro));
     enderEmit.ele('cMun').txt(input.emitter.cMun);
-    enderEmit.ele('xMun').txt(input.emitter.xMun);
+    enderEmit.ele('xMun').txt(this.sanitizeNfeText(input.emitter.xMun));
     enderEmit.ele('UF').txt(input.emitter.uf);
     enderEmit.ele('CEP').txt(input.emitter.cep.replace(/\D/g, ''));
     enderEmit.ele('cPais').txt('1058');
@@ -302,7 +302,7 @@ export class NfeXmlBuilder {
       } else if (r.cpf) {
         dest.ele('CPF').txt(r.cpf.replace(/\D/g, ''));
       }
-      dest.ele('xNome').txt(r.xNome);
+      dest.ele('xNome').txt(this.sanitizeNfeText(r.xNome));
 
       const hasRecipientAddress =
         Boolean(r.xLgr) &&
@@ -314,12 +314,12 @@ export class NfeXmlBuilder {
 
       if (hasRecipientAddress) {
         const enderDest = dest.ele('enderDest');
-        enderDest.ele('xLgr').txt(r.xLgr!);
+        enderDest.ele('xLgr').txt(this.sanitizeNfeText(r.xLgr!));
         enderDest.ele('nro').txt(r.nro ?? 'S/N');
-        if (r.xCpl) enderDest.ele('xCpl').txt(r.xCpl);
-        enderDest.ele('xBairro').txt(r.xBairro!);
+        if (r.xCpl) enderDest.ele('xCpl').txt(this.sanitizeNfeText(r.xCpl));
+        enderDest.ele('xBairro').txt(this.sanitizeNfeText(r.xBairro!));
         enderDest.ele('cMun').txt(r.cMun!);
-        enderDest.ele('xMun').txt(r.xMun!);
+        enderDest.ele('xMun').txt(this.sanitizeNfeText(r.xMun!));
         enderDest.ele('UF').txt(r.uf!);
         enderDest.ele('CEP').txt(r.cep!.replace(/\D/g, ''));
         enderDest.ele('cPais').txt(r.cPais ?? '1058');
@@ -338,7 +338,7 @@ export class NfeXmlBuilder {
       const prod = det.ele('prod');
       prod.ele('cProd').txt(item.cProd);
       prod.ele('cEAN').txt(item.cEAN ?? 'SEM GTIN');
-      prod.ele('xProd').txt(item.xProd);
+      prod.ele('xProd').txt(this.sanitizeNfeText(item.xProd));
       prod.ele('NCM').txt(item.ncm.replace(/\D/g, ''));
       if (item.cest) prod.ele('CEST').txt(item.cest.replace(/\D/g, ''));
       prod.ele('CFOP').txt(item.cfop);
@@ -439,7 +439,7 @@ export class NfeXmlBuilder {
 
     // ── infAdic ───────────────────────────────────────────
     if (input.infAdic) {
-      infNFe.ele('infAdic').ele('infCpl').txt(input.infAdic);
+      infNFe.ele('infAdic').ele('infCpl').txt(this.sanitizeNfeText(input.infAdic, 5000));
     }
 
     if (input.supplemental?.qrCode) {
@@ -450,10 +450,61 @@ export class NfeXmlBuilder {
       }
     }
 
-    return root.end({ prettyPrint: false });
+    const xml = root.end({ prettyPrint: false });
+    this.validateSingleImpostoPerItem(xml, input.items.length);
+    return xml;
   }
 
   // ── private helpers ───────────────────────────────────────────────────────
+
+  /**
+   * Corrige mojibake comum (UTF-8 lido como latin1, ex: "COLÃ‰GIO") e normaliza
+   * para ASCII puro — nomes de cliente/produto digitados com encoding quebrado
+   * já geraram XML rejeitado por validadores externos no motor original
+   * (Construline). Portado de sefaz-direct.service.ts (sanitizeNfeText).
+   */
+  private sanitizeNfeText(value: unknown, maxLen = 60): string {
+    let text = String(value ?? '').trim();
+    if (!text) return '';
+
+    if (/[\u00c3\u00c2]/.test(text)) {
+      const repaired = Buffer.from(text, 'latin1').toString('utf8');
+      if (repaired && repaired.replace(/\s/g, '').length >= text.replace(/\s/g, '').length / 2) {
+        text = repaired;
+      }
+    }
+
+    text = text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .normalize('NFC')
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
+      .replace(/[^\x20-\x7E]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return text.slice(0, maxLen);
+  }
+
+  /**
+   * Guarda defensiva: o schema da NF-e exige exatamente um bloco <imposto> por
+   * item — o builder acima já é estruturalmente imune (um único `det.ele('imposto')`
+   * por item), mas o Construline (motor original) já teve um caso real de XML
+   * malformado com <imposto> duplicado que só foi percebido depois da rejeição
+   * pela SEFAZ. Falha cedo aqui em vez de gastar uma transmissão.
+   */
+  private validateSingleImpostoPerItem(xml: string, itemCount: number): void {
+    const detMatches = xml.match(/<det\b[^>]*>[\s\S]*?<\/det>/g) ?? [];
+    if (detMatches.length !== itemCount) {
+      throw new Error(`XML fiscal inválido: esperado ${itemCount} bloco(s) <det>, encontrado ${detMatches.length}.`);
+    }
+    detMatches.forEach((det, idx) => {
+      const impostoCount = (det.match(/<imposto>/g) ?? []).length;
+      if (impostoCount !== 1) {
+        throw new Error(`XML fiscal inválido no item ${idx + 1}: esperado 1 bloco <imposto>, encontrado ${impostoCount}.`);
+      }
+    });
+  }
 
   private buildIcms(parent: any, icms: NfeIcmsSimples | NfeIcmsNormal): void {
     if (icms.type === 'simples') {

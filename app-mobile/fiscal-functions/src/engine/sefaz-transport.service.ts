@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosInstance } from 'axios';
+import * as crypto from 'crypto';
 import * as https from 'https';
 import * as zlib from 'zlib';
 import { SefazUfEndpoints } from './sefaz-endpoints';
@@ -88,6 +89,11 @@ export class SefazTransport {
       cert: certPem,
       key: keyPem,
       rejectUnauthorized: true,
+      minVersion: 'TLSv1.2',
+      // Muitos servidores da SEFAZ ainda exigem renegociação TLS legada, que o
+      // OpenSSL 3.x (Node 18+) passou a bloquear por padrão — sem isso a conexão
+      // cai com "SSL alert number 40: handshake failure".
+      secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
     } as any);
 
     return axios.create({

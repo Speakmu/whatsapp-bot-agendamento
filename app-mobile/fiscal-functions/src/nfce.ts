@@ -320,9 +320,28 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
   if (!forcarCont) {
     const { chave44, signedXml } = montarAssinar('1');
     try {
-      const result = await transport.authorize(
+      let result = await transport.authorize(
         signedXml, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, '1',
       );
+
+      // cStat 103/105 = lote recebido/em processamento — comum em picos de carga
+      // da SEFAZ mesmo em modo síncrono (indSinc=1). Não é rejeição: sem consultar
+      // de novo, uma nota que seria autorizada em poucos segundos ficaria marcada
+      // erroneamente como REJEITADA.
+      if ((result.cStat === '103' || result.cStat === '105') && result.nRec) {
+        for (let tentativa = 1; tentativa <= 2; tentativa++) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          try {
+            result = await transport.retAutorizacao(
+              result.nRec, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, 8000,
+            );
+          } catch {
+            break; // sem resposta na consulta rápida — mantém o último resultado conhecido
+          }
+          if (result.cStat !== '103' && result.cStat !== '105') break;
+        }
+      }
+
       const autorizada = result.cStat === '100';
       return {
         status: autorizada ? 'AUTORIZADA' : 'REJEITADA',
