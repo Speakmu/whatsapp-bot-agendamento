@@ -30,6 +30,12 @@ export function validarCertificado(buffer: Buffer, password: string): void {
   signer.loadCertificateFromBuffer(buffer, password);
 }
 
+// Validade do certificado configurado — usado pelo /fiscal/health pra flagar
+// certificado vencido/perto de vencer sem precisar tentar emitir uma nota.
+export function obterValidadeCertificado(cert: CertInput): { notBefore: Date; notAfter: Date } {
+  return carregarCred(cert).validity;
+}
+
 // IBGE — código da UF (2 dígitos)
 const UF_CODIGO: Record<string, string> = {
   RO: '11', AC: '12', AM: '13', RR: '14', PA: '15', AP: '16', TO: '17',

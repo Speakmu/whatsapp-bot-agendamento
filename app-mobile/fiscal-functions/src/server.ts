@@ -24,6 +24,7 @@ import {
   sincronizarDfe, DfeSyncRequest,
   processarXmlAvulso,
   validarCertificado, CertInput,
+  obterValidadeCertificado,
 } from './nfce';
 import { carregarCertificado, salvarCertificado, existeCertificado } from './cert-store';
 import { prewarmAliquotas } from './ibpt-store';
@@ -118,10 +119,29 @@ async function exigirCert(res: express.Response): Promise<CertInput | null> {
 app.get('/fiscal/health', async (_req, res) => {
   let temCert = CERT_PATH ? fs.existsSync(CERT_PATH) : false;
   try { if (!temCert) temCert = await existeCertificado(); } catch { /* ignora */ }
+
+  // Validade do certificado — não impede a resposta se falhar (senha errada,
+  // certificado ausente, etc.); só reporta o que conseguir.
+  let certificadoValidade: { notBefore: string; notAfter: string; diasRestantes: number; vencido: boolean } | null = null;
+  try {
+    const cert = await obterCert();
+    if (cert) {
+      const { notBefore, notAfter } = obterValidadeCertificado(cert);
+      const diasRestantes = Math.floor((notAfter.getTime() - Date.now()) / 86_400_000);
+      certificadoValidade = {
+        notBefore: notBefore.toISOString(),
+        notAfter: notAfter.toISOString(),
+        diasRestantes,
+        vencido: diasRestantes < 0,
+      };
+    }
+  } catch { /* ignora — health não deve quebrar por causa disso */ }
+
   res.json({
     ok: true,
     service: 'pizzaria-fiscal-service',
     certificado: temCert,
+    certificado_validade: certificadoValidade,
     time: new Date().toISOString(),
   });
 });

@@ -8,9 +8,19 @@ const { SignedXml } = require('xml-crypto') as typeof import('xml-crypto');
 
 export interface CertificateData {
   privateKeyPem: string;
+  /**
+   * Cadeia completa (folha + intermediárias) — usar SÓ para o https.Agent do
+   * mTLS com a SEFAZ. NÃO usar para assinar XML: a assinatura XMLDSig espera
+   * exatamente um certificado dentro de <X509Certificate>; passar a cadeia
+   * inteira aqui quebra o schema da NF-e (rejeição "Falha no schema XML").
+   */
   certificatePem: string;
+  /** Certificado-folha isolado (1 único PEM) — usar para assinar o XML (KeyInfo/X509Certificate). */
+  certificatePemLeaf: string;
   /** X.509 certificate in DER → Base64 (used inside <X509Certificate>) */
   certBase64: string;
+  /** Validade do certificado-folha (não a da cadeia inteira) */
+  validity: { notBefore: Date; notAfter: Date };
 }
 
 export interface NfeSignResult {
@@ -79,22 +89,62 @@ export class NfeXmlSigner {
       privateKey = plainList[0].key as forge.pki.rsa.PrivateKey;
     }
 
-    // Extract certificate
+    // Extract certificate(s) — um .pfx de certificado A1 da ICP-Brasil normalmente
+    // traz o certificado-folha JUNTO com a(s) CA(s) intermediária(s) que o emitiram.
+    // Pegar só o primeiro certBag descarta as intermediárias: a SEFAZ (mTLS) então
+    // não consegue montar a cadeia até a raiz confiável e derruba a conexão com um
+    // "handshake_failure" genérico, sem apontar o certificado como causa. Por isso
+    // aqui montamos a cadeia completa (folha + intermediárias, sem a raiz) e mandamos
+    // tudo junto no <cert> do https.Agent.
     const certBags = pfx.getBags({ bagType: forge.pki.oids.certBag });
     const certList = certBags[forge.pki.oids.certBag] ?? [];
     if (certList.length === 0 || !certList[0].cert) {
       throw new Error('Certificado X.509 não encontrado no PFX');
     }
-    const cert = certList[0].cert!;
+    const allCerts = certList.map(b => b.cert).filter((c): c is forge.pki.Certificate => !!c);
 
+    const dn = (attrs: forge.pki.CertificateField[]) =>
+      attrs.map(a => `${a.shortName || a.name || a.type}=${a.value}`).join(',');
+
+    // Identifica o certificado-folha comparando o modulo da chave publica com o da privada.
+    const privModulus = privateKey.n.toString(16);
+    const leafCert = allCerts.find(c => {
+      const pub = c.publicKey as forge.pki.rsa.PublicKey;
+      return pub?.n && pub.n.toString(16) === privModulus;
+    }) ?? allCerts[0];
+
+    // Monta a cadeia folha -> intermediarias seguindo issuer/subject, parando antes
+    // de incluir uma raiz autoassinada (subject === issuer).
+    const chain: forge.pki.Certificate[] = [leafCert];
+    const usados = new Set<forge.pki.Certificate>([leafCert]);
+    let atual = leafCert;
+    for (let i = 0; i < allCerts.length; i++) {
+      const issuerDn = dn(atual.issuer.attributes);
+      const proximo = allCerts.find(c => !usados.has(c) && dn(c.subject.attributes) === issuerDn);
+      if (!proximo) break;
+      const autoAssinado = dn(proximo.subject.attributes) === dn(proximo.issuer.attributes);
+      if (autoAssinado) break; // raiz — nao precisa mandar pro servidor
+      chain.push(proximo);
+      usados.add(proximo);
+      atual = proximo;
+    }
+
+    const cert = leafCert;
     const privateKeyPem = forge.pki.privateKeyToPem(privateKey);
-    const certificatePem = forge.pki.certificateToPem(cert);
+    const certificatePem = chain.map(c => forge.pki.certificateToPem(c)).join('\n');
+    const certificatePemLeaf = forge.pki.certificateToPem(cert);
 
-    // DER in base64 for <X509Certificate>
+    // DER in base64 for <X509Certificate> — sempre o certificado-folha (assinatura da NF-e).
     const certDer = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
     const certBase64 = Buffer.from(certDer, 'binary').toString('base64');
 
-    return { privateKeyPem, certificatePem, certBase64 };
+    return {
+      privateKeyPem,
+      certificatePem,
+      certificatePemLeaf,
+      certBase64,
+      validity: { notBefore: cert.validity.notBefore, notAfter: cert.validity.notAfter },
+    };
   }
 
   // ── XML Signing (XMLDSig + C14N Exclusive) ───────────────────────────────
@@ -120,7 +170,7 @@ export class NfeXmlSigner {
 
     const signer = new SignedXml();
     signer.privateKey = cert.privateKeyPem;
-    signer.publicCert = cert.certificatePem;
+    signer.publicCert = cert.certificatePemLeaf;
     signer.signatureAlgorithm =
       'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
     signer.canonicalizationAlgorithm = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
@@ -162,7 +212,7 @@ export class NfeXmlSigner {
 
     const signer = new SignedXml();
     signer.privateKey = cert.privateKeyPem;
-    signer.publicCert = cert.certificatePem;
+    signer.publicCert = cert.certificatePemLeaf;
     signer.signatureAlgorithm =
       'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
     signer.canonicalizationAlgorithm = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
@@ -201,7 +251,7 @@ export class NfeXmlSigner {
 
     const signer = new SignedXml();
     signer.privateKey = cert.privateKeyPem;
-    signer.publicCert = cert.certificatePem;
+    signer.publicCert = cert.certificatePemLeaf;
     signer.signatureAlgorithm =
       'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
     signer.canonicalizationAlgorithm = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
