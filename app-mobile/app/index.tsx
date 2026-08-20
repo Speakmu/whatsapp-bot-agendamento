@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import * as Linking from 'expo-linking';
+import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
@@ -20,10 +21,10 @@ import {
   updateDoc,
   where
 } from 'firebase/firestore';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Modal, Platform,
+  Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform,
   ScrollView,
   StatusBar, StyleSheet, Text, TextInput, TouchableOpacity,
   View
@@ -594,18 +595,30 @@ interface HomeProps {
 }
 
 // --- COMPONENTE DE IMAGEM COM FALLBACK ---
-const ProdutoImagem = ({ uri, style }: { uri?: string; style: any }) => {
+// cachePolicy="memory-disk": evita rebaixar da rede fotos já vistas ao trocar
+// de categoria/voltar pra "Todos" — crítico em Android, que não cacheia em
+// disco por padrão como o Image nativo faz no iOS.
+const ProdutoImagem = React.memo(({ uri, style }: { uri?: string; style: any }) => {
   const [erro, setErro] = React.useState(false);
   const temUri = uri && uri.trim() !== '' && !erro;
   if (temUri) {
-    return <Image source={{ uri }} style={style} onError={() => setErro(true)} />;
+    return (
+      <Image
+        source={{ uri }}
+        style={style}
+        cachePolicy="memory-disk"
+        transition={150}
+        onError={() => setErro(true)}
+      />
+    );
   }
   return (
     <View style={[style, { backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center' }]}>
       <Text style={{ fontSize: 32 }}>🍕</Text>
     </View>
   );
-};
+});
+ProdutoImagem.displayName = 'ProdutoImagem';
 
 // Tamanhos de imagem configuráveis no GestorChef (Marketing & App → Layout da vitrine)
 const IMG_TAMANHO_LISTA: Record<string, number> = { pequena: 64, media: 88, grande: 120 };
@@ -614,20 +627,25 @@ const IMG_TAMANHO_GRADE: Record<string, number> = { pequena: 90, media: 130, gra
 const COL_LARGURA: Record<number, string> = { 2: '48%', 3: '31%', 4: '23%' };
 
 // --- CARTÃO DE PRODUTO (usado na lista de resultados e nas vitrines de destaque) ---
-const CartaoProduto = ({ item, styles, corMarca, pontos, onAbrir, onAdicionar, colunas = 1, tamanhoImagem = 'media' }: {
-  item: any; styles: any; corMarca: string; pontos: number; onAbrir: () => void; onAdicionar: () => void;
+// React.memo + onAbrir/onAdicionar recebendo o item (em vez de closures novas por
+// render no chamador) — evita re-render de todos os cards a cada troca de categoria.
+const CartaoProduto = React.memo(({ item, styles, corMarca, pontos, onAbrir, onAdicionar, colunas = 1, tamanhoImagem = 'media' }: {
+  item: any; styles: any; corMarca: string; pontos: number; onAbrir: (item: any) => void; onAdicionar: (item: any) => void;
   colunas?: number; tamanhoImagem?: string;
 }) => {
+  const abrir = () => onAbrir(item);
+  const adicionar = () => onAdicionar(item);
+
   if (colunas > 1) {
     const altura = IMG_TAMANHO_GRADE[tamanhoImagem] || IMG_TAMANHO_GRADE.media;
     const largura = COL_LARGURA[colunas] || COL_LARGURA[2];
     return (
-      <TouchableOpacity activeOpacity={0.85} style={[styles.cardGrade, { width: largura }]} onPress={onAbrir}>
+      <TouchableOpacity activeOpacity={0.85} style={[styles.cardGrade, { width: largura }]} onPress={abrir}>
         <ProdutoImagem uri={item.imagem_url} style={[styles.fotoGrade, { height: altura }]} />
         <Text style={styles.nomeGrade} numberOfLines={1}>{item.nome_exibicao || item.nome}</Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
           <Text style={styles.precoGrade}>R$ {Number(item.preco).toFixed(2)}</Text>
-          <TouchableOpacity style={[styles.btnAdicionarGrade, { borderColor: corMarca }]} onPress={onAdicionar}>
+          <TouchableOpacity style={[styles.btnAdicionarGrade, { borderColor: corMarca }]} onPress={adicionar}>
             <Text style={[styles.btnAdicionarTxt, { color: corMarca, fontSize: 15 }]}>+</Text>
           </TouchableOpacity>
         </View>
@@ -642,7 +660,7 @@ const CartaoProduto = ({ item, styles, corMarca, pontos, onAbrir, onAdicionar, c
 
   const tamanho = IMG_TAMANHO_LISTA[tamanhoImagem] || IMG_TAMANHO_LISTA.media;
   return (
-    <TouchableOpacity activeOpacity={0.85} style={styles.cardProdutoHorizontal} onPress={onAbrir}>
+    <TouchableOpacity activeOpacity={0.85} style={styles.cardProdutoHorizontal} onPress={abrir}>
       <ProdutoImagem uri={item.imagem_url} style={[styles.fotoProdutoEsquerda, { width: tamanho, height: tamanho }]} />
       <View style={styles.infoProduto}>
         <Text style={styles.nomeProduto}>{item.nome_exibicao || item.nome}</Text>
@@ -658,15 +676,16 @@ const CartaoProduto = ({ item, styles, corMarca, pontos, onAbrir, onAdicionar, c
           )}
         </View>
       </View>
-      <TouchableOpacity style={[styles.btnAdicionar, { borderColor: corMarca }]} onPress={onAdicionar}>
+      <TouchableOpacity style={[styles.btnAdicionar, { borderColor: corMarca }]} onPress={adicionar}>
         <Text style={[styles.btnAdicionarTxt, { color: corMarca }]}>+</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
-};
+});
+CartaoProduto.displayName = 'CartaoProduto';
 
 // --- COMPONENTE SEÇÃO HOME ---
-const SecaoHome = ({
+const SecaoHome = React.memo(({
   produtosFiltrados, nome, busca, setBusca,
   executarBusca, adicionarAoCarrinho, insets, styles,
   pontosPorReal = 0, fidelidadeAtiva = true,
@@ -680,13 +699,28 @@ const SecaoHome = ({
 }: HomeProps) => {
   const [produtoDetalhe, setProdutoDetalhe] = useState<any>(null);
 
-  const calcularPontosItem = (item: any) => {
+  const calcularPontosItem = useCallback((item: any) => {
     if (fidelidadeAtiva === false) return 0;
     const temPontosProprios = item.pontos_fidelidade !== undefined && item.pontos_fidelidade !== null;
     return temPontosProprios
       ? Number(item.pontos_fidelidade) || 0
       : Math.floor((Number(item.preco) || 0) * pontosPorReal);
-  };
+  }, [fidelidadeAtiva, pontosPorReal]);
+
+  // Identidade estável pro renderItem da FlatList: evita recriar a função (e o
+  // efeito cascata de perder o React.memo dos cards) a cada troca de categoria.
+  const renderCartaoProduto = useCallback(({ item }: { item: any }) => (
+    <CartaoProduto
+      item={item}
+      styles={styles}
+      corMarca={corMarca}
+      pontos={calcularPontosItem(item)}
+      onAbrir={setProdutoDetalhe}
+      onAdicionar={adicionarAoCarrinho}
+      colunas={colunasVitrine}
+      tamanhoImagem={tamanhoImagemVitrine}
+    />
+  ), [styles, corMarca, calcularPontosItem, adicionarAoCarrinho, colunasVitrine, tamanhoImagemVitrine]);
 
   const mostrarVitrine = busca.trim() === '' && categoriaAtiva === 'Todos';
 
@@ -722,7 +756,7 @@ const SecaoHome = ({
             {/* Saudação + Logo + Notificação */}
             <View style={[styles.headerHome, { backgroundColor: corMarca }]}>
               {usaLogotipo && logoUrl ? (
-                <Image source={{ uri: logoUrl }} style={styles.marcaLogoHeader} resizeMode="contain" />
+                <Image source={{ uri: logoUrl }} style={styles.marcaLogoHeader} contentFit="contain" />
               ) : (
                 <Text style={[styles.logoTexto, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeApp}</Text>
               )}
@@ -774,7 +808,7 @@ const SecaoHome = ({
 
           {/* Banner principal (imagem) — primeiro bloco da vitrine */}
           {mostrarVitrine && !!heroUrl && (
-            <Image source={{ uri: heroUrl }} style={styles.heroBanner} resizeMode="cover" />
+            <Image source={{ uri: heroUrl }} style={styles.heroBanner} contentFit="cover" />
           )}
 
           {/* Vitrines de Destaques (Topo / Meio / Fundo) — só na home, sem busca/filtro */}
@@ -794,8 +828,8 @@ const SecaoHome = ({
                     styles={styles}
                     corMarca={corMarca}
                     pontos={calcularPontosItem(p)}
-                    onAbrir={() => setProdutoDetalhe(p)}
-                    onAdicionar={() => adicionarAoCarrinho(p)}
+                    onAbrir={setProdutoDetalhe}
+                    onAdicionar={adicionarAoCarrinho}
                     colunas={colunasVitrine}
                     tamanhoImagem={tamanhoImagemVitrine}
                   />
@@ -812,19 +846,12 @@ const SecaoHome = ({
           )}
         </View>
       }
-      renderItem={({ item }) => (
-        <CartaoProduto
-          item={item}
-          styles={styles}
-          corMarca={corMarca}
-          pontos={calcularPontosItem(item)}
-          onAbrir={() => setProdutoDetalhe(item)}
-          onAdicionar={() => adicionarAoCarrinho(item)}
-          colunas={colunasVitrine}
-          tamanhoImagem={tamanhoImagemVitrine}
-        />
-      )}
+      renderItem={renderCartaoProduto}
       contentContainerStyle={{ paddingBottom: 20, flexGrow: 1 }}
+      removeClippedSubviews={true}
+      initialNumToRender={8}
+      maxToRenderPerBatch={8}
+      windowSize={7}
     />
 
     <Modal
@@ -891,7 +918,8 @@ const SecaoHome = ({
     </Modal>
     </>
   );
-};
+});
+SecaoHome.displayName = 'SecaoHome';
 interface PerfilProps {
   nome: string;
   telefone: string;
@@ -1759,15 +1787,16 @@ function AppCliente() {
 
     return () => unsubscribe();
   }, [usuarioId, estaCadastrado]);
-  // Função para adicionar itens
-  const adicionarAoCarrinho = (produto: any) => {
+  // Função para adicionar itens (useCallback: identidade estável entre re-renders,
+  // necessário pra CartaoProduto memoizado não perder o memo por causa de uma prop nova)
+  const adicionarAoCarrinho = useCallback((produto: any) => {
     const novoItem = {
       ...produto,
       // Garante um ID único para cada clique, mesmo que seja o mesmo produto
       id_carrinho: Math.random().toString(36).slice(2, 9) + Date.now()
     };
     setCarrinho(prevCarrinho => [...prevCarrinho, novoItem]);
-  };
+  }, []);
 
   const aplicarFiltros = (lista: any[], termoBusca: string, categoria: string) => {
     let resultado = lista;
@@ -1992,9 +2021,9 @@ function AppCliente() {
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
             <View style={styles.containerCentro}>
               <View style={styles.cardCadastro}>
-                <Image source={BRAND_LOGO} style={styles.logoLogin} resizeMode="contain" />
+                <Image source={BRAND_LOGO} style={styles.logoLogin} contentFit="contain" />
                 {usaLogotipo && appCfg.logoUrl ? (
-                  <Image source={{ uri: appCfg.logoUrl }} style={styles.marcaLogoLogin} resizeMode="contain" />
+                  <Image source={{ uri: appCfg.logoUrl }} style={styles.marcaLogoLogin} contentFit="contain" />
                 ) : (
                   <Text style={[styles.tituloCadastro, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeAppExibicao}</Text>
                 )}
