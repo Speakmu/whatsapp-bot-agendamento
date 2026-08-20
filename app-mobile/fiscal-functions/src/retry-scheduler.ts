@@ -101,6 +101,32 @@ async function proximoNumero(): Promise<number> {
 // outro número nem duplicar a nota fiscal da venda.
 const STATUS_NOTA_ATIVA = ['PROCESSANDO', 'ERRO_REDE', 'CONTINGENCIA', 'AUTORIZADA'];
 
+// Mesma trava transacional do fiscal-client.js (client), no MESMO campo do
+// MESMO documento pedidos/{pedidoId} — Firestore garante consistência entre
+// SDK admin (aqui) e SDK client (dashboard), então um clique manual de
+// "Retry" e este cron se excluem mutuamente de verdade, mesmo rodando em
+// processos diferentes. Sem isso, os dois podiam checar "nenhuma nota ativa"
+// quase ao mesmo tempo e cada um emitir a sua — já causou duas NFC-e
+// AUTORIZADA de verdade pra um único pedido em produção.
+const TRAVA_EMISSAO_TIMEOUT_MS = 5 * 60 * 1000;
+async function adquirirTravaEmissao(pedidoId: string): Promise<void> {
+  const pedidoRef = db().collection('pedidos').doc(pedidoId);
+  await db().runTransaction(async (tx) => {
+    const snap = await tx.get(pedidoRef);
+    const d = snap.exists ? (snap.data() as any) : {};
+    const travaEm = d?.nfce_emitindo_em?.toMillis ? d.nfce_emitindo_em.toMillis() : 0;
+    if (travaEm && (Date.now() - travaEm) < TRAVA_EMISSAO_TIMEOUT_MS) {
+      throw new Error('NFCE_JA_EM_ANDAMENTO');
+    }
+    tx.update(pedidoRef, { nfce_emitindo_em: admin.firestore.FieldValue.serverTimestamp() });
+  });
+}
+async function liberarTravaEmissao(pedidoId: string): Promise<void> {
+  await db().collection('pedidos').doc(pedidoId)
+    .set({ nfce_emitindo_em: admin.firestore.FieldValue.delete() }, { merge: true })
+    .catch(() => {});
+}
+
 async function gravarResultado(ref: admin.firestore.DocumentReference, data: AvulsaResult): Promise<void> {
   const emContingencia = data.status === 'CONTINGENCIA';
   await ref.update({
@@ -119,6 +145,19 @@ async function gravarResultado(ref: admin.firestore.DocumentReference, data: Avu
 }
 
 async function emitirParaPedido(pedidoId: string, pedido: any, cfg: any, cert: CertInput): Promise<void> {
+  try {
+    await adquirirTravaEmissao(pedidoId);
+  } catch {
+    return; // outro processo (dashboard ou este mesmo cron) já está emitindo pra este pedido
+  }
+  try {
+    await emitirParaPedidoComTravaAdquirida(pedidoId, pedido, cfg, cert);
+  } finally {
+    await liberarTravaEmissao(pedidoId);
+  }
+}
+
+async function emitirParaPedidoComTravaAdquirida(pedidoId: string, pedido: any, cfg: any, cert: CertInput): Promise<void> {
   const existentes = await db().collection('notas_fiscais').where('pedido_id', '==', pedidoId).get();
   if (existentes.docs.some((d) => STATUS_NOTA_ATIVA.includes(d.data().status))) return;
 

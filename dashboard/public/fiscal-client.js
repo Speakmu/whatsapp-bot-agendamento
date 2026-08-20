@@ -80,6 +80,34 @@
     // novo enquanto uma dessas existir, senão duplica a nota fiscal da venda.
     const STATUS_NOTA_ATIVA = ['PROCESSANDO', 'ERRO_REDE', 'CONTINGENCIA', 'AUTORIZADA'];
 
+    // Trava transacional no PRÓPRIO PEDIDO para o trecho "checar se já existe
+    // nota ativa + pedir número + criar o registro PROCESSANDO". Sem isso, dois
+    // gatilhos concorrentes para o mesmo pedido (ex.: clique manual em "Retry"
+    // + o cron fiscalRetryScheduler rodando ~20min depois, ou duplo-clique no
+    // botão) podem cada um checar "nenhuma nota ativa" antes de qualquer um
+    // deles ter criado a sua — e os dois seguem em frente, emitindo (e a SEFAZ
+    // autorizando) DUAS NFC-e válidas e distintas pra mesma venda. Já aconteceu
+    // em produção (pedido com 2 notas AUTORIZADA, teve que cancelar as duas).
+    // A trava expira sozinha depois de 5min (processo que travou/caiu no meio
+    // não prende o pedido pra sempre).
+    const TRAVA_EMISSAO_TIMEOUT_MS = 5 * 60 * 1000;
+    async function adquirirTravaEmissao(pedidoId) {
+        const pedidoRef = db().collection('pedidos').doc(pedidoId);
+        await db().runTransaction(async (tx) => {
+            const snap = await tx.get(pedidoRef);
+            const d = snap.exists ? (snap.data() || {}) : {};
+            const travaEm = d.nfce_emitindo_em && d.nfce_emitindo_em.toMillis ? d.nfce_emitindo_em.toMillis() : 0;
+            if (travaEm && (Date.now() - travaEm) < TRAVA_EMISSAO_TIMEOUT_MS) {
+                throw new Error('NFCE_JA_EM_ANDAMENTO');
+            }
+            tx.update(pedidoRef, { nfce_emitindo_em: firebase.firestore.FieldValue.serverTimestamp() });
+        });
+    }
+    function liberarTravaEmissao(pedidoId) {
+        db().collection('pedidos').doc(pedidoId)
+            .set({ nfce_emitindo_em: firebase.firestore.FieldValue.delete() }, { merge: true }).catch(() => {});
+    }
+
     // Emite em segundo plano: grava um registro "PROCESSANDO" na hora (só Firestore,
     // rápido) e devolve o controle ao caixa imediatamente. A comunicação com a SEFAZ
     // (que pode levar até ~30s) continua rodando por trás e atualiza o MESMO
@@ -89,6 +117,15 @@
         const cfg = await getConfig();
         validarConfig(cfg);
 
+        await adquirirTravaEmissao(pedidoId);
+        try {
+            return await emitirComTravaAdquirida(pedidoId, pedido, cfg);
+        } finally {
+            liberarTravaEmissao(pedidoId);
+        }
+    }
+
+    async function emitirComTravaAdquirida(pedidoId, pedido, cfg) {
         // Já existe uma nota em andamento/concluída para este pedido (ex.: uma
         // tentativa anterior ficou em ERRO_REDE por falta de internet) — não
         // pede outro número nem cria outro documento, só devolve o que já existe.
@@ -143,6 +180,15 @@
             // Firestore recusa gravar "undefined" e quebraria o addDoc().
             payload_pendente: JSON.parse(JSON.stringify(payload))
         });
+
+        // Uma emissão foi iniciada de verdade pra este pedido — limpa
+        // nfce_pendente aqui (não só em emitirAutomatico) pra qualquer chamador
+        // (retry manual na tela Fiscal incluído). Sem isso, um retry manual
+        // bem-sucedido deixava a flag true pra sempre, e o cron do backend
+        // tentava emitir de novo no ciclo seguinte — uma das causas da
+        // duplicidade de NFC-e mencionada acima.
+        db().collection('pedidos').doc(pedidoId)
+            .set({ nfce_pendente: firebase.firestore.FieldValue.delete() }, { merge: true }).catch(() => {});
 
         // Não faz "await" abaixo — roda em segundo plano e atualiza o registro
         // quando a SEFAZ (ou a contingência) responder.
