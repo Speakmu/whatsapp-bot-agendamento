@@ -138,7 +138,10 @@
             // Guardado desde a criação (não só quando dá erro): se a aba fechar
             // ou recarregar antes da resposta chegar, resgatarNotasTravadas()
             // usa isso pra reenviar exatamente esta tentativa depois.
-            payload_pendente: payload
+            // JSON.parse(JSON.stringify()) remove campos "undefined" (ex.:
+            // indIntermed/recipient/ibptToken quando não se aplicam) — o
+            // Firestore recusa gravar "undefined" e quebraria o addDoc().
+            payload_pendente: JSON.parse(JSON.stringify(payload))
         });
 
         // Não faz "await" abaixo — roda em segundo plano e atualiza o registro
@@ -174,7 +177,7 @@
             const motivo = err.name === 'AbortError'
                 ? `Serviço fiscal não respondeu em ${TIMEOUT_EMISSAO_MS / 1000}s.`
                 : 'Falha ao contatar o serviço fiscal: ' + err.message;
-            await ref.update({ status: 'ERRO_REDE', motivo, payload_pendente: payload });
+            await ref.update({ status: 'ERRO_REDE', motivo, payload_pendente: JSON.parse(JSON.stringify(payload)) });
             return;
         } finally {
             clearTimeout(timeoutId);
