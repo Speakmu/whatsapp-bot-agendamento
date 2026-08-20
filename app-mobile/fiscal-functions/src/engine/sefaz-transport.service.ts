@@ -94,6 +94,12 @@ export class SefazTransport {
       // OpenSSL 3.x (Node 18+) passou a bloquear por padrão — sem isso a conexão
       // cai com "SSL alert number 40: handshake failure".
       secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+      // A renegociação legada sozinha não bastou (mesmo erro persistiu): o
+      // "security level" padrão do OpenSSL 3.x (SECLEVEL=1+) também recusa
+      // certificados/assinaturas mais fracos (RSA menor, SHA-1) que ainda
+      // aparecem do lado da SEFAZ/do certificado A1 do cliente. SECLEVEL=0
+      // rebaixa essa exigência só para esta conexão específica.
+      ciphers: 'DEFAULT:@SECLEVEL=0',
     } as any);
 
     return axios.create({
