@@ -119,6 +119,16 @@ export interface NfeXmlInput {
   // Additional info
   infAdic?: string;
 
+  // Responsável técnico (NT 2018.005) — obrigatório em vários estados quando
+  // quem emite a nota é um software de terceiros (não o sistema próprio do
+  // emitente), identificando quem desenvolve/mantém o sistema.
+  respTec?: {
+    cnpj: string;
+    xContato: string;
+    email: string;
+    fone: string;
+  };
+
   // NFC-e supplemental information
   supplemental?: {
     qrCode: string;
@@ -440,6 +450,15 @@ export class NfeXmlBuilder {
     // ── infAdic ───────────────────────────────────────────
     if (input.infAdic) {
       infNFe.ele('infAdic').ele('infCpl').txt(this.sanitizeNfeText(input.infAdic, 5000));
+    }
+
+    // ── infRespTec ──────────────────────────────────────────
+    if (input.respTec) {
+      const respTec = infNFe.ele('infRespTec');
+      respTec.ele('CNPJ').txt(input.respTec.cnpj.replace(/\D/g, ''));
+      respTec.ele('xContato').txt(this.sanitizeNfeText(input.respTec.xContato));
+      respTec.ele('email').txt(input.respTec.email.trim());
+      respTec.ele('fone').txt(input.respTec.fone.replace(/\D/g, ''));
     }
 
     if (input.supplemental?.qrCode) {

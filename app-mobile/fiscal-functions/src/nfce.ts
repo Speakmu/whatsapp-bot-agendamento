@@ -153,6 +153,15 @@ function gerarQrCode(chave44: string, tpAmb: '1' | '2', cscId: string, csc: stri
   return `${qrBaseUrl}${sep}p=${dadosBase}|${hash}`;
 }
 
+// Responsável técnico (NT 2018.005) — mesmo em toda nota, de todo cliente:
+// identifica quem desenvolve/mantém o software, não a loja emitente.
+const RESP_TEC = {
+  cnpj: '67168721000186',
+  xContato: 'Murilo Amorim',
+  email: 'contato@verticalworks.com.br',
+  fone: '3584377958',
+};
+
 // Avisos obrigatórios em ambiente de homologação (confirmados comparando com uma
 // NFC-e real gerada pelo Construline): descrição do(s) item(ns) e nome do
 // destinatário precisam avisar que a nota não tem valor fiscal.
@@ -287,6 +296,7 @@ async function montarInputNFe(req: AvulsaRequest): Promise<{ input: NfeXmlInput;
       vTroco: req.payment.vTroco ? round2(req.payment.vTroco) : undefined,
     },
     infAdic: tpAmb === '2' ? AVISO_HOMOLOGACAO_DEST : req.infAdic,
+    respTec: RESP_TEC,
   };
 
   return { input, cUF, uf, tpAmb };
