@@ -75,7 +75,15 @@ export interface AvulsaRequest {
   cscId: string;
   qrBaseUrl: string;         // portal QR Code da UF (homolog/prod)
   urlChave?: string;         // portal de consulta por chave
-  recipient?: { cpf?: string; cnpj?: string; xNome?: string };
+  recipient?: {
+    cpf?: string; cnpj?: string; xNome?: string;
+    // Endereço do destinatário: obrigatório pela SEFAZ quando a venda é
+    // "entrega a domicílio" (indPres=4) — sem isso a nota é rejeitada com
+    // "NFC-e de entrega a domicílio sem o endereço do destinatário", mesmo
+    // com CPF preenchido. Não se aplica a retirada no balcão.
+    xLgr?: string; nro?: string; xCpl?: string; xBairro?: string;
+    cMun?: string; xMun?: string; uf?: string; cep?: string;
+  };
   // Indicador de presença do comprador (padrão '1' = presencial/balcão). Pra
   // vendas por app/delivery, usar '4' (NFC-e com entrega a domicílio) — ver
   // Nota Técnica 2020.006. Quando indPres exige, indIntermed é obrigatório
@@ -256,6 +264,16 @@ async function montarInputNFe(req: AvulsaRequest): Promise<{ input: NfeXmlInput;
       // trazer o aviso de nota sem valor fiscal.
       xNome: tpAmb === '2' ? AVISO_HOMOLOGACAO_DEST : (req.recipient.xNome || 'CONSUMIDOR'),
       indIEDest: '9',
+      // Endereço de entrega (obrigatório em NFC-e "entrega a domicílio",
+      // indPres=4 — ver comentário na interface acima). Ausente em retirada.
+      xLgr: req.recipient.xLgr,
+      nro: req.recipient.nro,
+      xCpl: req.recipient.xCpl,
+      xBairro: req.recipient.xBairro,
+      cMun: req.recipient.cMun,
+      xMun: req.recipient.xMun,
+      uf: req.recipient.uf,
+      cep: req.recipient.cep ? req.recipient.cep.replace(/\D/g, '') : undefined,
     } : undefined,
     items,
     totals: {

@@ -181,7 +181,17 @@ async function emitirParaPedidoComTravaAdquirida(pedidoId: string, pedido: any, 
     indIntermed: pedido.origem === 'APP' ? '0' : undefined,
     payment: { tPag: mapTPag(pedido.forma_pagamento), vPag: Number(pedido.valor_total) || 0 },
     items: itensDoPedido(pedido, cfg),
-    recipient: pedido.cpf_cliente ? { cpf: pedido.cpf_cliente, xNome: pedido.nome_cliente } : undefined,
+    recipient: pedido.cpf_cliente ? {
+      cpf: pedido.cpf_cliente, xNome: pedido.nome_cliente,
+      // Endereço de entrega — exigido pela SEFAZ em NFC-e "entrega a domicílio"
+      // (indPres=4). Cidade/UF/CEP usam os dados do emitente (delivery local,
+      // mesma cidade da loja) já que o pedido só guarda a rua/número em texto livre.
+      ...(pedido.tipo_entrega === 'ENTREGA' && pedido.endereco ? {
+        xLgr: pedido.endereco,
+        xBairro: pedido.bairro || cfg.xBairro,
+        cMun: cfg.cMun, xMun: cfg.xMun, uf: cfg.uf, cep: cfg.cep,
+      } : {}),
+    } : undefined,
   };
 
   const ref = await db().collection('notas_fiscais').add({
