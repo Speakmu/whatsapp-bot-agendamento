@@ -637,6 +637,7 @@ interface HomeProps {
   bannerTexto?: string;
   bannerCor?: string;
   destaques?: any[];
+  promocoes?: any[];
   heroUrl?: string;
   corFundo?: string;
   colunasVitrine?: number;
@@ -744,7 +745,7 @@ const SecaoHome = React.memo(({
   categorias = ['Todos'], categoriaAtiva = 'Todos', setCategoriaAtiva,
   usaLogotipo = false, logoUrl, estiloFonteMarca = FONT_STYLE_MAP.italico, tamanhoFonteMarca = FONT_SIZE_MAP.grande,
   bannerAtivo = true, bannerTexto = 'Peça agora e ganhe pontos de fidelidade!', bannerCor = '#0f3d1e',
-  destaques = [], heroUrl, corFundo = '#ffffff',
+  destaques = [], promocoes = [], heroUrl, corFundo = '#ffffff',
   colunasVitrine = 1, tamanhoImagemVitrine = 'media',
   lojaFechada = false, horarioTexto = ''
 }: HomeProps) => {
@@ -862,8 +863,33 @@ const SecaoHome = React.memo(({
             <Image source={{ uri: heroUrl }} style={styles.heroBanner} contentFit="cover" />
           )}
 
-          {/* Vitrines de Destaques (Topo / Meio / Fundo) — só na home, sem busca/filtro */}
-          {mostrarVitrine && destaques.map((grupo: any) => (
+          {/* Promoções (carrossel) — quando existe pelo menos uma ativa, toma o
+              lugar das vitrines de destaque (configurado em Marketing & App). */}
+          {mostrarVitrine && promocoes.length > 0 && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 15, paddingTop: 10, gap: 12 }}
+            >
+              {promocoes.map((promo: any) => (
+                <View key={promo.id} style={styles.cardPromocao}>
+                  {!!promo.imagemUrl && (
+                    <Image source={{ uri: promo.imagemUrl }} style={styles.fotoPromocao} contentFit="cover" />
+                  )}
+                  <View style={styles.infoPromocao}>
+                    <Text style={styles.tituloPromocao} numberOfLines={1}>{promo.titulo}</Text>
+                    {!!promo.descricao && (
+                      <Text style={styles.descricaoPromocao} numberOfLines={2}>{promo.descricao}</Text>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+
+          {/* Vitrines de Destaques (Topo / Meio / Fundo) — só na home, sem busca/filtro,
+              e só quando não há promoção ativa tomando esse espaço */}
+          {mostrarVitrine && promocoes.length === 0 && destaques.map((grupo: any) => (
             <View key={grupo.chave}>
               <View style={[styles.faixaDestaque, { backgroundColor: grupo.cor || corMarca }]}>
                 <Text style={styles.faixaDestaqueTxt}>{grupo.titulo}</Text>
@@ -1296,6 +1322,20 @@ function AppCliente() {
       const d = s && s.exists() ? (s.data() || {}) : {};
       setDestaquesGrupos(Array.isArray(d.grupos) ? d.grupos : []);
       setHeroUrl(d.heroUrl || '');
+    }, () => { });
+    return () => unsub();
+  }, []);
+
+  // Promoções (Marketing & App → Promoções): quando existe pelo menos uma
+  // ativa, elas tomam o lugar das vitrines de destaque na home (carrossel).
+  const [promocoesAtivas, setPromocoesAtivas] = useState<any[]>([]);
+  useEffect(() => {
+    const unsub = onSnapshot(collection(dbModular, 'promocoes'), (snap: any) => {
+      const lista = snap.docs
+        .map((d: any) => ({ id: d.id, ...d.data() }))
+        .filter((p: any) => p.ativo !== false)
+        .sort((a: any, b: any) => (Number(a.ordem) || 0) - (Number(b.ordem) || 0));
+      setPromocoesAtivas(lista);
     }, () => { });
     return () => unsub();
   }, []);
@@ -2225,6 +2265,7 @@ function AppCliente() {
                 bannerTexto={appCfg.bannerTexto}
                 bannerCor={appCfg.bannerCor}
                 destaques={destaquesResolvidos}
+                promocoes={promocoesAtivas}
                 heroUrl={heroUrl}
                 corFundo={corFundoVitrine}
                 colunasVitrine={Number(appCfg.vitrineColunas) || 1}
@@ -2836,6 +2877,21 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   faixaDestaqueTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  cardPromocao: {
+    width: 260,
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    overflow: 'hidden',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+  },
+  fotoPromocao: { width: '100%', height: 140, backgroundColor: '#f0f0f0' },
+  infoPromocao: { padding: 12 },
+  tituloPromocao: { fontSize: 15, fontWeight: '700', color: '#1a1a1a' },
+  descricaoPromocao: { fontSize: 13, color: '#7f8c8d', marginTop: 3 },
   fotoDetalheProduto: { width: '100%', height: 240 },
   btnFecharDetalhe: {
     position: 'absolute',

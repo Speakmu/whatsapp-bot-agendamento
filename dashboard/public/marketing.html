@@ -262,13 +262,23 @@
             </div>
             <div class="box">
                 <h2>Promoções</h2>
-                <div class="sub">Lista de promoções exibidas no app.</div>
+                <div class="sub">Lista de promoções exibidas no app — quando existe pelo menos uma ativa, elas substituem as vitrines de destaque na tela inicial, em forma de carrossel. Use a ordem pra decidir a sequência do carrossel.</div>
                 <div class="form-inline">
                     <div class="campo" style="grid-column:span 2;"><label>Título</label><input id="p-titulo" placeholder="Ex: Combo família"></div>
                     <div class="campo" style="grid-column:span 3;"><label>Descrição</label><input id="p-desc" placeholder="2 pizzas G + refri"></div>
                     <div class="campo"><label>&nbsp;</label><button class="btn btn-add" id="p-add">+ Adicionar</button></div>
                 </div>
-                <table><thead><tr><th>Promoção</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
+                <div class="campo"><label>Imagem da promoção</label>
+                    <input type="file" id="p-file" accept="image/*">
+                    <small style="display:block; color:var(--muted); font-size:.78rem; margin-top:5px;">
+                        Resolução ideal: ~800×500px (proporção 16:10, horizontal) — usada no carrossel da home.
+                    </small>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+                    <img id="p-preview" src="" style="display:none; max-height:80px; max-width:100%; border:1px solid var(--line); border-radius:8px; padding:4px; background:#fff;">
+                    <button type="button" class="btn btn-rm" id="p-remover" style="display:none;">Remover imagem</button>
+                </div>
+                <table><thead><tr><th>Imagem</th><th>Promoção</th><th>Ordem</th><th>Status</th><th style="text-align:right">Ações</th></tr></thead>
                     <tbody id="p-lista"></tbody></table>
             </div>
         </section>

@@ -10,7 +10,7 @@
 //                        valorMinimoResgate, validadePontosDias }
 //    app_config/destaques { grupos: [{ chave, titulo, cor, limite, produtosIds }] }
 //    cupons     { codigo, tipo, valor, minimo, validade, ativo }
-//    promocoes  { titulo, descricao, ativo, criado_em }
+//    promocoes  { titulo, descricao, imagemUrl, ordem, ativo, criado_em }
 // ============================================================
 document.addEventListener('DOMContentLoaded', () => {
     const firebaseConfig = window.__FIREBASE_CONFIG__;
@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let logoFileSelecionado = null; // arquivo novo escolhido, aguardando upload no "Salvar"
     let logoUrlAtual = '';          // logoUrl já salvo no Firestore
+    let pFileSelecionado = null;    // imagem da nova promoção, aguardando upload no "+ Adicionar"
 
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
@@ -115,6 +116,21 @@ document.addEventListener('DOMContentLoaded', () => {
             $('totem-bv-preview').src = '';
             $('totem-bv-preview').style.display = 'none';
             $('totem-bv-remover').style.display = 'none';
+        });
+        $('p-file').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            pFileSelecionado = file;
+            $('p-preview').src = URL.createObjectURL(file);
+            $('p-preview').style.display = 'inline-block';
+            $('p-remover').style.display = 'inline-block';
+        });
+        $('p-remover').addEventListener('click', () => {
+            pFileSelecionado = null;
+            $('p-file').value = '';
+            $('p-preview').src = '';
+            $('p-preview').style.display = 'none';
+            $('p-remover').style.display = 'none';
         });
     });
 
@@ -527,15 +543,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---------- Promoções ----------
+    let promocoesCount = 0; // usado só pra sugerir a próxima ordem ao adicionar
     function ouvirPromocoes() {
         db.collection('promocoes').onSnapshot(snap => {
             const arr = []; snap.forEach(d => arr.push({ id: d.id, ...d.data() }));
+            promocoesCount = arr.length;
+            arr.sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
             const tb = $('p-lista');
-            if (!arr.length) { tb.innerHTML = '<tr><td colspan="3" style="color:#7f8c8d">Nenhuma promoção.</td></tr>'; return; }
+            if (!arr.length) { tb.innerHTML = '<tr><td colspan="5" style="color:#7f8c8d">Nenhuma promoção.</td></tr>'; return; }
             tb.innerHTML = arr.map(p => {
                 const badge = p.ativo !== false ? '<span class="badge b-on">ativa</span>' : '<span class="badge b-off">inativa</span>';
+                const img = p.imagemUrl
+                    ? `<img src="${esc(p.imagemUrl)}" style="width:56px;height:40px;object-fit:cover;border-radius:6px;background:#eee">`
+                    : `<div style="width:56px;height:40px;border-radius:6px;background:#eee"></div>`;
                 return `<tr>
+                    <td>${img}</td>
                     <td><strong>${esc(p.titulo)}</strong><br><span style="color:#7f8c8d;font-size:.82rem">${esc(p.descricao)}</span></td>
+                    <td><input type="number" class="p-ordem-input" data-ordem="${p.id}" value="${p.ordem ?? 0}" style="width:60px"></td>
                     <td>${badge}</td>
                     <td style="text-align:right">
                         <button class="btn btn-add" data-toggle="${p.id}" data-ativo="${p.ativo !== false}">${p.ativo !== false ? 'Desativar' : 'Ativar'}</button>
@@ -545,19 +569,38 @@ document.addEventListener('DOMContentLoaded', () => {
             tb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => db.collection('promocoes').doc(b.dataset.del).delete());
             tb.querySelectorAll('[data-toggle]').forEach(b => b.onclick = () =>
                 db.collection('promocoes').doc(b.dataset.toggle).update({ ativo: b.dataset.ativo !== 'true' }));
+            tb.querySelectorAll('[data-ordem]').forEach(inp => inp.onchange = () =>
+                db.collection('promocoes').doc(inp.dataset.ordem).update({ ordem: parseFloat(inp.value) || 0 }));
         });
     }
 
     async function addPromocao() {
         const titulo = ($('p-titulo').value || '').trim();
         if (!titulo) { alert('Informe o título.'); return; }
+        const btn = $('p-add');
+        const textoOriginal = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Adicionando...';
         try {
+            let imagemUrl = '';
+            if (pFileSelecionado) {
+                const storageRef = firebase.storage().ref();
+                const fileName = `promocoes/${Date.now()}_${pFileSelecionado.name}`;
+                const fileRef = storageRef.child(fileName);
+                const snapshot = await fileRef.put(pFileSelecionado);
+                imagemUrl = await snapshot.ref.getDownloadURL();
+            }
             await db.collection('promocoes').add({
-                titulo, descricao: $('p-desc').value.trim(), ativo: true, criado_em: FieldValue.serverTimestamp()
+                titulo, descricao: $('p-desc').value.trim(), imagemUrl,
+                ordem: promocoesCount, ativo: true, criado_em: FieldValue.serverTimestamp()
             });
             $('p-titulo').value = ''; $('p-desc').value = '';
+            pFileSelecionado = null;
+            $('p-file').value = '';
+            $('p-preview').src = ''; $('p-preview').style.display = 'none';
+            $('p-remover').style.display = 'none';
             flash('Promoção adicionada.');
         } catch (e) { alert('Erro: ' + e.message); }
+        finally { btn.disabled = false; btn.textContent = textoOriginal; }
     }
 
     function flash(t) {
