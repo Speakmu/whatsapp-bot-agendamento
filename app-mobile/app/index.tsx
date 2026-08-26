@@ -858,13 +858,15 @@ const SecaoHome = React.memo(({
             })}
           </ScrollView>
 
-          {/* Banner principal (imagem) — primeiro bloco da vitrine */}
-          {mostrarVitrine && !!heroUrl && (
+          {/* Banner principal (imagem) — primeiro bloco da vitrine. Some quando
+              há promoção ativa: só um dos dois aparece por vez. */}
+          {mostrarVitrine && promocoes.length === 0 && !!heroUrl && (
             <Image source={{ uri: heroUrl }} style={styles.heroBanner} contentFit="cover" />
           )}
 
           {/* Promoções (carrossel) — quando existe pelo menos uma ativa, toma o
-              lugar das vitrines de destaque (configurado em Marketing & App). */}
+              lugar do banner principal e das vitrines de destaque (configurado
+              em Marketing & App). */}
           {mostrarVitrine && promocoes.length > 0 && (
             <ScrollView
               horizontal
