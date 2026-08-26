@@ -981,7 +981,7 @@ interface PerfilProps {
   setTelefone: (tel: string) => void;
 }
 
-const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, setTelefone, cpf, setCpf, pontosPerfil }: any) => {
+const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, setTelefone, cpf, setCpf, pontosPerfil, valorPorPonto = 0, corMarca = BRAND_GREEN }: any) => {
   const [editando, setEditando] = useState(false);
   const [novoNome, setNovoNome] = useState(nome);
   const [novoTelefone, setNovoTelefone] = useState(telefone);
@@ -1074,16 +1074,31 @@ const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, set
 
         {/* 1. CARTÃO FIDELIDADE NO TOPO DO BLOCO CENTRAL */}
         <View style={styles.containerFidelidade}>
-          <View style={styles.cartaoFidelidade}>
+          <View style={[styles.cartaoFidelidade, { borderColor: corMarca }]}>
+            <View style={styles.cartaoBrilho} pointerEvents="none" />
             <View style={styles.cartaoTopo}>
-              <Text style={styles.cartaoTitulo}>CLIENTE FIDELIDADE</Text>
+              <Text style={styles.cartaoTitulo}>CARTÃO FIDELIDADE</Text>
+              <View style={[styles.cartaoChip, { backgroundColor: corMarca }]}>
+                <Text style={styles.cartaoChipTxt}>⭐</Text>
+              </View>
             </View>
             <View style={styles.cartaoConteudo}>
-              <Text style={styles.labelSaldo}>Seu Saldo</Text>
+              <Text style={styles.labelSaldo}>Seu saldo</Text>
               <View style={styles.rowPontos}>
                 <Text style={styles.valorPontosGrandes}>{pontosPerfil}</Text>
-                <Text style={styles.labelPontosTexto}> pontos</Text>
+                <Text style={[styles.labelPontosTexto, { color: corMarca }]}> pontos</Text>
               </View>
+              {valorPorPonto > 0 && (
+                <Text style={styles.valorEquivalente}>
+                  ≈ R$ {(Number(pontosPerfil) * valorPorPonto).toFixed(2)} em desconto
+                </Text>
+              )}
+            </View>
+            <View style={styles.cartaoBase}>
+              <Text style={styles.cartaoNomeTitular} numberOfLines={1}>
+                {(nome || 'CLIENTE').toUpperCase()}
+              </Text>
+              <Text style={[styles.cartaoSelo, { color: corMarca }]}>MEMBRO</Text>
             </View>
           </View>
         </View>
@@ -2253,6 +2268,8 @@ function AppCliente() {
                 cpf={cpf}
                 setCpf={setCpf}
                 pontosPerfil={pontosPerfil}
+                valorPorPonto={valorPorPonto}
+                corMarca={corMarca}
                 onSair={async () => {
                   Alert.alert(
                     "Sair",
@@ -3155,45 +3172,77 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   cartaoFidelidade: {
-    backgroundColor: '#1e1e1e', // Cor escura luxuosa
-    borderRadius: 20,
-    padding: 20,
-    elevation: 10,
+    backgroundColor: '#14151a', // grafite escuro, mais moderno que o preto chapado
+    borderRadius: 24,
+    padding: 22,
+    overflow: 'hidden',
+    elevation: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    borderWidth: 1,
-    borderColor: '#d4af37', // Borda dourada sutil
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    borderWidth: 1.5,
+  },
+  // Camada decorativa: um círculo grande e translúcido no canto, dando a
+  // textura de "brilho" que cartões físicos modernos costumam ter.
+  cartaoBrilho: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    top: -110,
+    right: -60,
   },
   cartaoTopo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 15,
+    alignItems: 'center',
+    marginBottom: 18,
   },
   cartaoTitulo: {
-    color: '#d4af37',
-    fontWeight: 'bold',
-    fontSize: 14,
-    letterSpacing: 1,
+    color: 'rgba(255,255,255,0.55)',
+    fontWeight: '700',
+    fontSize: 12,
+    letterSpacing: 1.5,
   },
-  cartaoEmoji: { fontSize: 20 },
+  cartaoChip: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cartaoChipTxt: { fontSize: 14 },
   cartaoConteudo: {
-    paddingVertical: 15,
-    paddingHorizontal: 0,
+    paddingVertical: 4,
   },
-  labelSaldo: { color: '#aaa', fontSize: 12, textTransform: 'uppercase' },
-  rowPontos: { flexDirection: 'row', alignItems: 'baseline' },
-  valorPontosGrandes: { color: '#fff', fontSize: 48, fontWeight: 'bold' },
-  labelPontosTexto: { color: '#d4af37', fontSize: 20, fontWeight: 'bold', marginLeft: 5 },
+  labelSaldo: { color: 'rgba(255,255,255,0.45)', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 },
+  rowPontos: { flexDirection: 'row', alignItems: 'baseline', marginTop: 4 },
+  valorPontosGrandes: { color: '#fff', fontSize: 44, fontWeight: '800', letterSpacing: -1 },
+  labelPontosTexto: { fontSize: 18, fontWeight: 'bold', marginLeft: 6 },
+  valorEquivalente: { color: 'rgba(255,255,255,0.5)', fontSize: 13, marginTop: 4 },
   cartaoBase: {
-    marginTop: 15,
+    marginTop: 22,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderTopWidth: 0.2,
-    borderTopColor: '#555',
-    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+    paddingTop: 14,
+  },
+  cartaoNomeTitular: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 1,
+    flexShrink: 1,
+    marginRight: 10,
+  },
+  cartaoSelo: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    letterSpacing: 1,
   },
   botaoSairFlutuante: {
     position: 'absolute', // Retira o botão do fluxo normal do layout
