@@ -6,7 +6,8 @@
 //                        bannerAtivo, bannerTexto, bannerCor,
 //                        vitrineColunas, vitrineImagem,
 //                        fidelidadeAtiva, pontosPorReal, valorPorPonto,
-//                        minResgate, validadePontosDias }
+//                        modoResgate ('pontos'|'valor'), minResgate,
+//                        valorMinimoResgate, validadePontosDias }
 //    app_config/destaques { grupos: [{ chave, titulo, cor, limite, produtosIds }] }
 //    cupons     { codigo, tipo, valor, minimo, validade, ativo }
 //    promocoes  { titulo, descricao, ativo, criado_em }
@@ -48,6 +49,8 @@ document.addEventListener('DOMContentLoaded', () => {
         $('a-salvar').addEventListener('click', salvarAparencia);
         $('b-salvar').addEventListener('click', salvarBanner);
         $('f-salvar').addEventListener('click', salvarFidelidade);
+        $('f-modo-valor').addEventListener('change', alternarModoResgate);
+        $('f-modo-pontos').addEventListener('change', alternarModoResgate);
         $('d-salvar').addEventListener('click', salvarDestaques);
         $('c-add').addEventListener('click', addCupom);
         $('p-add').addEventListener('click', addPromocao);
@@ -155,7 +158,12 @@ document.addEventListener('DOMContentLoaded', () => {
         $('f-pontosreal').value = d.pontosPorReal != null ? d.pontosPorReal : 1;
         $('f-valorponto').value = d.valorPorPonto != null ? d.valorPorPonto : 0.05;
         $('f-minresgate').value = d.minResgate != null ? d.minResgate : 100;
+        $('f-valorminresgate').value = d.valorMinimoResgate != null ? d.valorMinimoResgate : 1;
         $('f-validade').value = d.validadePontosDias != null ? d.validadePontosDias : 0;
+        const modoResgate = d.modoResgate === 'valor' ? 'valor' : 'pontos';
+        $('f-modo-valor').checked = modoResgate === 'valor';
+        $('f-modo-pontos').checked = modoResgate === 'pontos';
+        alternarModoResgate();
         $('v-colunas').value = d.vitrineColunas || 1;
         $('v-imagem').value = d.vitrineImagem || 'media';
         previewApp();
@@ -455,12 +463,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function alternarModoResgate() {
+        const modoValor = $('f-modo-valor').checked;
+        $('f-campo-valorminresgate').style.display = modoValor ? '' : 'none';
+        $('f-campo-minresgate').style.display = modoValor ? 'none' : '';
+    }
+
     async function salvarFidelidade() {
         try {
             await APP.set({
                 fidelidadeAtiva: $('f-ativo').checked,
                 pontosPorReal: parseFloat($('f-pontosreal').value) || 0,
                 valorPorPonto: parseFloat($('f-valorponto').value) || 0,
+                modoResgate: $('f-modo-valor').checked ? 'valor' : 'pontos',
+                valorMinimoResgate: parseFloat($('f-valorminresgate').value) || 1,
                 minResgate: parseInt($('f-minresgate').value) || 0,
                 validadePontosDias: parseInt($('f-validade').value) || 0
             }, { merge: true });

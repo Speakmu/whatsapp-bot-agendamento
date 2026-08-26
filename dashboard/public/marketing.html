@@ -303,9 +303,23 @@
                 <div class="grid2">
                     <div class="campo"><label>Pontos por R$ 1,00 gasto</label><input type="number" id="f-pontosreal" step="0.01" min="0" value="1"></div>
                     <div class="campo"><label>Valor de cada ponto no resgate (R$)</label><input type="number" id="f-valorponto" step="0.01" min="0" value="0.05"></div>
-                    <div class="campo"><label>Mínimo de pontos para resgatar</label><input type="number" id="f-minresgate" min="0" value="100"></div>
                     <div class="campo"><label>Validade dos pontos (dias, 0 = sem validade)</label><input type="number" id="f-validade" min="0" value="0"></div>
                 </div>
+
+                <div class="sub" style="margin-top:18px"><strong>Quando liberar o resgate</strong></div>
+                <div class="switch-row" style="gap:20px">
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+                        <input type="radio" name="f-modo" id="f-modo-valor" value="valor"> Por valor mínimo em desconto
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-weight:normal">
+                        <input type="radio" name="f-modo" id="f-modo-pontos" value="pontos"> Por quantidade mínima de pontos
+                    </label>
+                </div>
+                <div class="grid2">
+                    <div class="campo" id="f-campo-valorminresgate"><label>Valor mínimo em pontos pra liberar (R$)</label><input type="number" id="f-valorminresgate" step="0.01" min="0.01" value="1"></div>
+                    <div class="campo" id="f-campo-minresgate"><label>Mínimo de pontos para resgatar</label><input type="number" id="f-minresgate" min="0" value="100"></div>
+                </div>
+
                 <button class="btn btn-salvar" id="f-salvar">Salvar fidelidade</button>
             </div>
         </section>

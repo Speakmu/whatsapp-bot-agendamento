@@ -166,6 +166,7 @@ interface SacolaProps {
   pontosPerfil?: number;
   calcularDescontoResgate?: () => number;
   pontosResgatados?: number;
+  dicaResgatePontos?: string;
 }
 
 interface PedidosProps {
@@ -173,8 +174,9 @@ interface PedidosProps {
   insets: any;
   styles: any;
   getCorStatus: (status: string) => string;
+  onVerPix: (codigo: string) => void;
 }
-const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus }: PedidosProps) => {
+const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix }: PedidosProps) => {
   return (
     <View style={{ flex: 1, backgroundColor: '#f9f9f9', paddingTop: insets.top }}>
       <Text style={[styles.tituloSecao, { margin: 15 }]}>Meus Pedidos 📋</Text>
@@ -187,10 +189,16 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus }: PedidosProp
           // Tentamos pegar o array novo 'itens' ou o antigo 'itens_pedido'
           const listaItens = item.itens || item.itens_pedido;
           const valorExibicao = item.valor_total || item.total;
+          const aguardandoPix = item.status === 'AGUARDANDO_PIX' && !!item.pix_copia_cola;
           // --------------------------------------
 
           return (
-            <View style={styles.cardPedido}>
+            <TouchableOpacity
+              activeOpacity={aguardandoPix ? 0.7 : 1}
+              disabled={!aguardandoPix}
+              onPress={() => onVerPix(item.pix_copia_cola)}
+              style={styles.cardPedido}
+            >
               <View style={styles.linhaPedido}>
                 <Text style={styles.idPedido}>Pedido #{item.id.slice(-4)}</Text>
                 <Text style={[styles.statusBadge, { backgroundColor: getCorStatus(item.status) }]}>
@@ -225,7 +233,13 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus }: PedidosProp
               <Text style={styles.totalPedido}>
                 Total: R$ {typeof valorExibicao === 'number' ? valorExibicao.toFixed(2) : valorExibicao}
               </Text>
-            </View>
+
+              {aguardandoPix && (
+                <Text style={{ marginTop: 6, color: BRAND_GREEN, fontWeight: 'bold', fontSize: 12 }}>
+                  ⚡ Toque para ver o código PIX
+                </Text>
+              )}
+            </TouchableOpacity>
           );
         }}
         ListEmptyComponent={
@@ -252,8 +266,14 @@ const SecaoSacola = ({
   cupom, setCupom, aplicarCupom, cupomAplicado,
   calcularSubtotal, calcularDesconto, corMarca = BRAND_GREEN,
   usarPontos, setUsarPontos, podeResgatar, pontosPerfil, calcularDescontoResgate, pontosResgatados = 0,
+  dicaResgatePontos = '',
   lojaFechada = false, horarioTexto = ''
 }: SacolaProps) => {
+
+  // Refs pra encadear "próximo" no teclado (Nome -> Telefone -> Endereço),
+  // já que a área visível fica curta com o teclado aberto.
+  const refTelefone = useRef<TextInput>(null);
+  const refEndereco = useRef<TextInput>(null);
 
   // ESTADO LOCAL PARA OS DADOS DO CARTÃO
   const [dadosCartao, setDadosCartao] = useState({
@@ -274,8 +294,12 @@ const SecaoSacola = ({
   );
 
   return (
-
-    <View style={{ flex: 1 }}>
+    <>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top : 0}
+    >
       {/* HEADER */}
       <View style={[{ paddingTop: insets.top }]}>
         <Text style={[styles.tituloSecao, { margin: 15 }]}>Minha Sacola 🛍️</Text>
@@ -306,15 +330,27 @@ const SecaoSacola = ({
             <Text style={styles.tituloCheckout}>Confirme seus Dados</Text>
 
             <Text style={styles.labelInput}>Seu Nome</Text>
-            <TextInput style={styles.inputCheckout} value={nome} onChangeText={setNome} placeholder="Nome do cliente" />
+            <TextInput
+              style={styles.inputCheckout}
+              value={nome}
+              onChangeText={setNome}
+              placeholder="Nome do cliente"
+              returnKeyType="next"
+              onSubmitEditing={() => refTelefone.current?.focus()}
+              blurOnSubmit={false}
+            />
 
             <Text style={styles.labelInput}>Telefone</Text>
             <TextInput
+              ref={refTelefone}
               style={styles.inputCheckout}
               value={telefone}
               onChangeText={setTelefone}
               keyboardType="phone-pad"
               placeholder="(00) 00000-0000"
+              returnKeyType={tipoEntrega === 'entrega' ? 'next' : 'done'}
+              onSubmitEditing={() => { if (tipoEntrega === 'entrega') refEndereco.current?.focus(); }}
+              blurOnSubmit={tipoEntrega !== 'entrega'}
             />
 
             {/* TIPO DE PEDIDO: RETIRADA x ENTREGA */}
@@ -356,6 +392,7 @@ const SecaoSacola = ({
                 )}
                 <Text style={[styles.labelInput, { marginTop: 16 }]}>Rua e número</Text>
                 <TextInput
+                  ref={refEndereco}
                   style={[styles.inputCheckout, { height: 60 }]}
                   value={endereco}
                   onChangeText={setEndereco}
@@ -423,6 +460,14 @@ const SecaoSacola = ({
                 </Text>
               </TouchableOpacity>
             )}
+            {!podeResgatar && !!dicaResgatePontos && (
+              <View style={{
+                marginTop: 16, padding: 12, borderWidth: 1, borderColor: '#eee',
+                borderRadius: 8, backgroundColor: '#fafafa'
+              }}>
+                <Text style={{ fontSize: 13, color: '#888' }}>⭐ {dicaResgatePontos}</Text>
+              </View>
+            )}
           </View>
         )}
       </ScrollView>
@@ -432,12 +477,17 @@ const SecaoSacola = ({
         <View style={[
           styles.resumoPedido,
           {
-            // Se houver insets (entalhe inferior), usamos ele. 
-            // Se não, usamos apenas 10 de respiro.
-            paddingBottom: insets.bottom > 0 ? insets.bottom : 10
+            // Com o teclado aberto o espaço na tela é curto — corta o respiro
+            // extra da área segura (ele não é necessário, o teclado já ocupa
+            // essa faixa) pra sobrar mais altura pra edição dos campos.
+            paddingTop: tecladoVisivel ? 8 : 15,
+            paddingBottom: tecladoVisivel ? 8 : (insets.bottom > 0 ? insets.bottom : 10)
           }
         ]}>
-          {cupomAplicado && calcularDesconto && calcularDesconto() > 0 && (
+          {/* Com o teclado aberto, esconde o detalhamento (desconto/pontos/taxa)
+              pra sobrar mais tela pro campo que o cliente está digitando —
+              ele volta a aparecer assim que o teclado fecha. */}
+          {!tecladoVisivel && cupomAplicado && calcularDesconto && calcularDesconto() > 0 && (
             <View style={[styles.linhaTotal, { marginBottom: 4 }]}>
               <Text style={{ fontSize: 14, color: BRAND_GREEN }}>Desconto ({cupomAplicado.codigo})</Text>
               <Text style={{ fontSize: 14, color: BRAND_GREEN, fontWeight: '600' }}>
@@ -445,7 +495,7 @@ const SecaoSacola = ({
               </Text>
             </View>
           )}
-          {usarPontos && calcularDescontoResgate && calcularDescontoResgate() > 0 && (
+          {!tecladoVisivel && usarPontos && calcularDescontoResgate && calcularDescontoResgate() > 0 && (
             <View style={[styles.linhaTotal, { marginBottom: 4 }]}>
               <Text style={{ fontSize: 14, color: BRAND_GREEN }}>Pontos resgatados ({pontosResgatados})</Text>
               <Text style={{ fontSize: 14, color: BRAND_GREEN, fontWeight: '600' }}>
@@ -453,7 +503,7 @@ const SecaoSacola = ({
               </Text>
             </View>
           )}
-          {tipoEntrega === 'entrega' && taxaEntrega > 0 && (
+          {!tecladoVisivel && tipoEntrega === 'entrega' && taxaEntrega > 0 && (
             <View style={[styles.linhaTotal, { marginBottom: 4 }]}>
               <Text style={{ fontSize: 14, color: '#888' }}>Taxa de entrega</Text>
               <Text style={{ fontSize: 14, color: '#888', fontWeight: '600' }}>
@@ -461,21 +511,21 @@ const SecaoSacola = ({
               </Text>
             </View>
           )}
-          <View style={styles.linhaTotal}>
-            <Text style={{ fontSize: 16 }}>Total do pedido</Text>
-            <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#2d3436' }}>
+          <View style={[styles.linhaTotal, tecladoVisivel && { marginBottom: 8 }]}>
+            <Text style={{ fontSize: tecladoVisivel ? 14 : 16 }}>Total do pedido</Text>
+            <Text style={{ fontSize: tecladoVisivel ? 18 : 22, fontWeight: 'bold', color: '#2d3436' }}>
               R$ {calcularTotal()}
             </Text>
           </View>
 
-          {!tecladoVisivel && (
-            <TouchableOpacity
+          <TouchableOpacity
               style={[
                 styles.btnFinalizarPedido,
                 {
                   backgroundColor: metodoPagamento === 'cartao' ? '#197ddb' : corMarca,
                   // 🔥 REMOVA ou reduza drasticamente o marginBottom
-                  marginBottom: 0
+                  marginBottom: 0,
+                  height: tecladoVisivel ? 44 : 55
                 }
               ]}
               disabled={carregandoLogin || lojaFechada}
@@ -509,9 +559,9 @@ const SecaoSacola = ({
                 </Text>
               )}
             </TouchableOpacity>
-          )}
         </View>
       )}
+    </KeyboardAvoidingView>
 
       <Modal
         visible={modalBairroVisivel}
@@ -560,7 +610,7 @@ const SecaoSacola = ({
           </View>
         </View>
       </Modal>
-    </View>
+    </>
   );
 };
 interface HomeProps {
@@ -1011,7 +1061,12 @@ const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, set
   }
 
   return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+    >
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
       style={{ flex: 1, backgroundColor: '#f8f9fa' }}
     >
@@ -1120,6 +1175,7 @@ const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, set
         </TouchableOpacity>
       </View>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 function AppCliente() {
@@ -1267,11 +1323,26 @@ function AppCliente() {
   };
 
   // --- Resgate de pontos (regras do GestorChef) ---
+  // Dois modos de liberar o resgate: por quantidade mínima de pontos
+  // (minResgate, o original) ou por valor mínimo de desconto (qualquer
+  // saldo que já valha pelo menos valorMinimoResgate em R$).
   const valorPorPonto = Number(appCfg.valorPorPonto) || 0;
   const minResgate = Number(appCfg.minResgate) || 0;
-  const podeResgatar =
-    appCfg.fidelidadeAtiva !== false && valorPorPonto > 0 &&
-    pontosPerfil > 0 && pontosPerfil >= minResgate;
+  const modoResgate = appCfg.modoResgate === 'valor' ? 'valor' : 'pontos';
+  const valorMinimoResgate = Number(appCfg.valorMinimoResgate) || 1;
+  const valorDisponivelPontos = pontosPerfil * valorPorPonto;
+  const fidelidadeHabilitada = appCfg.fidelidadeAtiva !== false && valorPorPonto > 0 && pontosPerfil > 0;
+  const podeResgatar = fidelidadeHabilitada && (
+    modoResgate === 'valor' ? valorDisponivelPontos >= valorMinimoResgate : pontosPerfil >= minResgate
+  );
+  // Aviso de "quase lá" quando o cliente já tem pontos mas ainda não bateu o
+  // mínimo — sem isso, o bloco de resgate simplesmente não aparece e passa a
+  // impressão de que o recurso nem existe.
+  const dicaResgatePontos = !podeResgatar && fidelidadeHabilitada
+    ? (modoResgate === 'valor'
+      ? `Você já tem R$ ${valorDisponivelPontos.toFixed(2)} em pontos — resgate liberado a partir de R$ ${valorMinimoResgate.toFixed(2)}.`
+      : `Faltam ${Math.max(0, minResgate - pontosPerfil)} pontos pra poder resgatar (mínimo de ${minResgate}).`)
+    : '';
 
   const calcularDescontoResgate = () => {
     if (!usarPontos || !podeResgatar) return 0;
@@ -1463,7 +1534,7 @@ function AppCliente() {
       const resultado = await response.json();
 
       if (resultado.status === 'pending') {
-        const codigoPix = resultado.point_of_interaction.transaction_data.qr_code;
+        const codigoPix: string = resultado.point_of_interaction.transaction_data.qr_code;
         setPixCopiaECola(codigoPix);
 
         // --- AGRUPAMENTO DE ITENS (Igual ao Cartão para a Cozinha ler certo) ---
@@ -1499,6 +1570,7 @@ function AppCliente() {
           // identificado, senão a SEFAZ rejeita a nota (schema/regra fiscal).
           cpf_cliente: cpfLimpo,
           pagamento_id: resultado.id,
+          pix_copia_cola: codigoPix, // permite reabrir o código na aba Pedidos se o cliente sair da tela
           status: 'AGUARDANDO_PIX', // 🔥 CORREÇÃO: Começa como aguardando o pagamento
           pontos_a_creditar: pontosDoPedido(carrinho), // creditado pelo webhook quando o MP confirmar o pagamento
           hora_pedido: serverTimestamp(),
@@ -2162,6 +2234,10 @@ function AppCliente() {
                 insets={insets}
                 styles={styles}
                 getCorStatus={getCorStatus}
+                onVerPix={(codigo) => {
+                  setPixCopiaECola(codigo);
+                  setModalPixVisivel(true);
+                }}
               />
             )}
 
@@ -2249,6 +2325,7 @@ function AppCliente() {
                 pontosPerfil={pontosPerfil}
                 calcularDescontoResgate={calcularDescontoResgate}
                 pontosResgatados={usarPontos ? pontosUsados() : 0}
+                dicaResgatePontos={dicaResgatePontos}
                 lojaFechada={lojaFechada}
                 horarioTexto={horarioTexto}
               />
