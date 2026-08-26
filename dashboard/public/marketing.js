@@ -271,10 +271,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if ($('a-tipo').value === 'logo') {
                 if (logoFileSelecionado) {
                     btn.textContent = 'Enviando logotipo...';
+                    const imagemComprimida = await redimensionarImagem(logoFileSelecionado, 500);
                     const storageRef = firebase.storage().ref();
-                    const fileName = `marca/${Date.now()}_${logoFileSelecionado.name}`;
+                    const fileName = `marca/${Date.now()}_logo.jpg`;
                     const fileRef = storageRef.child(fileName);
-                    const snapshot = await fileRef.put(logoFileSelecionado);
+                    const snapshot = await fileRef.put(imagemComprimida, { contentType: 'image/jpeg' });
                     logoUrlAtual = await snapshot.ref.getDownloadURL();
                     logoFileSelecionado = null;
                 }
@@ -439,20 +440,24 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             if (heroFileSelecionado) {
                 btn.textContent = 'Enviando banner...';
+                const imagemComprimida = await redimensionarImagem(heroFileSelecionado, 1100);
                 const storageRef = firebase.storage().ref();
-                const fileName = `marca/${Date.now()}_${heroFileSelecionado.name}`;
+                const fileName = `marca/${Date.now()}_hero.jpg`;
                 const fileRef = storageRef.child(fileName);
-                const snapshot = await fileRef.put(heroFileSelecionado);
+                const snapshot = await fileRef.put(imagemComprimida, { contentType: 'image/jpeg' });
                 heroUrlAtual = await snapshot.ref.getDownloadURL();
                 heroFileSelecionado = null;
             }
 
             if (totemBvFileSelecionado) {
                 btn.textContent = 'Enviando imagem do totem...';
+                // Tela cheia em pé (retrato) — mantém uma resolução maior que os
+                // demais banners, já que ocupa o totem inteiro.
+                const imagemComprimida = await redimensionarImagem(totemBvFileSelecionado, 1920);
                 const storageRef = firebase.storage().ref();
-                const fileName = `marca/${Date.now()}_${totemBvFileSelecionado.name}`;
+                const fileName = `marca/${Date.now()}_totem.jpg`;
                 const fileRef = storageRef.child(fileName);
-                const snapshot = await fileRef.put(totemBvFileSelecionado);
+                const snapshot = await fileRef.put(imagemComprimida, { contentType: 'image/jpeg' });
                 totemBvUrlAtual = await snapshot.ref.getDownloadURL();
                 totemBvFileSelecionado = null;
             }
@@ -583,10 +588,12 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             let imagemUrl = '';
             if (pFileSelecionado) {
+                btn.textContent = 'Enviando imagem...';
+                const imagemComprimida = await redimensionarImagem(pFileSelecionado, 900);
                 const storageRef = firebase.storage().ref();
-                const fileName = `promocoes/${Date.now()}_${pFileSelecionado.name}`;
+                const fileName = `promocoes/${Date.now()}_promo.jpg`;
                 const fileRef = storageRef.child(fileName);
-                const snapshot = await fileRef.put(pFileSelecionado);
+                const snapshot = await fileRef.put(imagemComprimida, { contentType: 'image/jpeg' });
                 imagemUrl = await snapshot.ref.getDownloadURL();
             }
             await db.collection('promocoes').add({

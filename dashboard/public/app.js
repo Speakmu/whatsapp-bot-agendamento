@@ -1,39 +1,5 @@
-// Redimensiona/comprime a foto do produto no navegador antes de enviar pro
-// Storage — sem isso, fotos de câmera de celular (vários MB cada) são
-// baixadas em tamanho real toda vez que a grade de produtos aparece
-// (Cardápio, Caixa, Mesas, Totem, app do cliente), pesando muito numa
-// conexão/computador mais fraco. 900px de lado maior é sobra pra exibição
-// em card — resultado tipicamente sai abaixo de 200KB.
-function redimensionarImagem(file, maxDim = 900, qualidade = 0.82) {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        img.onload = () => {
-            URL.revokeObjectURL(url);
-            let { width, height } = img;
-            if (width > maxDim || height > maxDim) {
-                if (width >= height) {
-                    height = Math.round(height * (maxDim / width));
-                    width = maxDim;
-                } else {
-                    width = Math.round(width * (maxDim / height));
-                    height = maxDim;
-                }
-            }
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-            canvas.toBlob(
-                blob => blob ? resolve(blob) : reject(new Error('Falha ao comprimir imagem')),
-                'image/jpeg',
-                qualidade
-            );
-        };
-        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não foi possível ler a imagem')); };
-        img.src = url;
-    });
-}
+// redimensionarImagem() vem de /img-utils.js (compartilhado com marketing.js)
+// — carregado antes deste script em painel.html.
 
 document.addEventListener('DOMContentLoaded', () => {
     // Apenas a configuração do Firebase é definida fora do DOMContentLoaded
@@ -898,6 +864,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function canalPedido(pedido) {
         const origem = String(pedido.origem || pedido.canal || pedido.source || '').trim().toUpperCase();
         if (origem === 'APP') return 'app';
+        if (origem === 'IFOOD') return 'ifood';
         if (['BOT', 'WHATSAPP', 'WPP'].includes(origem)) return 'bot';
         if (['BALCAO', 'MESA', 'SISTEMA', 'PDV'].includes(origem)) return 'sistema';
         if (pedido.wa_id || pedido.telefone_cliente || String(pedido.usuario_id || '').startsWith('wa_')) return 'bot';
@@ -934,6 +901,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const canais = {
                     app: { qtd: 0, total: 0 },
                     bot: { qtd: 0, total: 0 },
+                    ifood: { qtd: 0, total: 0 },
                     sistema: { qtd: 0, total: 0 }
                 };
                 let totalPedidos = 0;
@@ -959,13 +927,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
 
-                const maiorQtd = Math.max(canais.app.qtd, canais.bot.qtd, canais.sistema.qtd, 1);
+                const maiorQtd = Math.max(canais.app.qtd, canais.bot.qtd, canais.ifood.qtd, canais.sistema.qtd, 1);
                 setText('orders-today-total', String(totalPedidos));
                 setText('orders-today-revenue', moneyBR(faturamento));
                 setText('orders-today-active', String(pedidosAtivos));
                 setText('orders-today-ticket', moneyBR(vendasFaturadas ? faturamento / vendasFaturadas : 0));
 
-                [['app', 'channel-app'], ['bot', 'channel-bot'], ['sistema', 'channel-sistema']].forEach(([key, prefix]) => {
+                // channel-ifood-* só atualiza se a tela tiver o card (setText/setBar
+                // ignoram silenciosamente se o elemento não existir).
+                [['app', 'channel-app'], ['bot', 'channel-bot'], ['ifood', 'channel-ifood'], ['sistema', 'channel-sistema']].forEach(([key, prefix]) => {
                     setText(`${prefix}-count`, String(canais[key].qtd));
                     setText(`${prefix}-value`, moneyBR(canais[key].total));
                     setBar(`${prefix}-bar`, pct(canais[key].qtd, maiorQtd));
