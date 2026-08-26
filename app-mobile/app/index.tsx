@@ -24,7 +24,7 @@ import {
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform,
+  Alert, Dimensions, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform,
   ScrollView,
   StatusBar, StyleSheet, Text, TextInput, TouchableOpacity,
   View
@@ -678,6 +678,13 @@ const IMG_TAMANHO_GRADE: Record<string, number> = { pequena: 90, media: 130, gra
 // Largura do card por quantidade de itens por linha (grade)
 const COL_LARGURA: Record<number, string> = { 2: '48%', 3: '31%', 4: '23%' };
 
+// Card do carrossel de promoções: quase full-bleed (só uma tira do próximo
+// card "espiando" na borda, como banner de app de delivery) — recomendação
+// de imagem no dashboard é 16:10, então a altura segue essa proporção pra
+// cortar o mínimo possível da arte enviada pelo lojista.
+const LARGURA_CARD_PROMOCAO = Dimensions.get('window').width - 45;
+const ALTURA_CARD_PROMOCAO = Math.round(LARGURA_CARD_PROMOCAO / 1.6);
+
 // --- CARTÃO DE PRODUTO (usado na lista de resultados e nas vitrines de destaque) ---
 // React.memo + onAbrir/onAdicionar recebendo o item (em vez de closures novas por
 // render no chamador) — evita re-render de todos os cards a cada troca de categoria.
@@ -865,12 +872,16 @@ const SecaoHome = React.memo(({
           )}
 
           {/* Promoções (carrossel) — quando existe pelo menos uma ativa, toma o
-              lugar do banner principal e das vitrines de destaque (configurado
-              em Marketing & App). */}
+              lugar do banner principal (não dos destaques, que continuam
+              aparecendo normalmente logo abaixo). Cards quase full-bleed
+              (só um respiro pra "espiar" o próximo) pra artes desenhadas na
+              proporção recomendada (16:10) não cortarem feio. */}
           {mostrarVitrine && promocoes.length > 0 && (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
+              decelerationRate="fast"
+              snapToInterval={LARGURA_CARD_PROMOCAO + 12}
               contentContainerStyle={{ paddingHorizontal: 15, paddingTop: 10, gap: 12 }}
             >
               {promocoes.map((promo: any) => (
@@ -889,9 +900,10 @@ const SecaoHome = React.memo(({
             </ScrollView>
           )}
 
-          {/* Vitrines de Destaques (Topo / Meio / Fundo) — só na home, sem busca/filtro,
-              e só quando não há promoção ativa tomando esse espaço */}
-          {mostrarVitrine && promocoes.length === 0 && destaques.map((grupo: any) => (
+          {/* Vitrines de Destaques (Topo / Meio / Fundo) — só na home, sem busca/filtro.
+              Fazem parte da interface inicial e continuam visíveis mesmo com
+              promoção ativa (só o banner principal é substituído). */}
+          {mostrarVitrine && destaques.map((grupo: any) => (
             <View key={grupo.chave}>
               <View style={[styles.faixaDestaque, { backgroundColor: grupo.cor || corMarca }]}>
                 <Text style={styles.faixaDestaqueTxt}>{grupo.titulo}</Text>
@@ -2880,7 +2892,7 @@ const styles = StyleSheet.create({
   },
   faixaDestaqueTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
   cardPromocao: {
-    width: 260,
+    width: LARGURA_CARD_PROMOCAO,
     borderRadius: 14,
     backgroundColor: '#fff',
     overflow: 'hidden',
@@ -2890,7 +2902,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 6,
   },
-  fotoPromocao: { width: '100%', height: 140, backgroundColor: '#f0f0f0' },
+  fotoPromocao: { width: '100%', height: ALTURA_CARD_PROMOCAO, backgroundColor: '#f0f0f0' },
   infoPromocao: { padding: 12 },
   tituloPromocao: { fontSize: 15, fontWeight: '700', color: '#1a1a1a' },
   descricaoPromocao: { fontSize: 13, color: '#7f8c8d', marginTop: 3 },
