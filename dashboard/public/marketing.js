@@ -132,6 +132,34 @@ document.addEventListener('DOMContentLoaded', () => {
             $('p-preview').style.display = 'none';
             $('p-remover').style.display = 'none';
         });
+
+        // Colar (Ctrl+V) um print da área de transferência direto num dos
+        // campos de imagem — mesmo recurso que o Cardápio já tem. Como aqui
+        // tem vários campos de imagem na mesma página (logo, banner, totem,
+        // promoção), o alvo do "colar" é sempre o último campo que o usuário
+        // clicou (padrão: logotipo, a primeira aba da página).
+        let campoImagemAtivo = 'a-logo-file';
+        ['a-logo-file', 'hero-file', 'totem-bv-file', 'p-file'].forEach(id => {
+            $(id).addEventListener('click', () => { campoImagemAtivo = id; });
+            $(id).addEventListener('focus', () => { campoImagemAtivo = id; });
+        });
+        document.addEventListener('paste', (e) => {
+            const input = $(campoImagemAtivo);
+            if (!input) return;
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    if (!file) continue;
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(file);
+                    input.files = dataTransfer.files;
+                    input.dispatchEvent(new Event('change'));
+                    break;
+                }
+            }
+        });
     });
 
     function setupTabs() {
