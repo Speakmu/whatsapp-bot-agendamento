@@ -59,9 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const COLECAO_PEDIDOS = "pedidos";
     const COLECAO_CARDAPIO = "cardapio";
     const COLECAO_ENTREGADORES = "entregadores";
-    // Backend real do bot no Render — antes apontava pra um túnel ngrok
-    // antigo e morto (as notificações de "pedido pronto" nunca chegavam).
-    const ngrokUrl = "https://whatsapp-bot-agendamento.onrender.com";
+    // Backend real do bot, agora no Cloud Run (migrado do Render).
+    const ngrokUrl = "https://whatsapp-bot-agendamento-353057562610.us-central1.run.app";
     const STATUS_ATIVOS_PEDIDOS = ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"];
     const STATUS_NAO_FATURA = new Set(["CANCELADO", "AGUARDANDO_PAGAMENTO", "AGUARDANDO_PIX"]);
     const moneyBR = (v) => "R$ " + (Number(v) || 0).toFixed(2).replace('.', ',');

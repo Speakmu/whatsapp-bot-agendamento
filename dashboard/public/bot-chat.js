@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const $ = (id) => document.getElementById(id);
 
     // Base do backend do bot (mesmo endereço usado em kds.js / entrega.js).
-    const BOT_BASE_URL = "https://whatsapp-bot-agendamento.onrender.com";
+    const BOT_BASE_URL = "https://whatsapp-bot-agendamento-353057562610.us-central1.run.app";
     const COL = db.collection('historico_conversas');
     const COL_BAIRROS_APRENDIZADO = db.collection('bairros_aprendizado');
     const COL_ITENS_APRENDIZADO = db.collection('itens_aprendizado');

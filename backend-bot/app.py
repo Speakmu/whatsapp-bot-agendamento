@@ -20,7 +20,14 @@ FIREBASE_CREDENCIAL_PATH = os.environ.get("FIREBASE_CREDENCIAL_PATH")
 FIREBASE_STORAGE_BUCKET = os.environ.get("FIREBASE_STORAGE_BUCKET")
 
 if not firebase_admin._apps:
-    cred = credentials.Certificate(FIREBASE_CREDENCIAL_PATH)
+    # No Cloud Run (K_SERVICE sempre definido em runtime) usa a service
+    # account do próprio serviço via Application Default Credentials — sem
+    # precisar de arquivo de chave nenhum. Localmente (Render antigo/dev)
+    # continua caindo no arquivo apontado por FIREBASE_CREDENCIAL_PATH.
+    if os.environ.get("K_SERVICE"):
+        cred = credentials.ApplicationDefault()
+    else:
+        cred = credentials.Certificate(FIREBASE_CREDENCIAL_PATH)
     firebase_admin.initialize_app(cred, {'storageBucket': FIREBASE_STORAGE_BUCKET})
 db = firestore.client()
 

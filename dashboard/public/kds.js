@@ -14,7 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const COLECAO_PEDIDOS = "pedidos";
     // Base do backend do bot (para avisar o cliente quando o pedido fica pronto).
     // Ajuste aqui se mudar a URL pública do backend.
-    const BOT_BASE_URL = "https://whatsapp-bot-agendamento.onrender.com";
+    const BOT_BASE_URL = "https://whatsapp-bot-agendamento-353057562610.us-central1.run.app";
 
     // Limiares de urgência (minutos) para colorir os tickets
     const MIN_ATENCAO = 10;
