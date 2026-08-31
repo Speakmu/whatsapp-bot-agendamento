@@ -60,19 +60,47 @@
     // valor_total do pedido sem mudar o preço unitário guardado em cada item
     // — a soma dos itens ficava diferente do valor realmente pago, e a SEFAZ
     // rejeita a nota ("Total dos pagamentos menor/maior que o total da nota").
-    // Ajusta o último item pra fechar exatamente com o valor cobrado.
     function reconciliarComValorPago(items, valorTotal) {
         const alvo = Number(valorTotal) || 0;
         const soma = items.reduce((s, i) => s + i.qCom * i.vUnCom, 0);
         const diff = Math.round((soma - alvo) * 100) / 100;
         if (Math.abs(diff) < 0.01) return;
-        const ultimo = items[items.length - 1];
-        if (diff > 0) {
-            // itens somam mais que o valor pago (cupom/pontos de desconto) -> abate no último item
-            ultimo.vDesc = Math.round(((ultimo.vDesc || 0) + diff) * 100) / 100;
-        } else {
+
+        if (diff < 0) {
             // valor pago é maior que a soma dos itens (ex: taxa de entrega) -> soma no valor do último item
+            const ultimo = items[items.length - 1];
             ultimo.vUnCom = Math.round((ultimo.vUnCom + (-diff) / ultimo.qCom) * 100) / 100;
+            return;
+        }
+
+        // Itens somam mais que o valor pago (cupom/pontos de desconto): distribui
+        // o desconto proporcionalmente entre os itens, sem deixar o desconto de
+        // nenhum item passar do valor dele (a SEFAZ rejeita isso também). Se
+        // sobrar valor por causa de itens já "saturados" (desconto = valor
+        // inteiro), reparte de novo só entre os que ainda têm folga.
+        let restante = diff;
+        items.forEach((it, idx) => {
+            const vItem = Math.round(it.qCom * it.vUnCom * 100) / 100;
+            const proporcional = idx === items.length - 1
+                ? restante
+                : Math.round((diff * (vItem / soma)) * 100) / 100;
+            const parte = Math.min(proporcional, vItem, restante);
+            if (parte > 0) {
+                it.vDesc = Math.round(((it.vDesc || 0) + parte) * 100) / 100;
+                restante = Math.round((restante - parte) * 100) / 100;
+            }
+        });
+        while (restante > 0.004) {
+            const comFolga = items.find(it => {
+                const vItem = Math.round(it.qCom * it.vUnCom * 100) / 100;
+                return vItem - (it.vDesc || 0) > 0.004;
+            });
+            if (!comFolga) break; // desconto >= soma de todos os itens (caso extremo, não dá pra reconciliar)
+            const vItem = Math.round(comFolga.qCom * comFolga.vUnCom * 100) / 100;
+            const folga = Math.round((vItem - (comFolga.vDesc || 0)) * 100) / 100;
+            const parte = Math.min(folga, restante);
+            comFolga.vDesc = Math.round(((comFolga.vDesc || 0) + parte) * 100) / 100;
+            restante = Math.round((restante - parte) * 100) / 100;
         }
     }
 
