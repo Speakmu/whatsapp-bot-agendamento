@@ -1,7 +1,6 @@
 import re
 import unicodedata
 import threading
-import queue
 from flask import Flask, request, jsonify
 import requests
 import os
@@ -1305,11 +1304,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     messages.append({"role": "user", "content": prompt})
 
     try:
+        # timeout explícito: sem isso, uma resposta lenta/pendurada da OpenAI
+        # prende essa thread indefinidamente. Como cada mensagem já roda numa
+        # thread própria (travada só por cliente, não globalmente), isso por
+        # si só não travaria outros clientes — mas travava ESSE cliente pro
+        # resto da conversa, e sem limite de tempo. 60s é folgado pra uma
+        # resposta com function-calling.
         response = openai.chat.completions.create(
             model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"],
             messages=messages,
             tools=tools,
-            tool_choice="auto"
+            tool_choice="auto",
+            timeout=60
         )
         
         response_message = response.choices[0].message
@@ -1382,7 +1388,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
 
                 messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": content})
             
-            second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages)
+            second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages, timeout=60)
             final_text = second_res.choices[0].message.content
         else:
             final_text = response_message.content
@@ -1528,42 +1534,49 @@ def webhook():
                             # O Meta espera o 200 rápido — não o fim do processamento, que
                             # envolve Firestore + OpenAI + envio pelo WhatsApp e pode passar
                             # do timeout do webhook, disparando um retry (e uma resposta
-                            # duplicada). Só enfileira e confirma na hora; quem processa é o
-                            # worker único abaixo — NUNCA dispare uma thread por mensagem
-                            # aqui: duas mensagens seguidas do mesmo cliente (ex.: "Cartão"
-                            # e "Sim" logo em seguida) rodando em paralelo correm pra ler/
-                            # escrever o mesmo histórico no Firestore (leitura-modificação-
-                            # escrita não é atômica em salvar_historico_firestore) — a
-                            # segunda pode perder o contexto da primeira, a IA "confirma" o
-                            # pedido em texto mas nunca chama registrar_pedido de verdade.
-                            fila_mensagens.put((message, from_number))
+                            # duplicada). Processa em background e confirma na hora.
+                            threading.Thread(
+                                target=processar_mensagem_recebida,
+                                args=(message, from_number),
+                                daemon=True
+                            ).start()
                             return "EVENT_RECEIVED", 200
 
         return "OK", 200
 
 
-fila_mensagens = queue.Queue()
+_locks_por_cliente = {}
+_locks_por_cliente_guard = threading.Lock()
 
 
-def _worker_fila_mensagens():
-    while True:
-        message, from_number = fila_mensagens.get()
-        try:
-            processar_mensagem_recebida(message, from_number)
-        except Exception as e:
-            print(f"❌ Erro ao processar mensagem de {from_number}: {e}")
-        finally:
-            fila_mensagens.task_done()
-
-
-# Worker único e persistente: processa a fila em ordem de chegada, uma
-# mensagem por vez — preserva a mesma serialização que o worker sync do
-# gunicorn dava de graça antes de virar background, sem voltar a bloquear
-# o ack do webhook.
-threading.Thread(target=_worker_fila_mensagens, daemon=True).start()
+def _lock_do_cliente(wa_id):
+    # Uma thread por mensagem (bom pra concorrência entre clientes diferentes),
+    # mas com um lock por wa_id: duas mensagens seguidas do MESMO cliente (ex.:
+    # "Cartão" e "Sim" logo em seguida) não podem processar em paralelo, senão
+    # correm pra ler/escrever o mesmo histórico no Firestore (leitura-
+    # modificação-escrita não é atômica em salvar_historico_firestore) — a
+    # segunda pode perder o contexto da primeira, a IA "confirma" o pedido em
+    # texto mas nunca chama registrar_pedido de verdade. Uma fila GLOBAL única
+    # já foi tentada aqui e criou o problema oposto: um cliente travado (ex.:
+    # a chamada da OpenAI sem timeout demorando minutos) travava o atendimento
+    # de TODO MUNDO, porque só existia um worker pra fila inteira.
+    with _locks_por_cliente_guard:
+        lock = _locks_por_cliente.get(wa_id)
+        if lock is None:
+            lock = threading.Lock()
+            _locks_por_cliente[wa_id] = lock
+        return lock
 
 
 def processar_mensagem_recebida(message, from_number):
+    with _lock_do_cliente(from_number):
+        try:
+            _processar_mensagem_recebida(message, from_number)
+        except Exception as e:
+            print(f"❌ Erro ao processar mensagem de {from_number}: {e}")
+
+
+def _processar_mensagem_recebida(message, from_number):
     if 'text' in message:
         text = message['text']['body']
         ai_response = get_openai_response(text, from_number, "WPP")
