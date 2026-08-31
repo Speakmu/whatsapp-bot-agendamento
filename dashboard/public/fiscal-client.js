@@ -35,8 +35,8 @@
 
     function itensDoPedido(pedido, cfg) {
         const lista = pedido.itens || [];
-        if (Array.isArray(lista) && lista.length) {
-            return lista.map(i => ({
+        const items = (Array.isArray(lista) && lista.length)
+            ? lista.map(i => ({
                 xProd: i.nome_exibicao || i.nome || 'Item',
                 ncm: i.ncm || cfg.ncm,
                 cfop: i.cfop || cfg.cfop,
@@ -45,14 +45,35 @@
                 uCom: 'UN',
                 qCom: Number(i.quantidade) || 1,
                 vUnCom: Number(i.preco) || 0
-            }));
+            }))
+            // fallback: item único com o total
+            : [{
+                xProd: pedido.item_pedido || 'Consumo', ncm: cfg.ncm, cfop: cfg.cfop,
+                csosn: cfg.cst, origem: cfg.origem || '0', uCom: 'UN', qCom: 1,
+                vUnCom: Number(pedido.valor_total) || 0
+            }];
+        reconciliarComValorPago(items, pedido.valor_total);
+        return items;
+    }
+
+    // Cupom de desconto, resgate de pontos e taxa de entrega alteram o
+    // valor_total do pedido sem mudar o preço unitário guardado em cada item
+    // — a soma dos itens ficava diferente do valor realmente pago, e a SEFAZ
+    // rejeita a nota ("Total dos pagamentos menor/maior que o total da nota").
+    // Ajusta o último item pra fechar exatamente com o valor cobrado.
+    function reconciliarComValorPago(items, valorTotal) {
+        const alvo = Number(valorTotal) || 0;
+        const soma = items.reduce((s, i) => s + i.qCom * i.vUnCom, 0);
+        const diff = Math.round((soma - alvo) * 100) / 100;
+        if (Math.abs(diff) < 0.01) return;
+        const ultimo = items[items.length - 1];
+        if (diff > 0) {
+            // itens somam mais que o valor pago (cupom/pontos de desconto) -> abate no último item
+            ultimo.vDesc = Math.round(((ultimo.vDesc || 0) + diff) * 100) / 100;
+        } else {
+            // valor pago é maior que a soma dos itens (ex: taxa de entrega) -> soma no valor do último item
+            ultimo.vUnCom = Math.round((ultimo.vUnCom + (-diff) / ultimo.qCom) * 100) / 100;
         }
-        // fallback: item único com o total
-        return [{
-            xProd: pedido.item_pedido || 'Consumo', ncm: cfg.ncm, cfop: cfg.cfop,
-            csosn: cfg.cst, origem: cfg.origem || '0', uCom: 'UN', qCom: 1,
-            vUnCom: Number(pedido.valor_total) || 0
-        }];
     }
 
     // Escolhe o par de URLs (QR Code / consulta por chave) certo pro ambiente
