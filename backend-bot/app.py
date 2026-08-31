@@ -1,5 +1,6 @@
 import re
 import unicodedata
+import threading
 from flask import Flask, request, jsonify
 import requests
 import os
@@ -8,10 +9,10 @@ import openai
 import firebase_admin
 from thefuzz import process, fuzz
 from firebase_admin import credentials, firestore, storage, messaging
-from dotenv import load_dotenv 
+from google.api_core import exceptions as gcp_exceptions
+from dotenv import load_dotenv
 from flask_cors import CORS
 from datetime import datetime, timedelta, timezone
-processed_message_ids = set()
 
 load_dotenv()
 
@@ -1489,53 +1490,72 @@ def webhook():
 
     if request.method == 'POST':
         data = request.json
-        
+
         if data and 'entry' in data:
             for entry in data['entry']:
                 for change in entry.get('changes', []):
                     value = change.get('value', {})
                     if 'messages' in value:
                         for message in value['messages']:
-                            
-                            # --- BLOQUEIO DE DUPLICIDADE ---
+
+                            # --- BLOQUEIO DE DUPLICIDADE (persistente, entre instâncias) ---
+                            # O Meta reenvia o webhook (às vezes horas depois) se o 200 não
+                            # volta rápido o bastante. Um set() em memória não sobrevive a um
+                            # restart/cold-start do Cloud Run, então o bot reprocessava
+                            # eventos antigos como se fossem mensagem nova — daí ele "puxava
+                            # assunto sozinho". O claim abaixo é atômico: create() falha com
+                            # AlreadyExists se outro processo (ou uma instância anterior) já
+                            # reivindicou esse msg_id.
                             msg_id = message.get('id')
-                            if msg_id in processed_message_ids:
+                            try:
+                                db.collection('webhook_processed_ids').document(msg_id).create({
+                                    'processado_em': firestore.SERVER_TIMESTAMP
+                                })
+                            except gcp_exceptions.AlreadyExists:
                                 print(f"🚫 Mensagem repetida bloqueada: {msg_id}")
-                                return "EVENT_RECEIVED", 200 # Responde OK para o WhatsApp parar de tentar
-                            
-                            processed_message_ids.add(msg_id)
-                            # Limpeza simples para a memória não estourar (mantém últimos 1000 IDs)
-                            if len(processed_message_ids) > 1000:
-                                processed_message_ids.pop()
-                            # -------------------------------
+                                return "EVENT_RECEIVED", 200
+                            # -----------------------------------------------------------
 
                             from_number = message['from']
-                            
-                            if 'text' in message:
-                                text = message['text']['body']
-                                ai_response = get_openai_response(text, from_number, "WPP")
-                                if ai_response:
-                                    send_message(from_number, ai_response)
-                                return "EVENT_RECEIVED", 200
 
-                            elif 'image' in message or 'document' in message:
-                                # ... (seu código de imagem continua igual) ...
-                                tipo = 'image' if 'image' in message else 'document'
-                                media_id = message[tipo]['id']
-                                # (mantenha sua lógica de imagem aqui)
-                                caminho_arquivo = baixar_imagem_whatsapp(media_id, tipo)
-                                if caminho_arquivo:
-                                    nome_arquivo = os.path.basename(caminho_arquivo)
-                                    url_publica = upload_comprovante_firebase(caminho_arquivo, nome_arquivo)
-                                    if url_publica:
-                                        msg = f"Recebi seu comprovante! Vou registrar aqui."
-                                        send_message(from_number, msg)
-                                        registrar_comprovante(from_number, url_publica) # Chamei a função que faltava no seu código original
-                                        os.remove(caminho_arquivo)
-                                return "EVENT_RECEIVED", 200
+                            # O Meta espera o 200 rápido — não o fim do processamento, que
+                            # envolve Firestore + OpenAI + envio pelo WhatsApp e pode passar
+                            # do timeout do webhook, disparando um retry (e uma resposta
+                            # duplicada). Processa em background e confirma na hora.
+                            threading.Thread(
+                                target=processar_mensagem_recebida,
+                                args=(message, from_number),
+                                daemon=True
+                            ).start()
+                            return "EVENT_RECEIVED", 200
 
         return "OK", 200
-                                    
+
+
+def processar_mensagem_recebida(message, from_number):
+    try:
+        if 'text' in message:
+            text = message['text']['body']
+            ai_response = get_openai_response(text, from_number, "WPP")
+            if ai_response:
+                send_message(from_number, ai_response)
+
+        elif 'image' in message or 'document' in message:
+            tipo = 'image' if 'image' in message else 'document'
+            media_id = message[tipo]['id']
+            caminho_arquivo = baixar_imagem_whatsapp(media_id, tipo)
+            if caminho_arquivo:
+                nome_arquivo = os.path.basename(caminho_arquivo)
+                url_publica = upload_comprovante_firebase(caminho_arquivo, nome_arquivo)
+                if url_publica:
+                    msg = f"Recebi seu comprovante! Vou registrar aqui."
+                    send_message(from_number, msg)
+                    registrar_comprovante(from_number, url_publica)
+                    os.remove(caminho_arquivo)
+    except Exception as e:
+        print(f"❌ Erro ao processar mensagem de {from_number}: {e}")
+
+
 def send_message(to, message):
     url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {ACCESS_TOKEN}", "Content-Type": "application/json"}
