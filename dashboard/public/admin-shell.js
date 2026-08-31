@@ -8,9 +8,12 @@
         'configuracoes.html'
     ]);
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
-    // Acesso de suporte/fornecedor: só enxerga a Mensalidade, nada de
-    // operação da loja (nem a própria página Início, que não é protegida
-    // por nenhuma permissão de módulo).
+    // Acesso de suporte (mesmo e-mail tratado como "Suporte" na tela de
+    // Usuários — configuracoes.js/firestore.rules): acesso total a todos os
+    // módulos, incondicional (não passa pelo filtro de exibição do admin
+    // nem pela permissão por módulo de usuario comum). Era restrito só à
+    // Mensalidade antes, mas isso ficou incoerente com o resto do sistema
+    // já tratar esse e-mail como acesso protegido e total.
     const VENDOR_ADMIN_EMAIL = 'contato.seusuportetec@gmail.com';
     const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'mensalidade', 'configuracoes'];
     const PAGE_KEYS = {
@@ -37,7 +40,6 @@
     };
     let acessoEfetivo = null;
     let acessoCarregado = false;
-    let souFornecedor = false;
 
     function normalizePage(raw) {
         let page = raw || '/home.html';
@@ -69,16 +71,15 @@
         return normalizarEmail(email) === VENDOR_ADMIN_EMAIL;
     }
 
-    // Página padrão pra abrir/redirecionar quando não há uma explícita —
-    // Início mostra dados operacionais da loja, então o fornecedor nunca
-    // deve cair lá.
     function paginaPadrao() {
-        return souFornecedor ? '/mensalidades.html' : '/home.html';
+        return '/home.html';
     }
 
     async function carregarAcesso(user) {
         if (isVendor(user && user.email)) {
-            return { mensalidade: true };
+            const suporte = {};
+            MODULE_KEYS.forEach(k => suporte[k] = true);
+            return suporte;
         }
 
         const db = firebase.firestore();
@@ -131,9 +132,8 @@
         const keys = keysDaPagina(page);
         if (!keys.length) {
             // Páginas sem permissão de módulo definida (ex.: home.html) ficam
-            // abertas por padrão pra equipe da loja — mas o acesso de
-            // suporte/fornecedor só entra no que tem permissão explícita.
-            return !souFornecedor;
+            // abertas por padrão pra qualquer um que já passou pelo login.
+            return true;
         }
         return keys.some(k => acessoEfetivo && acessoEfetivo[k] === true);
     }
@@ -200,7 +200,6 @@
     async function recarregarAcesso() {
         const user = firebase.auth().currentUser;
         if (!user) return;
-        souFornecedor = isVendor(user.email);
         acessoEfetivo = await carregarAcesso(user);
         acessoCarregado = true;
         filtrarMenu();
@@ -337,7 +336,6 @@
             });
             firebase.auth().onAuthStateChanged(async user => {
                 if (!user) { window.location.href = '/login.html'; return; }
-                souFornecedor = isVendor(user.email);
                 try {
                     acessoEfetivo = await carregarAcesso(user);
                     acessoCarregado = true;
