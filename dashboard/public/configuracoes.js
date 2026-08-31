@@ -16,6 +16,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const DOC_BOT = db.collection('configuracoes').doc('bot');
     const COL_USUARIOS = db.collection('usuarios_admin');
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
+    // Acesso de suporte (Murilo/fornecedor do sistema) — igual em todo cliente que
+    // roda este mesmo código. Acesso total e protegido: nem o admin do cliente
+    // consegue editar ou remover esse login (reforçado no firestore.rules, não só
+    // aqui na tela).
+    const SUPORTE_EMAIL = 'contato.seusuportetec@gmail.com';
     const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'mensalidade', 'configuracoes'];
     const NOMES_MODULOS = {
         pedidos: 'Pedidos',
@@ -137,6 +142,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     function isAdmin(email) {
         return docIdEmail(email) === ADMIN_EMAIL;
+    }
+    function isSuporte(email) {
+        return docIdEmail(email) === SUPORTE_EMAIL;
     }
 
     async function carregar() {
@@ -433,11 +441,33 @@ document.addEventListener('DOMContentLoaded', () => {
         await ref.set(snap.exists ? base : { ...base, criado_em: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
     }
 
+    // Garante o registro de Suporte (mesma ideia do garantirAdmin acima). O
+    // firestore.rules só deixa CRIAR esse documento (não editar/apagar depois)
+    // pra quem não for o próprio suporte — então depois de criado uma vez, essa
+    // chamada passa a falhar pra sessão do admin do cliente, de propósito
+    // (por isso o try/catch isolado: não pode derrubar o carregamento da lista).
+    async function garantirSuporte() {
+        const ref = COL_USUARIOS.doc(SUPORTE_EMAIL);
+        const snap = await ref.get();
+        const permissoes = Object.fromEntries(MODULOS.map(m => [m, true]));
+        const base = {
+            email: SUPORTE_EMAIL,
+            nome: 'Suporte',
+            admin: false,
+            suporte: true,
+            ativo: true,
+            permissoes,
+            atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await ref.set(snap.exists ? base : { ...base, criado_em: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    }
+
     async function carregarUsuarios() {
         const lista = $('usuarios-lista');
         lista.innerHTML = '<div class="muted-box">Carregando usuarios...</div>';
         try {
             await garantirAdmin();
+            try { await garantirSuporte(); } catch { /* protegido pelas regras depois de criado — só o suporte consegue atualizar o próprio registro */ }
             const snap = await COL_USUARIOS.orderBy('email').get();
             const usuarios = [];
             snap.forEach(doc => usuarios.push({ id: doc.id, ...doc.data() }));
@@ -453,26 +483,35 @@ document.addEventListener('DOMContentLoaded', () => {
             lista.innerHTML = '<div class="muted-box">Nenhum usuario cadastrado.</div>';
             return;
         }
+        const souSuporte = isSuporte(usuarioAtual && usuarioAtual.email);
         lista.innerHTML = usuarios.map(u => {
-            const permissoes = u.admin ? MODULOS : MODULOS.filter(m => u.permissoes && u.permissoes[m]);
+            const permissoes = (u.admin || u.suporte) ? MODULOS : MODULOS.filter(m => u.permissoes && u.permissoes[m]);
             const mods = permissoes.length
                 ? permissoes.map(m => `<span>${escapeHtml(NOMES_MODULOS[m] || m)}</span>`).join('')
                 : '<span>Nenhum modulo</span>';
-            const badge = u.admin ? '<span class="usuario-badge admin">ADMIN</span>' : '<span class="usuario-badge">Usuario</span>';
-            const remove = u.admin ? '' : `<button class="btn btn-vermelho" data-del-user="${escapeHtml(u.email)}">Remover</button>`;
+            const badge = u.suporte
+                ? '<span class="usuario-badge suporte">SUPORTE</span>'
+                : (u.admin ? '<span class="usuario-badge admin">ADMIN</span>' : '<span class="usuario-badge">Usuario</span>');
+            // Suporte nunca aparece removível pra ninguém; e só o próprio suporte
+            // vê o botão de editar o próprio acesso — o admin do cliente nem
+            // consegue clicar (e mesmo que forçasse, o firestore.rules bloqueia).
+            const remove = (u.admin || u.suporte) ? '' : `<button class="btn btn-vermelho" data-del-user="${escapeHtml(u.email)}">Remover</button>`;
+            const podeEditar = !u.suporte || souSuporte;
+            const editar = podeEditar ? `<button class="btn btn-azul" data-edit-user="${escapeHtml(u.email)}">Editar acesso</button>` : '';
             const avisoAdmin = u.admin ? '<div class="usuario-meta">Admin principal: somente este login pode editar usuarios e permissoes.</div>' : '';
+            const avisoSuporte = u.suporte ? '<div class="usuario-meta">Acesso de suporte: protegido, somente o proprio suporte pode alterar.</div>' : '';
             return `<div class="usuario-card">
                 <div class="usuario-top">
                     <div>
                         <div class="usuario-email">${escapeHtml(u.email || u.id)}</div>
                         <div class="usuario-meta">${escapeHtml(u.nome || 'Sem nome')} ${u.ativo === false ? '- inativo' : ''}</div>
-                        ${avisoAdmin}
+                        ${avisoAdmin}${avisoSuporte}
                     </div>
                     ${badge}
                 </div>
                 <div class="usuario-modulos">${mods}</div>
                 <div class="usuario-actions">
-                    <button class="btn btn-azul" data-edit-user="${escapeHtml(u.email)}">Editar acesso</button>
+                    ${editar}
                     ${remove}
                 </div>
             </div>`;
@@ -482,8 +521,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function salvarUsuario() {
-        if (!isAdmin(usuarioAtual && usuarioAtual.email)) {
-            alert('Apenas o administrador pode gerenciar usuarios.');
+        const meuEmail = usuarioAtual && usuarioAtual.email;
+        if (!isAdmin(meuEmail) && !isSuporte(meuEmail)) {
+            alert('Apenas o administrador ou o suporte podem gerenciar usuarios.');
             return;
         }
         const email = docIdEmail($('u-email').value);
@@ -493,12 +533,21 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Informe um e-mail valido.');
             return;
         }
+        // Acesso de suporte é protegido: só o próprio suporte pode alterar o
+        // proprio registro, mesmo que o admin do cliente force a chamada (o
+        // firestore.rules bloqueia de qualquer forma — isso aqui só evita a
+        // tentativa e mostra uma mensagem clara).
+        if (isSuporte(email) && !isSuporte(meuEmail)) {
+            alert('Apenas o proprio suporte pode alterar este acesso.');
+            return;
+        }
         if (senha && senha.length < 6) {
             alert('A senha precisa ter pelo menos 6 caracteres.');
             return;
         }
         const admin = isAdmin(email);
-        const permissoes = admin ? Object.fromEntries(MODULOS.map(m => [m, true])) : permissoesDoForm();
+        const suporte = isSuporte(email);
+        const permissoes = (admin || suporte) ? Object.fromEntries(MODULOS.map(m => [m, true])) : permissoesDoForm();
         const btn = $('salvar-usuario');
         const textoOriginal = btn.textContent;
         btn.disabled = true; btn.textContent = 'Salvando...';
@@ -520,6 +569,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 email,
                 nome: nome || email,
                 admin,
+                suporte,
                 ativo: true,
                 permissoes,
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp(),
@@ -546,7 +596,7 @@ document.addEventListener('DOMContentLoaded', () => {
             $('u-email').value = u.email || id;
             $('u-email').disabled = true;
             $('u-senha').value = '';
-            aplicarPermissoesNoForm(u.permissoes || {}, !!u.admin);
+            aplicarPermissoesNoForm(u.permissoes || {}, !!u.admin || !!u.suporte);
             $('usuarios-admin-box').scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch (err) {
             alert('Erro ao editar usuario: ' + err.message);
@@ -557,6 +607,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const id = docIdEmail(email);
         if (isAdmin(id)) {
             alert('O admin principal nao pode ser removido.');
+            return;
+        }
+        if (isSuporte(id)) {
+            alert('O acesso de suporte nao pode ser removido.');
             return;
         }
         if (!confirm(`Remover acesso de ${id}?`)) return;

@@ -102,13 +102,29 @@ service cloud.firestore {
       allow get: if request.auth != null
         && request.auth.token.email != null
         && (request.auth.token.email == "lileamarloja04@gmail.com"
+          || request.auth.token.email == "contato.seusuportetec@gmail.com"
           || id == request.auth.token.email);
       allow list: if request.auth != null
         && request.auth.token.email != null
-        && request.auth.token.email == "lileamarloja04@gmail.com";
-      allow write: if request.auth != null
+        && (request.auth.token.email == "lileamarloja04@gmail.com"
+          || request.auth.token.email == "contato.seusuportetec@gmail.com");
+      // Suporte cria seu próprio registro na primeira vez (self-heal, igual o
+      // admin já faz) e o admin do cliente também pode criar (caso o admin
+      // abra a tela antes do suporte logar uma vez). Depois de criado, só
+      // update/delete é que ficam restritos — o admin não consegue mais tocar
+      // no documento do suporte (nem apagar, nem mudar permissão), reforçando
+      // no nível de dado o que a tela de Configurações já impede na interface.
+      allow create: if request.auth != null
         && request.auth.token.email != null
-        && request.auth.token.email == "lileamarloja04@gmail.com";
+        && (request.auth.token.email == "lileamarloja04@gmail.com"
+          || request.auth.token.email == "contato.seusuportetec@gmail.com");
+      allow update, delete: if request.auth != null
+        && request.auth.token.email != null
+        && (
+          request.auth.token.email == "contato.seusuportetec@gmail.com"
+          || (request.auth.token.email == "lileamarloja04@gmail.com"
+            && id != "contato.seusuportetec@gmail.com")
+        );
     }
     match /notas_fiscais/{id} {
       allow read, write: if request.auth != null;

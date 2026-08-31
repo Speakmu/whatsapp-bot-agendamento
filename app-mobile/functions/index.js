@@ -37,8 +37,13 @@ async function exigirAdmin(req) {
 async function exigirAdminGenerico(req) {
     const token = await exigirUsuario(req);
     const email = String(token.email || '').trim().toLowerCase();
+    // Suporte (contato.seusuportetec@gmail.com) tem acesso total em todo
+    // cliente, mesmo sem doc em usuarios_admin ainda existir (chicken-and-egg
+    // no primeiro acesso a um cliente novo) — ver garantirSuporte() em
+    // configuracoes.js pro mesmo e-mail sendo tratado como sempre-admin lá.
+    if (email === 'contato.seusuportetec@gmail.com') return token;
     const snap = await db.collection('usuarios_admin').doc(email).get();
-    if (!snap.exists || snap.data()?.admin !== true) {
+    if (!snap.exists || (snap.data()?.admin !== true && snap.data()?.suporte !== true)) {
         throw Object.assign(new Error('Apenas administradores podem alterar a integracao iFood.'), { status: 403 });
     }
     return token;
