@@ -1,6 +1,7 @@
 import re
 import unicodedata
 import threading
+import queue
 from flask import Flask, request, jsonify
 import requests
 import os
@@ -1527,39 +1528,60 @@ def webhook():
                             # O Meta espera o 200 rápido — não o fim do processamento, que
                             # envolve Firestore + OpenAI + envio pelo WhatsApp e pode passar
                             # do timeout do webhook, disparando um retry (e uma resposta
-                            # duplicada). Processa em background e confirma na hora.
-                            threading.Thread(
-                                target=processar_mensagem_recebida,
-                                args=(message, from_number),
-                                daemon=True
-                            ).start()
+                            # duplicada). Só enfileira e confirma na hora; quem processa é o
+                            # worker único abaixo — NUNCA dispare uma thread por mensagem
+                            # aqui: duas mensagens seguidas do mesmo cliente (ex.: "Cartão"
+                            # e "Sim" logo em seguida) rodando em paralelo correm pra ler/
+                            # escrever o mesmo histórico no Firestore (leitura-modificação-
+                            # escrita não é atômica em salvar_historico_firestore) — a
+                            # segunda pode perder o contexto da primeira, a IA "confirma" o
+                            # pedido em texto mas nunca chama registrar_pedido de verdade.
+                            fila_mensagens.put((message, from_number))
                             return "EVENT_RECEIVED", 200
 
         return "OK", 200
 
 
-def processar_mensagem_recebida(message, from_number):
-    try:
-        if 'text' in message:
-            text = message['text']['body']
-            ai_response = get_openai_response(text, from_number, "WPP")
-            if ai_response:
-                send_message(from_number, ai_response)
+fila_mensagens = queue.Queue()
 
-        elif 'image' in message or 'document' in message:
-            tipo = 'image' if 'image' in message else 'document'
-            media_id = message[tipo]['id']
-            caminho_arquivo = baixar_imagem_whatsapp(media_id, tipo)
-            if caminho_arquivo:
-                nome_arquivo = os.path.basename(caminho_arquivo)
-                url_publica = upload_comprovante_firebase(caminho_arquivo, nome_arquivo)
-                if url_publica:
-                    msg = f"Recebi seu comprovante! Vou registrar aqui."
-                    send_message(from_number, msg)
-                    registrar_comprovante(from_number, url_publica)
-                    os.remove(caminho_arquivo)
-    except Exception as e:
-        print(f"❌ Erro ao processar mensagem de {from_number}: {e}")
+
+def _worker_fila_mensagens():
+    while True:
+        message, from_number = fila_mensagens.get()
+        try:
+            processar_mensagem_recebida(message, from_number)
+        except Exception as e:
+            print(f"❌ Erro ao processar mensagem de {from_number}: {e}")
+        finally:
+            fila_mensagens.task_done()
+
+
+# Worker único e persistente: processa a fila em ordem de chegada, uma
+# mensagem por vez — preserva a mesma serialização que o worker sync do
+# gunicorn dava de graça antes de virar background, sem voltar a bloquear
+# o ack do webhook.
+threading.Thread(target=_worker_fila_mensagens, daemon=True).start()
+
+
+def processar_mensagem_recebida(message, from_number):
+    if 'text' in message:
+        text = message['text']['body']
+        ai_response = get_openai_response(text, from_number, "WPP")
+        if ai_response:
+            send_message(from_number, ai_response)
+
+    elif 'image' in message or 'document' in message:
+        tipo = 'image' if 'image' in message else 'document'
+        media_id = message[tipo]['id']
+        caminho_arquivo = baixar_imagem_whatsapp(media_id, tipo)
+        if caminho_arquivo:
+            nome_arquivo = os.path.basename(caminho_arquivo)
+            url_publica = upload_comprovante_firebase(caminho_arquivo, nome_arquivo)
+            if url_publica:
+                msg = f"Recebi seu comprovante! Vou registrar aqui."
+                send_message(from_number, msg)
+                registrar_comprovante(from_number, url_publica)
+                os.remove(caminho_arquivo)
 
 
 def send_message(to, message):
