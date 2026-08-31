@@ -1547,6 +1547,8 @@ def send_message(to, message):
             # salva no histórico (Firestore) como se tivesse sido enviada,
             # mas nunca chegava de verdade no WhatsApp do cliente.
             print(f"❌ Falha ao enviar WhatsApp pra {to}: HTTP {resp.status_code} — {resp.text}")
+        else:
+            print(f"✅ WhatsApp enviado pra {to}: {resp.status_code}")
     except Exception as e:
         print(f"❌ Erro de rede ao enviar WhatsApp pra {to}: {e}")
     return 'EVENT_RECEIVED', 200
