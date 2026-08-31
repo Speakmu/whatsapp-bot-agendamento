@@ -290,10 +290,12 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderComandasPendentes() {
         const lista = $('mesa-pendentes-lista');
         const total = $('mesa-pendentes-total');
+        const box = $('mesa-pendentes-box');
         if (!lista) return;
         if (total) {
             total.textContent = `${comandasPendentes.length} ${comandasPendentes.length === 1 ? 'aberta' : 'abertas'}`;
         }
+        if (box) box.classList.toggle('vazia', !comandasPendentes.length);
         if (!comandasPendentes.length) {
             lista.innerHTML = '<div class="empty-state">Nenhum pedido enviado ao caixa.</div>';
             return;

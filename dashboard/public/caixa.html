@@ -67,6 +67,10 @@
         .comandas-mini { flex:0 0 auto; max-height:220px; display:flex; flex-direction:column; border-bottom:1px solid var(--line); }
         .comandas-mini-head { padding:10px 14px; font-weight:700; font-size:.85rem; display:flex; justify-content:space-between; align-items:center; color:var(--muted); background:#fafbfc; flex:0 0 auto; }
         .comandas-mini-lista { overflow-y:auto; padding:6px 12px; flex:1; }
+        /* Sem comandas pendentes: não reserva os 220px cheios só pra caber
+           uma linha de texto — encolhe pro tamanho do próprio aviso. */
+        .comandas-mini.vazia { max-height:none; }
+        .comandas-mini.vazia .comandas-mini-lista { flex:0 0 auto; }
         .mesa-pendente { display:flex; flex-direction:column; gap:6px; padding:8px 0; border-bottom:1px dashed var(--line); font-size:.85rem; }
         .mesa-pendente .linha-topo { display:flex; justify-content:space-between; align-items:center; }
         .mesa-pendente .mesa-num { font-weight:900; font-size:.95rem; }
