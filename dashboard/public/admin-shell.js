@@ -1,7 +1,7 @@
 (function () {
     const frame = document.getElementById('admin-frame');
     const allowed = new Set([
-        'home.html', 'painel.html', 'kds.html', 'mesas.html', 'entrega.html',
+        'home.html', 'painel.html', 'pedidos.html', 'kds.html', 'mesas.html', 'entrega.html',
         'caixa.html', 'bi.html', 'financeiro.html', 'fiscal.html',
         'estoque.html', 'ficha-tecnica.html', 'marketing.html',
         'bot-chat.html', 'bot-config.html', 'mensalidades.html',
@@ -23,6 +23,7 @@
             if (hash === 'relatorios') return ['relatorios'];
             return ['pedidos'];
         },
+        'pedidos.html': ['pedidos'],
         'kds.html': ['kds'],
         'mesas.html': ['mesas'],
         'entrega.html': ['entregas'],
