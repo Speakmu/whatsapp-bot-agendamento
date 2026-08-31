@@ -100,6 +100,11 @@ body {
     font-size: .85rem;
 }
 .order-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, .08); }
+/* Cor da borda esquerda por canal de origem do pedido — mesmas cores do painel "Pedidos de hoje" */
+.order-card--app { border-left-color: #2f6fed; }
+.order-card--bot { border-left-color: #16a085; }
+.order-card--ifood { border-left-color: #ea1d2c; }
+.order-card--sistema { border-left-color: var(--accent); }
 .order-header {
     display: flex; justify-content: flex-start; align-items: center; gap: 6px;
     border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 6px;

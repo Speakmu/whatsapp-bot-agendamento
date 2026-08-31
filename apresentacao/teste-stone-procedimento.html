@@ -1,0 +1,373 @@
+<title>Teste da maquininha Stone — GestorChef</title>
+<style>
+  :root{
+    --bg:#f5f6f2;
+    --surface:#ffffff;
+    --text:#1b201d;
+    --muted:#667066;
+    --line:#e2e6de;
+    --accent:#00a868;
+    --accent-dark:#00623c;
+    --accent-soft:#e7f7ef;
+    --warn:#b9651b;
+    --warn-bg:#fdf3e7;
+    --warn-line:#f0d9b8;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#12140f;
+      --surface:#1a1d17;
+      --text:#eef1ea;
+      --muted:#93a191;
+      --line:#2c322a;
+      --accent:#2ee095;
+      --accent-dark:#7cf0be;
+      --accent-soft:#132a20;
+      --warn:#e8a25b;
+      --warn-bg:#2b2013;
+      --warn-line:#4a3820;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#12140f;
+    --surface:#1a1d17;
+    --text:#eef1ea;
+    --muted:#93a191;
+    --line:#2c322a;
+    --accent:#2ee095;
+    --accent-dark:#7cf0be;
+    --accent-soft:#132a20;
+    --warn:#e8a25b;
+    --warn-bg:#2b2013;
+    --warn-line:#4a3820;
+  }
+
+  *{box-sizing:border-box;}
+  html{-webkit-text-size-adjust:100%;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;
+  }
+  .mono{
+    font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Roboto Mono",monospace;
+  }
+
+  .wrap{max-width:640px;margin:0 auto;padding:28px 20px 80px;}
+
+  header.top{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:12px;
+    padding-bottom:18px;
+    border-bottom:1px solid var(--line);
+    margin-bottom:8px;
+    flex-wrap:wrap;
+  }
+  .brand{
+    font-size:.72rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--accent-dark);
+    font-weight:700;
+  }
+  .brand .dot{color:var(--accent);}
+  .meta{
+    font-size:.72rem;
+    color:var(--muted);
+    text-align:right;
+  }
+
+  h1{
+    font-size:1.5rem;
+    line-height:1.2;
+    margin:18px 0 6px;
+    text-wrap:balance;
+    letter-spacing:-.01em;
+  }
+  .sub{
+    color:var(--muted);
+    font-size:.95rem;
+    margin-bottom:28px;
+    max-width:52ch;
+  }
+
+  .stage{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:14px;
+    margin-bottom:16px;
+    overflow:hidden;
+  }
+  .stage-head{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:14px 18px;
+    border-bottom:1px solid var(--line);
+    background:var(--accent-soft);
+  }
+  .stage-tag{
+    font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Roboto Mono",monospace;
+    font-size:.72rem;
+    font-weight:700;
+    color:var(--accent-dark);
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:3px 7px;
+    letter-spacing:.02em;
+    white-space:nowrap;
+  }
+  .stage-title{
+    font-size:1.02rem;
+    font-weight:700;
+    letter-spacing:-.005em;
+  }
+
+  .stage-body{padding:16px 18px 18px;}
+  .stage-note{
+    color:var(--muted);
+    font-size:.86rem;
+    margin:0 0 14px;
+  }
+
+  ul.checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:11px;}
+  ul.checklist li{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    font-size:.94rem;
+  }
+  ul.checklist input[type="checkbox"]{
+    appearance:none;
+    -webkit-appearance:none;
+    width:19px;
+    height:19px;
+    min-width:19px;
+    margin-top:.15em;
+    border:1.5px solid var(--muted);
+    border-radius:5px;
+    background:var(--surface);
+    cursor:pointer;
+    position:relative;
+    transition:background .12s ease, border-color .12s ease;
+  }
+  ul.checklist input[type="checkbox"]:checked{
+    background:var(--accent);
+    border-color:var(--accent);
+  }
+  ul.checklist input[type="checkbox"]:checked::after{
+    content:"";
+    position:absolute;
+    left:5px; top:1px;
+    width:5px; height:10px;
+    border:solid var(--surface);
+    border-width:0 2px 2px 0;
+    transform:rotate(40deg);
+  }
+  ul.checklist input[type="checkbox"]:focus-visible{
+    outline:2px solid var(--accent-dark);
+    outline-offset:2px;
+  }
+  ul.checklist label{cursor:pointer;}
+  ul.checklist input[type="checkbox"]:checked + label{
+    color:var(--muted);
+    text-decoration:line-through;
+    text-decoration-color:var(--line);
+  }
+
+  .field{
+    font-family:ui-monospace,"Cascadia Code","SF Mono",Consolas,"Roboto Mono",monospace;
+    font-size:.82rem;
+    background:var(--bg);
+    border:1px solid var(--line);
+    border-radius:5px;
+    padding:1px 6px;
+    word-break:break-all;
+  }
+
+  .callout{
+    display:flex;
+    gap:10px;
+    background:var(--warn-bg);
+    border:1px solid var(--warn-line);
+    border-radius:10px;
+    padding:11px 13px;
+    margin-top:14px;
+    font-size:.86rem;
+  }
+  .callout .ic{color:var(--warn);flex:none;font-size:1rem;line-height:1.3;}
+  .callout b{color:var(--warn);}
+
+  .divider-label{
+    text-align:center;
+    font-size:.72rem;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    color:var(--muted);
+    margin:26px 0 14px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .divider-label::before,.divider-label::after{
+    content:"";
+    height:1px;
+    flex:1;
+    background:var(--line);
+  }
+
+  .report-box{
+    background:var(--surface);
+    border:1.5px solid var(--accent);
+    border-radius:14px;
+    padding:18px;
+  }
+  .report-box h2{
+    font-size:.98rem;
+    margin:0 0 4px;
+  }
+  .report-box .sub{margin-bottom:14px;font-size:.86rem;}
+  .report-grid{display:flex;flex-direction:column;gap:9px;}
+  .report-grid .r{
+    display:flex;
+    gap:8px;
+    font-size:.86rem;
+    align-items:flex-start;
+  }
+  .report-grid .r::before{
+    content:"→";
+    color:var(--accent-dark);
+    flex:none;
+  }
+
+  footer{
+    margin-top:30px;
+    padding-top:14px;
+    border-top:1px solid var(--line);
+    font-size:.72rem;
+    color:var(--muted);
+  }
+
+  @media print{
+    body{background:#fff;}
+    .stage{break-inside:avoid;}
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">GestorChef <span class="dot">·</span> Seu Suporte Tec</div>
+    <div class="meta">Teste de campo — maquininha Stone<br>Salgadinhos Lileamar</div>
+  </header>
+
+  <h1>Procedimento de teste da Stone</h1>
+  <p class="sub">Checklist pra rodar aí no local, na ordem. Marque cada item conforme for. Se algo falhar, tira print da mensagem de erro pra eu ver depois.</p>
+
+  <div class="stage">
+    <div class="stage-head">
+      <span class="stage-tag">00</span>
+      <span class="stage-title">Antes de sair</span>
+    </div>
+    <div class="stage-body">
+      <ul class="checklist">
+        <li><input type="checkbox" id="c1"><label for="c1">Maquininha Stone ligada, com bateria e internet/dados ativos, logada na conta da loja</label></li>
+        <li><input type="checkbox" id="c2"><label for="c2">Número de série do terminal em mãos (etiqueta atrás da maquininha ou portal da Stone)</label></li>
+        <li><input type="checkbox" id="c3"><label for="c3">Acesso ao GestorChef como admin da loja (pra entrar em Configurações)</label></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head">
+      <span class="stage-tag">01</span>
+      <span class="stage-title">Configurar no GestorChef</span>
+    </div>
+    <div class="stage-body">
+      <p class="stage-note">Menu lateral → <b>Configurações</b> → seção de pagamento.</p>
+      <ul class="checklist">
+        <li><input type="checkbox" id="c4"><label for="c4">Em "Provedor da maquininha", selecionar <b>Stone</b></label></li>
+        <li><input type="checkbox" id="c5"><label for="c5">Preencher "Número de série do terminal Stone" com o valor da etiqueta</label></li>
+        <li><input type="checkbox" id="c6"><label for="c6">Clicar em <span class="field">Salvar configurações de pagamento</span></label></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head">
+      <span class="stage-tag">02</span>
+      <span class="stage-title">Teste rápido de conexão</span>
+    </div>
+    <div class="stage-body">
+      <p class="stage-note">Mesma tela, logo abaixo. Isso dispara uma cobrança real de R$ 0,01 — não existe "ping" silencioso pra maquininha, então é assim que se confirma que ela está recebendo comando do sistema.</p>
+      <ul class="checklist">
+        <li><input type="checkbox" id="c7"><label for="c7">Clicar em <span class="field">Testar maquininha (R$ 0,01)</span></label></li>
+        <li><input type="checkbox" id="c8"><label for="c8">Conferir se R$ 0,01 apareceu na tela do terminal em alguns segundos</label></li>
+        <li><input type="checkbox" id="c9"><label for="c9">Se apareceu: <b>cancelar direto na maquininha</b> (não precisa passar cartão nenhum)</label></li>
+      </ul>
+      <div class="callout">
+        <span class="ic">⚠</span>
+        <div><b>Se der erro na tela do GestorChef:</b> o texto da mensagem já diz a causa mais provável — "Terminal Stone não configurado" (serial não foi salvo), ou "Configuração de pagamento (Stone) ausente no servidor" (chave da Stone não configurada do meu lado, me chama). Print da mensagem ajuda a diagnosticar rápido.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head">
+      <span class="stage-tag">03</span>
+      <span class="stage-title">Teste no fluxo real do Caixa</span>
+    </div>
+    <div class="stage-body">
+      <p class="stage-note">Agora simulando uma venda de verdade, do jeito que vai funcionar no dia a dia.</p>
+      <ul class="checklist">
+        <li><input type="checkbox" id="c10"><label for="c10">Abrir o <b>Caixa / PDV</b> e abrir uma sessão de caixa, se pedir</label></li>
+        <li><input type="checkbox" id="c11"><label for="c11">Adicionar um item de valor baixo ao carrinho</label></li>
+        <li><input type="checkbox" id="c12"><label for="c12">Escolher forma de pagamento <b>Cartão</b> e finalizar a venda</label></li>
+        <li><input type="checkbox" id="c13"><label for="c13">Conferir se a cobrança apareceu sozinha na maquininha, com o valor certo</label></li>
+        <li><input type="checkbox" id="c14"><label for="c14">Passar um cartão de teste (ou real, se for validar cobrança de verdade)</label></li>
+        <li><input type="checkbox" id="c15"><label for="c15">Voltar pro GestorChef e ver se o pedido saiu de "Aguardando pagamento..." pra <b>concluído sozinho</b>, sem precisar marcar nada na mão</label></li>
+      </ul>
+      <div class="callout">
+        <span class="ic">⚠</span>
+        <div><b>Se ficar travado em "Aguardando pagamento...":</b> a cobrança no terminal provavelmente foi aprovada, mas a confirmação automática (item 04 abaixo) não chegou. Anota a hora exata que isso aconteceu.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-head">
+      <span class="stage-tag">04</span>
+      <span class="stage-title">Webhook (fora do GestorChef)</span>
+    </div>
+    <div class="stage-body">
+      <p class="stage-note">É o que faz o pedido fechar sozinho no passo anterior. Configuração feita no <b>portal da Stone/Pagar.me</b>, não no GestorChef — geralmente com o gerente de contas da Stone.</p>
+      <ul class="checklist">
+        <li><input type="checkbox" id="c16"><label for="c16">Confirmar com o gerente Stone/Pagar.me se o webhook da conta já aponta pra:<br><span class="field">https://us-central1-salgadinhos-lileamar.cloudfunctions.net/stoneWebhook</span></label></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="divider-label">depois do teste</div>
+
+  <div class="report-box">
+    <h2>O que me reportar</h2>
+    <p class="sub">Só preciso dessas respostas pra saber se ficou tudo certo ou o que ajustar.</p>
+    <div class="report-grid">
+      <div class="r">A cobrança de R$ 0,01 apareceu na maquininha (etapa 02)?</div>
+      <div class="r">No teste de venda real (etapa 03), o pedido fechou sozinho ou travou em "Aguardando pagamento"?</div>
+      <div class="r">Alguma mensagem de erro na tela — texto exato ou print</div>
+      <div class="r">O gerente da Stone confirmou o webhook (etapa 04)?</div>
+    </div>
+  </div>
+
+  <footer>
+    GestorChef · Seu Suporte Tec — contato.seusuportetec@gmail.com<br>
+    Procedimento gerado a partir da integração já implementada em Configurações → Pagamentos e no Caixa/PDV.
+  </footer>
+
+</div>

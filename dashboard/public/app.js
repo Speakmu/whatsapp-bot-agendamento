@@ -1075,8 +1075,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ? ''
             : `<div class="order-endereco">📍 ${pedido.bairro ? `<strong>${pedido.bairro}</strong> — ` : ''}${pedido.endereco || '-'}</div>`;
 
+        const canal = canalPedido(pedido);
         return `
-        <div class="order-card" id="card-${id}">
+        <div class="order-card order-card--${canal}" id="card-${id}">
             <div class="order-header">
                 <span class="order-id">#${id.substring(0, 5)}</span>
                 ${badgeEntrega}

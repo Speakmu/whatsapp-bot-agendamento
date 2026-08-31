@@ -39,3 +39,9 @@ _legado_raiz_expo/
 # ===== Editor =====
 .vscode/
 .DS_Store
+
+# ===== Ferramentas locais / config de agente =====
+# .claude/settings.local.json guarda comandos com chaves de API coladas
+# (permissoes do Claude Code) — nunca deve ser versionado.
+.claude/
+tools/

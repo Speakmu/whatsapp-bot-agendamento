@@ -1,0 +1,30 @@
+{
+  "name": "ifood-functions",
+  "version": "1.0.0",
+  "description": "Recebe webhooks de pedidos do iFood e grava em pedidos (Firestore), empacotado como Firebase Cloud Function.",
+  "main": "dist/functions-entry.js",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "dev": "ts-node src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "deploy": "firebase deploy --only functions:ifood",
+    "logs": "firebase functions:log --only ifoodWebhook"
+  },
+  "dependencies": {
+    "axios": "^1.16.0",
+    "express": "^4.19.2",
+    "firebase-admin": "^12.7.0",
+    "firebase-functions": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.19.43",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}
