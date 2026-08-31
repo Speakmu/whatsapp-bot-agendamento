@@ -83,12 +83,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function listenNotes() {
-        db.collection('notas_fiscais').onSnapshot(snap => {
-            state.notas = [];
-            snap.forEach(doc => state.notas.push({ id: doc.id, ...doc.data() }));
-            state.notas.sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
-            render();
-        }, err => console.warn('notas_fiscais:', err.message));
+        const inicioHoje = new Date();
+        inicioHoje.setHours(0, 0, 0, 0);
+        db.collection('notas_fiscais')
+            .where('criado_em', '>=', inicioHoje)
+            .onSnapshot(snap => {
+                state.notas = [];
+                snap.forEach(doc => state.notas.push({ id: doc.id, ...doc.data() }));
+                state.notas.sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
+                render();
+            }, err => console.warn('notas_fiscais:', err.message));
     }
 
     function listenOrders() {
