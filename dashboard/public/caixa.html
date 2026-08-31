@@ -120,15 +120,20 @@
         @media (max-width:900px){
             #view-pdv{ grid-template-columns:1fr; overflow-y:auto; }
             #view-caixa{ grid-template-columns:1fr; }
-        }
-        @media (max-width:700px){
-            body { height:auto; min-height:100vh; overflow:auto; }
+            /* Header estica pra baixo (empilhado) na mesma largura em que o
+               PDV também empilha — antes ele virava grid de 1 coluna só
+               abaixo de 700px, então entre 700-900px ficava com o título
+               sozinho numa linha e um vazio enorme à direita, enquanto
+               Produtos/Venda já estavam lado a lado (largura > 700). */
             header.top { display:grid; grid-template-columns:1fr; gap:10px; padding:14px 12px; align-items:start; }
             header.top h1 { font-size:1.35rem; line-height:1.2; min-height:48px; display:flex; align-items:center; }
             nav.tabs { display:grid; grid-template-columns:1fr 1fr; width:100%; }
             .tab, .link { padding:12px 10px; text-align:center; font-size:.92rem; font-weight:700; }
             .right { justify-content:space-between; flex-wrap:wrap; width:100%; }
             #caixa-indicador { font-size:.95rem; padding:8px 12px; }
+        }
+        @media (max-width:700px){
+            body { height:auto; min-height:100vh; overflow:auto; }
             main { overflow:visible; }
             #view-pdv { height:auto; display:flex; flex-direction:column; gap:10px; padding:10px; }
             #view-pdv > .panel:not(.produtos-box) { order:1; }
