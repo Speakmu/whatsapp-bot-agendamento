@@ -12,8 +12,8 @@
     const arquivoAtual = (location.pathname.split('/').pop() || 'home.html').toLowerCase();
     const isAdminShell = arquivoAtual === 'admin.html';
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
-    // Acesso de suporte/fornecedor: só enxerga a Mensalidade — nem a página
-    // Início (que não é protegida por nenhuma permissão de módulo).
+    // Acesso de suporte (mesmo e-mail da categoria "Suporte" em
+    // configuracoes.js/firestore.rules): acesso total, igual admin.
     const VENDOR_ADMIN_EMAIL = 'contato.seusuportetec@gmail.com';
     const MODULE_KEYS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'mensalidade', 'configuracoes'];
 
@@ -99,11 +99,8 @@
     }
 
     async function carregarAcesso(user) {
-        if (isVendor(user && user.email)) {
-            return { admin: false, permissoes: { mensalidade: true }, vendor: true };
-        }
         const db = firebase.firestore();
-        if (isAdmin(user && user.email)) {
+        if (isAdmin(user && user.email) || isVendor(user && user.email)) {
             const acessoAdmin = {};
             MODULE_KEYS.forEach(k => acessoAdmin[k] = true);
             return { admin: true, permissoes: acessoAdmin };
@@ -255,32 +252,12 @@
                 const globalCfg = await carregarExibicaoGlobal();
                 const acesso = await carregarAcesso(user);
                 const cfg = acessoEfetivo(globalCfg, acesso);
-                const paginaPadrao = acesso.vendor ? '%2Fmensalidades.html' : '%2Fhome.html';
                 const donos = PAGE_KEYS[arquivoAtual];
                 if (donos && donos.every(function (k) { return cfg[k] !== true; })) {
-                    window.location.replace('/admin.html?page=' + paginaPadrao);
+                    window.location.replace('/admin.html?page=%2Fhome.html');
                     return;
                 }
                 aplicarExibicaoNoDOM(aside, cfg);
-                if (acesso.vendor) {
-                    // Início não tem data-key (nunca é escondido pelo mecanismo
-                    // padrão de permissões) — pro acesso de suporte, escondemos
-                    // à parte, e também o grupo "Operação" caso fique vazio.
-                    const inicioLink = aside.querySelector('.sb-item[data-href="/home.html"]');
-                    if (inicioLink) {
-                        inicioLink.style.display = 'none';
-                        const grupo = inicioLink.previousElementSibling;
-                        if (grupo && grupo.classList.contains('sb-group')) {
-                            let el = grupo.nextElementSibling;
-                            let algumVisivel = false;
-                            while (el && el.classList.contains('sb-item')) {
-                                if (el.style.display !== 'none') { algumVisivel = true; break; }
-                                el = el.nextElementSibling;
-                            }
-                            if (!algumVisivel) grupo.style.display = 'none';
-                        }
-                    }
-                }
             } catch (e) {
                 // Sem config = mostra tudo.
             }
