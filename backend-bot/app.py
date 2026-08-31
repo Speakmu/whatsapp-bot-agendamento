@@ -39,7 +39,11 @@ BOT_CONFIG_DEFAULTS = {
     "ativo": True,
     "nome_atendente": "Sofia",
     "nome_empresa": "Lileamar Salgados",
-    "chave_pix": "abc1231234567",
+    # Vazio de propósito: nunca cair de volta pra uma chave PIX de exemplo
+    # (isso já aconteceu — "abc1231234567" era passada como se fosse real
+    # quando o campo não tinha sido configurado no painel ainda). Sem chave
+    # configurada, o bot deve dizer pra falar com a equipe, não inventar uma.
+    "chave_pix": "",
     "modelo": "gpt-4o",
     # Fechar um pedido hoje passa por bem mais etapas do que antes (confirmar
     # bairro, pedir endereço completo, forma de pagamento, resumo antes de
@@ -1012,7 +1016,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
 
     nome_atendente = bot_cfg.get("nome_atendente") or BOT_CONFIG_DEFAULTS["nome_atendente"]
     nome_empresa = bot_cfg.get("nome_empresa") or BOT_CONFIG_DEFAULTS["nome_empresa"]
-    chave_pix = bot_cfg.get("chave_pix") or "consulte a equipe"
+    # .strip() pra pegar também o caso de alguém salvar só espaço em branco
+    # no painel — não é só "campo ausente" que precisa cair no fallback.
+    chave_pix = (bot_cfg.get("chave_pix") or "").strip() or "consulte a equipe"
     instrucoes_extras = bot_cfg.get("instrucoes_extras") or ""
     cidade_atendida = bot_cfg.get("cidade_atendida") or ""
 

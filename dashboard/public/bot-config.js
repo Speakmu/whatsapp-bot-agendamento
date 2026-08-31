@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ativo: true,
         nome_atendente: 'Sofia',
         nome_empresa: 'Lileamar Salgados',
-        chave_pix: 'abc1231234567',
+        chave_pix: '', // sem chave de exemplo: campo vazio força o cliente a configurar a chave real
         modelo: 'gpt-4o',
         mensagem_inicial: 'Ola! Como posso ajudar?',
         mensagem_inativo: 'No momento o atendimento automatico esta pausado. Em breve nossa equipe responde por aqui.',
