@@ -97,12 +97,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // ============================================================
     let vendasPendentes = 0;
     function configurarIndicadorConexao() {
-        const header = document.querySelector('header.top');
-        if (!header || $('conn-indicador')) return;
+        // Anexa dentro de .right (junto com "Caixa: ABERTO"/"Painel") em vez do
+        // header direto — no layout mobile o header vira grid de 1 coluna e um
+        // filho solto cai numa linha cheia própria, desorganizando o topo.
+        const right = document.querySelector('header.top .right');
+        if (!right || $('conn-indicador')) return;
         const badge = document.createElement('span');
         badge.id = 'conn-indicador';
         badge.style.cssText = 'font-size:.85rem;padding:5px 10px;border-radius:20px;margin-left:8px;';
-        header.appendChild(badge);
+        right.appendChild(badge);
         window.addEventListener('online', atualizarIndicadorConexao);
         window.addEventListener('offline', atualizarIndicadorConexao);
         atualizarIndicadorConexao();
