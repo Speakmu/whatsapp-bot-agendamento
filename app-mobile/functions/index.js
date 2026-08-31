@@ -31,6 +31,19 @@ async function exigirAdmin(req) {
     return token;
 }
 
+// Igual a exigirAdmin, mas sem e-mail fixo: consulta usuarios_admin (mesma
+// coleção que a aba Configurações usa pra listar quem é admin), pra não
+// depender de um e-mail hardcoded por cliente.
+async function exigirAdminGenerico(req) {
+    const token = await exigirUsuario(req);
+    const email = String(token.email || '').trim().toLowerCase();
+    const snap = await db.collection('usuarios_admin').doc(email).get();
+    if (!snap.exists || snap.data()?.admin !== true) {
+        throw Object.assign(new Error('Apenas administradores podem alterar a integracao iFood.'), { status: 403 });
+    }
+    return token;
+}
+
 // URL fixa da função de webhook abaixo (região padrão us-central1, mesmo projeto).
 const WEBHOOK_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/mercadoPagoWebhook";
 
@@ -299,6 +312,121 @@ export const configurarStoneConnect = onRequest(async (req, res) => {
         return res.status(200).json({ configured: true });
     } catch (error) {
         console.error('Erro ao configurar Stone Connect:', error.message);
+        return res.status(error.status || 500).json({ message: error.message });
+    }
+});
+
+// Salva a configuração da integração iFood: merchantId/clientId ficam em
+// configuracoes/ifood (o dashboard lê pra mostrar o status); clientSecret e
+// signatureSecret ficam em integracao_secrets/ifood, coleção sem acesso pelo
+// navegador (regras do Firestore), lida só pelo webhook (ifood-functions).
+export const configurarIfood = onRequest(async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        return res.status(204).send('');
+    }
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
+
+    try {
+        await exigirAdminGenerico(req);
+        const ativo = req.body?.ativo !== false;
+        const merchantId = String(req.body?.merchantId || '').trim();
+        const clientId = String(req.body?.clientId || '').trim();
+        const clientSecret = String(req.body?.clientSecret || '').trim();
+        const signatureSecret = String(req.body?.signatureSecret || '').trim();
+
+        if (!merchantId) return res.status(400).json({ message: 'Informe o Merchant ID (loja) do iFood.' });
+        if (!clientId) return res.status(400).json({ message: 'Informe o Client ID do aplicativo cadastrado no Portal do Parceiro.' });
+
+        const secretRef = db.collection('integracao_secrets').doc('ifood');
+        const atual = await secretRef.get();
+        const clientSecretConfigured = !!clientSecret || !!atual.data()?.clientSecret;
+        const signatureSecretConfigured = !!signatureSecret || !!atual.data()?.signatureSecret;
+
+        const batch = db.batch();
+        batch.set(db.collection('configuracoes').doc('ifood'), {
+            ativo,
+            merchantId,
+            clientId,
+            clientSecretConfigured,
+            signatureSecretConfigured,
+            atualizado_em: FieldValue.serverTimestamp()
+        }, { merge: true });
+        if (clientSecret || signatureSecret) {
+            batch.set(secretRef, {
+                ...(clientSecret ? { clientSecret } : {}),
+                ...(signatureSecret ? { signatureSecret } : {}),
+                atualizado_em: FieldValue.serverTimestamp()
+            }, { merge: true });
+        }
+        await batch.commit();
+        return res.status(200).json({ configured: true });
+    } catch (error) {
+        console.error('Erro ao configurar iFood:', error.message);
+        return res.status(error.status || 500).json({ message: error.message });
+    }
+});
+
+// Cria (ou atualiza a senha de) o login do Firebase Authentication de um
+// usuário do dashboard. A tela de Configurações (configuracoes.js) só grava
+// o documento de permissões em usuarios_admin — sem isso, alguém sempre
+// precisava criar o login manualmente no Console do Firebase depois. Não dá
+// pra fazer isso direto do navegador com createUserWithEmailAndPassword
+// porque essa chamada desloga o admin atual e loga como o usuário recém-criado;
+// por isso passa pelo Admin SDK aqui no servidor.
+export const criarUsuarioAdmin = onRequest(async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        return res.status(204).send('');
+    }
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
+
+    try {
+        await exigirAdminGenerico(req);
+        const email = String(req.body?.email || '').trim().toLowerCase();
+        const senha = String(req.body?.senha || '');
+        const nome = String(req.body?.nome || '').trim();
+
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({ message: 'Informe um e-mail valido.' });
+        }
+
+        let usuarioExistente = null;
+        try {
+            usuarioExistente = await getAuth().getUserByEmail(email);
+        } catch (err) {
+            if (err.code !== 'auth/user-not-found') throw err;
+        }
+
+        if (!usuarioExistente) {
+            if (!senha || senha.length < 6) {
+                return res.status(400).json({ message: 'Defina uma senha de pelo menos 6 caracteres pra criar o login deste usuario.' });
+            }
+            await getAuth().createUser({
+                email,
+                password: senha,
+                emailVerified: true,
+                ...(nome ? { displayName: nome } : {})
+            });
+            return res.status(200).json({ ok: true, existia: false, senhaAlterada: true });
+        }
+
+        if (senha) {
+            if (senha.length < 6) {
+                return res.status(400).json({ message: 'A senha precisa ter pelo menos 6 caracteres.' });
+            }
+            await getAuth().updateUser(usuarioExistente.uid, {
+                password: senha,
+                ...(nome ? { displayName: nome } : {})
+            });
+        }
+        return res.status(200).json({ ok: true, existia: true, senhaAlterada: !!senha });
+    } catch (error) {
+        console.error('Erro ao criar/atualizar login do usuario:', error.message);
         return res.status(error.status || 500).json({ message: error.message });
     }
 });

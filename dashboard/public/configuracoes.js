@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const DOC_GERAL = db.collection('configuracoes').doc('sistema');
     const DOC_EXIB = db.collection('configuracoes').doc('exibicao');
     const DOC_PAGAMENTOS = db.collection('configuracoes').doc('pagamentos');
+    const DOC_IFOOD = db.collection('configuracoes').doc('ifood');
     // horario_funcionamento mora no mesmo doc do bot (configuracoes/bot) porque
     // é lido por ele (backend-bot) e pelo app — não é exclusivo desta tela.
     const DOC_BOT = db.collection('configuracoes').doc('bot');
@@ -58,6 +59,8 @@ document.addEventListener('DOMContentLoaded', () => {
         $('pag-provedor').addEventListener('change', aplicarVisibilidadeProvedor);
         $('pag-maquininha-ativa').addEventListener('change', aplicarVisibilidadeMaquininha);
         $('testar-stone').addEventListener('click', testarMaquininhaStone);
+        $('salvar-ifood').addEventListener('click', salvarIfood);
+        $('testar-ifood').addEventListener('click', testarIfood);
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
         $('salvar-usuario').addEventListener('click', salvarUsuario);
         $('novo-usuario').addEventListener('click', limparUsuarioForm);
@@ -147,6 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             await carregarExibicao();
             await carregarPagamentos();
+            await carregarIfood();
             await carregarHorario();
         } catch (err) {
             alert('Erro ao carregar configuracoes: ' + err.message);
@@ -169,6 +173,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const CRIAR_COBRANCA_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaStone";
     const CONFIGURAR_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/configurarStoneConnect";
+    // Em outro projeto/cliente, trocar salgadinhos-lileamar pelo id do projeto Firebase dele.
+    const CONFIGURAR_IFOOD_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/configurarIfood";
+    const IFOOD_WEBHOOK_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/ifoodWebhook/ifood/webhook";
+    const IFOOD_HEALTH_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/ifoodWebhook/ifood/health";
+    const CRIAR_USUARIO_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarUsuarioAdmin";
 
     async function authHeaders() {
         if (!usuarioAtual) throw new Error('Sessao expirada. Entre novamente no sistema.');
@@ -275,6 +284,66 @@ document.addEventListener('DOMContentLoaded', () => {
         $('pag-stone-secret').placeholder = 'Chave Connect salva no servidor';
     }
 
+    async function carregarIfood() {
+        try {
+            $('ifood-webhook-url').value = IFOOD_WEBHOOK_URL;
+            const snap = await DOC_IFOOD.get();
+            const d = snap.exists ? (snap.data() || {}) : {};
+            $('ifood-ativa').checked = d.ativo !== false;
+            $('ifood-merchant-id').value = d.merchantId || '';
+            $('ifood-client-id').value = d.clientId || '';
+            $('ifood-client-secret').value = '';
+            $('ifood-client-secret').placeholder = d.clientSecretConfigured ? 'Chave salva no servidor' : 'sk_...';
+            $('ifood-signature-secret').value = '';
+            $('ifood-signature-secret').placeholder = d.signatureSecretConfigured
+                ? 'Chave salva no servidor'
+                : 'Aba Webhook do app no Portal do Parceiro (campo clientSecret)';
+        } catch (err) {
+            console.warn('ifood:', err.message);
+        }
+    }
+
+    async function salvarIfood() {
+        try {
+            const resp = await fetch(CONFIGURAR_IFOOD_URL, {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({
+                    ativo: $('ifood-ativa').checked,
+                    merchantId: $('ifood-merchant-id').value.trim(),
+                    clientId: $('ifood-client-id').value.trim(),
+                    clientSecret: $('ifood-client-secret').value.trim(),
+                    signatureSecret: $('ifood-signature-secret').value.trim()
+                })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(data.message || `erro ${resp.status}`);
+            await carregarIfood();
+            flash('Integracao iFood salva.');
+        } catch (err) {
+            alert('Erro ao salvar integracao iFood: ' + err.message);
+        }
+    }
+
+    async function testarIfood() {
+        const btn = $('testar-ifood');
+        const resultado = $('ifood-teste-resultado');
+        btn.disabled = true;
+        resultado.style.display = 'block';
+        resultado.textContent = 'Verificando...';
+        try {
+            const resp = await fetch(IFOOD_HEALTH_URL);
+            const data = await resp.json().catch(() => ({}));
+            resultado.textContent = data.configurado
+                ? '✅ Integração configurada e pronta para receber pedidos do iFood.'
+                : '⚠️ Serviço no ar, mas faltam credenciais (Merchant ID / Client ID / segredos) — salve a configuração acima.';
+        } catch (err) {
+            resultado.textContent = '❌ Erro ao contatar o servidor: ' + err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     async function carregarExibicao() {
         try {
             const snap = await DOC_EXIB.get();
@@ -345,6 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('u-nome').value = '';
         $('u-email').value = '';
         $('u-email').disabled = false;
+        $('u-senha').value = '';
         aplicarPermissoesNoForm(Object.fromEntries(MODULOS.map(m => [m, m !== 'configuracoes'])), false);
     }
 
@@ -418,13 +488,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const email = docIdEmail($('u-email').value);
         const nome = $('u-nome').value.trim();
+        const senha = $('u-senha').value;
         if (!email || !email.includes('@')) {
             alert('Informe um e-mail valido.');
             return;
         }
+        if (senha && senha.length < 6) {
+            alert('A senha precisa ter pelo menos 6 caracteres.');
+            return;
+        }
         const admin = isAdmin(email);
         const permissoes = admin ? Object.fromEntries(MODULOS.map(m => [m, true])) : permissoesDoForm();
+        const btn = $('salvar-usuario');
+        const textoOriginal = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Salvando...';
         try {
+            // Cria/atualiza o login no Firebase Authentication primeiro — só grava
+            // a permissao no Firestore se o login deu certo, pra nunca sobrar um
+            // usuario "fantasma" com permissao mas sem conseguir logar.
+            const resp = await fetch(CRIAR_USUARIO_URL, {
+                method: 'POST',
+                headers: await authHeaders(),
+                body: JSON.stringify({ email, senha, nome })
+            });
+            const dados = await resp.json().catch(() => ({}));
+            if (!resp.ok) throw new Error(dados.message || 'Falha ao criar/atualizar o login do usuario.');
+
             const ref = COL_USUARIOS.doc(email);
             const snap = await ref.get();
             await ref.set({
@@ -436,11 +525,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp(),
                 ...(snap.exists ? {} : { criado_em: firebase.firestore.FieldValue.serverTimestamp() })
             }, { merge: true });
-            flash('Usuario salvo.');
+            flash(!dados.existia ? 'Usuario e login criados.' : (dados.senhaAlterada ? 'Usuario salvo e senha atualizada.' : 'Usuario salvo.'));
             limparUsuarioForm();
             carregarUsuarios();
         } catch (err) {
             alert('Erro ao salvar usuario: ' + err.message);
+        } finally {
+            btn.disabled = false; btn.textContent = textoOriginal;
         }
     }
 
@@ -454,6 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
             $('u-nome').value = u.nome || '';
             $('u-email').value = u.email || id;
             $('u-email').disabled = true;
+            $('u-senha').value = '';
             aplicarPermissoesNoForm(u.permissoes || {}, !!u.admin);
             $('usuarios-admin-box').scrollIntoView({ behavior: 'smooth', block: 'start' });
         } catch (err) {

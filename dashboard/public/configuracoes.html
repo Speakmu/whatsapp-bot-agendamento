@@ -134,6 +134,43 @@
         </details>
 
         <details class="box">
+            <summary><div><h2>Integra&ccedil;&atilde;o iFood</h2><div class="sub">Recebe pedidos do iFood direto no Pedidos/KDS. As credenciais de acesso (Client Secret e assinatura do webhook) ficam protegidas no servidor.</div></div><span class="chevron">&#9656;</span></summary>
+            <div class="box-body">
+            <div class="campo">
+                <label class="exib-item" style="font-weight:600;"><input type="checkbox" id="ifood-ativa" checked> Integra&ccedil;&atilde;o ativa</label>
+                <small>Quando desligada, para de buscar pedidos do iFood (o polling a cada 1 min passa a s&oacute; checar essa op&ccedil;&atilde;o e sair, sem chamar a API do iFood) e o webhook tamb&eacute;m para de aceitar eventos.</small>
+            </div>
+            <div class="campo">
+                <label>Merchant ID (loja no iFood)</label>
+                <input id="ifood-merchant-id" placeholder="Identificador da loja no Portal do Parceiro">
+            </div>
+            <div class="campo">
+                <label>Client ID</label>
+                <input id="ifood-client-id" placeholder="Gerado ao cadastrar o aplicativo no Portal do Parceiro">
+            </div>
+            <div class="campo">
+                <label>Client Secret</label>
+                <input id="ifood-client-secret" type="password" placeholder="sk_..." autocomplete="off">
+                <small>Deixe em branco para manter a chave j&aacute; salva.</small>
+            </div>
+            <div class="campo">
+                <label>clientSecret do Webhook</label>
+                <input id="ifood-signature-secret" type="password" placeholder="Aba Webhook do app no Portal do Parceiro (campo clientSecret)" autocomplete="off">
+                <small>Fica na aba <strong>Webhook</strong> do aplicativo no Portal do Parceiro (n&atilde;o &eacute; um segredo separado &mdash; &eacute; o mesmo valor mostrado l&aacute; como <code>clientSecret</code>, usado pra assinar as chamadas do webhook). Deixe em branco para manter a chave j&aacute; salva.</small>
+            </div>
+            <div class="campo">
+                <label>URL do webhook (cadastre no Portal do Parceiro)</label>
+                <input id="ifood-webhook-url" readonly>
+            </div>
+            <div class="acoes">
+                <button class="btn btn-salvar" id="salvar-ifood">Salvar integra&ccedil;&atilde;o iFood</button>
+                <button class="btn btn-azul" id="testar-ifood" type="button">Testar conex&atilde;o</button>
+            </div>
+            <div id="ifood-teste-resultado" class="muted-box" style="margin-top:10px; display:none;"></div>
+            </div>
+        </details>
+
+        <details class="box">
             <summary><div><h2>Exibi&ccedil;&atilde;o de m&oacute;dulos</h2><div class="sub">Escolha o que aparece no menu lateral da loja. O cadastro de usu&aacute;rios controla o acesso por pessoa.</div></div><span class="chevron">&#9656;</span></summary>
             <div class="box-body">
             <div class="exib-grupos">
@@ -185,6 +222,11 @@
                     <label>E-mail de login</label>
                     <input id="u-email" type="email" placeholder="usuario@email.com">
                     <small>O admin principal &eacute; lileamarloja04@gmail.com.</small>
+                </div>
+                <div class="campo">
+                    <label>Senha de acesso</label>
+                    <input id="u-senha" type="password" placeholder="M&iacute;nimo 6 caracteres" autocomplete="new-password">
+                    <small>Cria o login no Firebase junto com o usu&aacute;rio &mdash; sem precisar adicionar manualmente depois. Ao editar, deixe em branco pra n&atilde;o mudar a senha atual.</small>
                 </div>
             </div>
             <div class="exib-grupos" id="u-modulos">
