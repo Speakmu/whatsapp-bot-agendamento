@@ -1322,6 +1322,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         
         if response_message.tool_calls:
             messages.append(response_message)
+            # Se registrar_pedido falhar por erro DE SISTEMA (Firestore fora do
+            # ar, exceção não prevista) — não por regra de negócio esperada
+            # (loja fechada, item não reconhecido) — a resposta final não pode
+            # depender da IA "perceber" isso no resultado da função e admitir
+            # o erro pro cliente. Ela pode muito bem gerar um texto de
+            # confirmação plausível mesmo com a função tendo retornado erro
+            # (é exatamente o que já causou um pedido confirmado em texto que
+            # nunca foi pro Firestore). Por isso: quando isso acontece, a
+            # resposta final é fixa (não vem da IA) e a equipe é avisada.
+            falha_sistema_pedido = None
             for tool_call in response_message.tool_calls:
                 function_name = tool_call.function.name
                 args = json.loads(tool_call.function.arguments)
@@ -1383,13 +1393,33 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                 tipo="item",
                                 dados={"nome_produto": nao_reconhecidos[0], "todos": nao_reconhecidos}
                             )
+                        if (function_name == "registrar_pedido"
+                                and resultado_pedido.get("status") == "erro"
+                                and resultado_pedido.get("motivo") in ("Erro de conexão.", "Erro interno.")):
+                            falha_sistema_pedido = resultado_pedido.get("motivo")
+                            marcar_atencao(
+                                id_usuario,
+                                f"FALHA ao registrar pedido (não foi salvo): {falha_sistema_pedido}",
+                                tipo="pedido_falhou",
+                                dados={"itens": args.get("itens"), "valor_total": args.get("valor_total")}
+                            )
                     except (ValueError, TypeError):
                         pass
 
                 messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": content})
-            
-            second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages, timeout=60)
-            final_text = second_res.choices[0].message.content
+
+            if falha_sistema_pedido:
+                # Texto fixo, não vem da IA: garante que o cliente nunca recebe
+                # uma "confirmação" pra um pedido que não foi salvo.
+                final_text = (
+                    "Poxa, tive um problema técnico bem na hora de registrar seu "
+                    "pedido — ele NÃO foi confirmado ainda. Já avisei nossa equipe "
+                    "aqui, alguém confere e fala com você em instantes. Desculpa o "
+                    "transtorno!"
+                )
+            else:
+                second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages, timeout=60)
+                final_text = second_res.choices[0].message.content
         else:
             final_text = response_message.content
 
