@@ -294,11 +294,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function configurarBuscaEComandas() {
         const btnBusca = $('btn-toggle-busca');
         const inputBusca = $('busca-produto');
+        const headProdutos = $('produtos-panel-head');
         if (btnBusca && inputBusca) {
             btnBusca.addEventListener('click', () => {
                 const abrindo = inputBusca.classList.contains('hidden');
                 inputBusca.classList.toggle('hidden', !abrindo);
                 btnBusca.classList.toggle('active', abrindo);
+                if (headProdutos) headProdutos.classList.toggle('buscando', abrindo);
                 if (abrindo) {
                     inputBusca.focus();
                 } else {

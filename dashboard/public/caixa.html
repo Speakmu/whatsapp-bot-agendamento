@@ -68,9 +68,13 @@
         .pdv-feedback { margin:0 12px 10px; padding:10px 12px; border-radius:8px; background:#e6f9ef; color:#1e8e4f; font-weight:700; font-size:.9rem; }
 
         /* ---------- Painel de produtos (grid touch) ---------- */
-        .produtos-busca { padding:12px; border-bottom:1px solid var(--line); }
-        .busca-row { display:flex; align-items:center; gap:8px; }
-        .icon-btn { position:relative; flex:0 0 auto; width:42px; height:42px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font-size:1.1rem; display:flex; align-items:center; justify-content:center; }
+        /* Ícones de busca/comandas vivem no cabeçalho do painel (ao lado do
+           título) em vez de reservarem uma faixa própria abaixo dele — só a
+           busca, quando aberta, toma o lugar do título pra caber o input. */
+        .busca-row { display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+        #produtos-panel-head.buscando #produtos-titulo { display:none; }
+        #produtos-panel-head.buscando .busca-row { flex:1; }
+        .icon-btn { position:relative; flex:0 0 auto; width:36px; height:36px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font-size:1rem; display:flex; align-items:center; justify-content:center; }
         .icon-btn.active { background:var(--accent); border-color:var(--accent); }
         .icon-badge { position:absolute; top:-6px; right:-6px; min-width:18px; height:18px; padding:0 4px; border-radius:999px; background:var(--danger); color:#fff; font-size:.68rem; font-weight:800; display:flex; align-items:center; justify-content:center; }
         .busca-row #busca-produto { flex:1; }
@@ -212,13 +216,11 @@
         <!-- ===================== PDV ===================== -->
         <section id="view-pdv">
             <div class="panel produtos-box" id="produtos-box">
-                <div class="panel-head">
-                    <span>Produtos</span>
-                </div>
-                <div class="produtos-busca">
+                <div class="panel-head" id="produtos-panel-head">
+                    <span id="produtos-titulo">Produtos</span>
                     <div class="busca-row">
-                        <button type="button" class="icon-btn" id="btn-toggle-busca" title="Buscar item" aria-label="Buscar item">🔍</button>
                         <input id="busca-produto" class="hidden" placeholder="Buscar item..." autocomplete="off">
+                        <button type="button" class="icon-btn" id="btn-toggle-busca" title="Buscar item" aria-label="Buscar item">🔍</button>
                         <button type="button" class="icon-btn" id="btn-comandas" title="Comandas abertas" aria-label="Comandas abertas">
                             🧾<span class="icon-badge hidden" id="comandas-badge">0</span>
                         </button>
