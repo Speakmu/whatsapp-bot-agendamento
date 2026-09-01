@@ -237,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function configurarPDV() {
         $('busca-produto').addEventListener('input', e => renderCardapio(e.target.value));
+        configurarBuscaEComandas();
         $('btn-limpar').addEventListener('click', () => { carrinho = []; renderCarrinho(); });
         $('pag-grid').querySelectorAll('.pag-btn').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -287,15 +288,49 @@ document.addEventListener('DOMContentLoaded', () => {
             }, err => console.error("Erro comandas pendentes:", err));
     }
 
+    // Busca vira ícone (some o input pra sobrar tela pro cardápio) e o
+    // ícone de comandas abre a lista num modal — antes ela ficava fixa
+    // ocupando espaço no painel "Venda rápida" o tempo todo, mesmo vazia.
+    function configurarBuscaEComandas() {
+        const btnBusca = $('btn-toggle-busca');
+        const inputBusca = $('busca-produto');
+        if (btnBusca && inputBusca) {
+            btnBusca.addEventListener('click', () => {
+                const abrindo = inputBusca.classList.contains('hidden');
+                inputBusca.classList.toggle('hidden', !abrindo);
+                btnBusca.classList.toggle('active', abrindo);
+                if (abrindo) {
+                    inputBusca.focus();
+                } else {
+                    inputBusca.value = '';
+                    renderCardapio('');
+                }
+            });
+        }
+
+        const modal = $('comandas-modal');
+        const abrirModal = () => modal && modal.classList.remove('hidden');
+        const fecharModal = () => modal && modal.classList.add('hidden');
+        const btnComandas = $('btn-comandas');
+        if (btnComandas) btnComandas.addEventListener('click', abrirModal);
+        const fechar = $('fechar-comandas-modal');
+        if (fechar) fechar.addEventListener('click', fecharModal);
+        const backdrop = $('comandas-modal-backdrop');
+        if (backdrop) backdrop.addEventListener('click', fecharModal);
+    }
+
     function renderComandasPendentes() {
         const lista = $('mesa-pendentes-lista');
         const total = $('mesa-pendentes-total');
-        const box = $('mesa-pendentes-box');
+        const badge = $('comandas-badge');
         if (!lista) return;
         if (total) {
             total.textContent = `${comandasPendentes.length} ${comandasPendentes.length === 1 ? 'aberta' : 'abertas'}`;
         }
-        if (box) box.classList.toggle('vazia', !comandasPendentes.length);
+        if (badge) {
+            badge.textContent = String(comandasPendentes.length);
+            badge.classList.toggle('hidden', !comandasPendentes.length);
+        }
         if (!comandasPendentes.length) {
             lista.innerHTML = '<div class="empty-state">Nenhum pedido enviado ao caixa.</div>';
             return;
