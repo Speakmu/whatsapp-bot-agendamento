@@ -123,7 +123,8 @@
         .pag-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:8px; }
         .pag-btn { padding:10px; min-height:40px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; font-size:.9rem; }
         .pag-btn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
-        .check-cozinha { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--muted); margin-bottom:8px; }
+        .checks-row { display:flex; gap:16px; margin-bottom:8px; flex-wrap:wrap; }
+        .chk-inline { display:flex; align-items:center; gap:6px; font-size:.85rem; color:var(--muted); cursor:pointer; }
         .btn-finalizar { width:100%; padding:12px; border:none; border-radius:10px; background:var(--ok); color:#fff; font-size:1.1rem; font-weight:700; cursor:pointer; }
         .btn-finalizar:disabled { background:#bdc3c7; cursor:not-allowed; }
         .btn-limpar { background:none; border:none; color:var(--danger); cursor:pointer; font-size:.85rem; }
@@ -245,8 +246,15 @@
                     <div id="cart-itens"></div>
                 </div>
                 <div style="padding:10px 12px; border-top:1px solid var(--line);">
-                    <div class="campo">
-                        <label>Cliente (opcional)</label>
+                    <div class="checks-row">
+                        <label class="chk-inline">
+                            <input type="checkbox" id="chk-identificar-cliente"> Identificar cliente
+                        </label>
+                        <label class="chk-inline">
+                            <input type="checkbox" id="chk-cozinha"> Enviar p/ cozinha
+                        </label>
+                    </div>
+                    <div class="campo hidden" id="campo-cliente">
                         <input id="cliente-nome" placeholder="Nome do cliente">
                     </div>
                     <div class="cart-total">Total: <span id="cart-total">R$ 0,00</span></div>
@@ -255,9 +263,6 @@
                         <button class="pag-btn" data-pag="PIX">PIX</button>
                         <button class="pag-btn" data-pag="Cartão">Cartão</button>
                     </div>
-                    <label class="check-cozinha">
-                        <input type="checkbox" id="chk-cozinha"> Enviar para a cozinha (KDS) em vez de concluir
-                    </label>
                     <button class="btn-finalizar" id="btn-finalizar" disabled>Finalizar venda</button>
                 </div>
             </div>

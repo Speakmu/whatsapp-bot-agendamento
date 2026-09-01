@@ -239,6 +239,16 @@ document.addEventListener('DOMContentLoaded', () => {
         $('busca-produto').addEventListener('input', e => renderCardapio(e.target.value));
         configurarBuscaEComandas();
         $('btn-limpar').addEventListener('click', () => { carrinho = []; renderCarrinho(); });
+        $('chk-identificar-cliente').addEventListener('change', e => {
+            const marcado = e.target.checked;
+            $('campo-cliente').classList.toggle('hidden', !marcado);
+            if (marcado) {
+                $('cliente-nome').focus();
+            } else {
+                // Some o campo sem apagar o texto -- se o operador marcar de novo
+                // (ex.: clicou sem querer), o nome digitado continua ali.
+            }
+        });
         $('pag-grid').querySelectorAll('.pag-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 $('pag-grid').querySelectorAll('.pag-btn').forEach(b => b.classList.remove('active'));
@@ -462,6 +472,16 @@ document.addEventListener('DOMContentLoaded', () => {
         maquininhaAtiva = d?.maquininhaAtiva !== false;
     }, err => console.warn('Erro ao ler provedor de pagamento:', err.message));
 
+    // Só usa o nome digitado se a caixinha "Identificar cliente" estiver
+    // marcada — desmarcar esconde o campo, mas se não checasse isso aqui
+    // um nome digitado antes e depois desmarcado ainda vazaria pra nota
+    // fiscal (o campo só fica invisível, o texto continua no input).
+    function nomeClienteAtual() {
+        const identificar = $('chk-identificar-cliente').checked;
+        const nome = identificar ? $('cliente-nome').value.trim() : '';
+        return nome || "Balcão";
+    }
+
     async function finalizarVenda() {
         if (!sessaoAtual || !carrinho.length) return;
         // Com a maquininha desativada, o Cartão segue o mesmo caminho manual de
@@ -484,7 +504,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const pedido = {
             origem: "BALCAO",
-            nome_cliente: ($('cliente-nome').value || "Balcão").trim(),
+            nome_cliente: nomeClienteAtual(),
             itens: carrinho.map(c => ({ nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
             valor_total: total,
             forma_pagamento: formaPagamento,
@@ -531,6 +551,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         carrinho = [];
         $('cliente-nome').value = "";
+        $('chk-identificar-cliente').checked = false;
+        $('campo-cliente').classList.add('hidden');
         $('chk-cozinha').checked = false;
         renderCarrinho();
         atualizarBotaoFinalizar();
@@ -593,7 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const pedido = {
             origem: "BALCAO",
-            nome_cliente: ($('cliente-nome').value || "Balcão").trim(),
+            nome_cliente: nomeClienteAtual(),
             itens: carrinho.map(c => ({ nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
             valor_total: total,
             forma_pagamento: formaPagamento,
@@ -617,6 +639,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // caixa pode atender o próximo cliente enquanto espera a confirmação.
         carrinho = [];
         $('cliente-nome').value = "";
+        $('chk-identificar-cliente').checked = false;
+        $('campo-cliente').classList.add('hidden');
         $('chk-cozinha').checked = false;
         renderCarrinho();
         flash(`💳 Aguardando confirmação da maquininha (${nomeProvedor}) • ${money(total)}`);
