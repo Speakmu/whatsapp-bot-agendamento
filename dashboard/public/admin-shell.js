@@ -256,10 +256,18 @@
             if (!style) {
                 style = doc.createElement('style');
                 style.id = 'admin-frame-cleanup-style';
+                // O PDV (#view-pdv, só existe em caixa.html) já cuida do próprio
+                // header responsivo com um breakpoint proprio (900px, alinhado
+                // com o layout Produtos/Venda) — a regra genérica abaixo (feita
+                // pra painel.html/kds.html/etc, que não tem esse cuidado) forçava
+                // header.top a empilhar já a partir de 1100px com !important,
+                // vencendo qualquer regra do caixa.html e desorganizando o topo
+                // mesmo sobrando espaço de sobra pra caber tudo numa linha.
+                const ehPdv = !!doc.getElementById('view-pdv');
                 style.textContent = [
                     '#app-sidebar,#sb-toggle,#sb-backdrop{display:none!important;}',
                     'body{margin-left:0!important;}',
-                    '@media (max-width:1100px){.painel-header,.topbar,header.top{display:grid!important;grid-template-columns:1fr!important;gap:10px!important;min-height:92px!important;padding:16px 14px 14px 76px!important;}.painel-header h1,header.top h1,.topbar h1{min-height:48px!important;display:flex!important;align-items:center!important;padding-left:0!important;margin:0!important;}}'
+                    ehPdv ? '' : '@media (max-width:1100px){.painel-header,.topbar,header.top{display:grid!important;grid-template-columns:1fr!important;gap:10px!important;min-height:92px!important;padding:16px 14px 14px 76px!important;}.painel-header h1,header.top h1,.topbar h1{min-height:48px!important;display:flex!important;align-items:center!important;padding-left:0!important;margin:0!important;}}'
                 ].join('');
                 doc.head.appendChild(style);
             }
