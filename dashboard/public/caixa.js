@@ -200,7 +200,9 @@ document.addEventListener('DOMContentLoaded', () => {
             qtd: 1
         });
         renderCarrinho();
-        mostrarItemAdicionado(item.nome_exibicao || item.nome || "Item");
+        if (window.matchMedia('(max-width: 700px)').matches) {
+            $('cart-itens').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
     }
     function mudarQtd(id, delta) {
         const c = carrinho.find(x => x.id === id);
@@ -265,19 +267,6 @@ document.addEventListener('DOMContentLoaded', () => {
             ? 'Abra o caixa para vender'
             : (carrinho.length ? `Finalizar venda • ${money(totalCarrinho())}` : 'Finalizar venda');
     }
-
-    function mostrarItemAdicionado(nome) {
-        const feedback = $('pdv-feedback');
-        if (!feedback) return;
-        feedback.textContent = `${nome} adicionado à venda.`;
-        feedback.classList.remove('hidden');
-        clearTimeout(mostrarItemAdicionado.timer);
-        mostrarItemAdicionado.timer = setTimeout(() => feedback.classList.add('hidden'), 2600);
-        if (window.matchMedia('(max-width: 700px)').matches) {
-            $('cart-itens').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-    }
-
 
     function ouvirComandasPendentes() {
         db.collection(COL_PEDIDOS)
