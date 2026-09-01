@@ -16,6 +16,16 @@
         // que o painel abre, sem depender de o operador já ter aberto o Caixa
         // antes com internet.
         if ('serviceWorker' in navigator) {
+            // Sem isso, um deploy novo só aparecia depois do operador fechar
+            // e reabrir a aba manualmente — o SW antigo continuava no
+            // controle da página até então. 'controllerchange' dispara
+            // assim que a versão nova assume; recarrega sozinho uma vez.
+            let jaRecarregou = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (jaRecarregou) return;
+                jaRecarregou = true;
+                location.reload();
+            });
             window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
         }
     </script>
