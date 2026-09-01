@@ -249,6 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const forma = n.tipo === 'INUTILIZACAO' ? '-' : (n.formaEmissao || (n.contingencia || status === 'CONTINGENCIA' ? 'CONTINGENCIA' : 'NORMAL'));
             const actions = [];
             if (n.danfeBase64) actions.push(`<button class="btn" data-danfe="${n.id}">DANFE</button>`);
+            if (n.danfeBase64) actions.push(`<button class="btn" data-imprimir="${n.id}" title="Imprimir cupom">🖨️ Imprimir</button>`);
             if (n.xml || n.xmlAssinado) actions.push(`<button class="btn" data-xml="${n.id}">Baixar XML</button>`);
             if (status === 'CONTINGENCIA') actions.push(`<button class="btn primary" data-transmitir="${n.id}">Transmitir</button>`);
             if (status === 'AUTORIZADA' && n.chave && n.protocolo) actions.push(`<button class="btn danger" data-cancelar="${n.id}">Cancelar</button>`);
@@ -360,7 +361,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // (e depois cancelada na SEFAZ) — cancelar a venda por aqui nao desfaz isso,
             // entao continua bloqueado mesmo com a nota cancelada.
             const nfEmitida = st === 'AUTORIZADA' || st === 'CONTINGENCIA' || st === 'PROCESSANDO' || st === 'CANCELADA' || st === 'INUTILIZADA';
-            if (st === 'AUTORIZADA' || st === 'CONTINGENCIA') acao = '<span class="badge b-ok">Emitida</span>';
+            if (st === 'AUTORIZADA' || st === 'CONTINGENCIA') {
+                acao = '<span class="badge b-ok">Emitida</span>';
+                if (nota.danfeBase64) acao += `<br><button class="btn" data-imprimir="${nota.id}" title="Imprimir cupom" style="margin-top:6px">🖨️ Imprimir</button>`;
+            }
             else if (st === 'PROCESSANDO') acao = '<span class="badge b-warn">Processando...</span>';
             else if (st === 'ERRO_REDE') acao = '<span class="badge b-warn">Aguardando conexão (reenvia sozinho)</span>';
             else if (st === 'REJEITADA' || st === 'ERRO') {
@@ -657,6 +661,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const notaPorId = (id) => state.notas.find(n => n.id === id) || state.notasRelatorio.find(n => n.id === id);
         document.querySelectorAll('[data-danfe]').forEach(btn => btn.onclick = () => baixarDanfe(notaPorId(btn.dataset.danfe)));
         document.querySelectorAll('[data-xml]').forEach(btn => btn.onclick = () => baixarXml(notaPorId(btn.dataset.xml)));
+        document.querySelectorAll('[data-imprimir]').forEach(btn => btn.onclick = () => imprimirDanfe(notaPorId(btn.dataset.imprimir)));
         document.querySelectorAll('[data-transmitir]').forEach(btn => btn.onclick = () => transmitir(btn));
         document.querySelectorAll('[data-cancelar]').forEach(btn => btn.onclick = () => cancelar(btn));
         const inut = $('btn-inutilizar-range');
@@ -1151,17 +1156,38 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function baixarDanfe(nota) {
-        if (!nota?.danfeBase64) return;
+    function danfeBlobUrl(nota) {
         const bytes = atob(nota.danfeBase64);
         const arr = new Uint8Array(bytes.length);
         for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
         const blob = new Blob([arr], { type: 'application/pdf' });
+        return URL.createObjectURL(blob);
+    }
+
+    function baixarDanfe(nota) {
+        if (!nota?.danfeBase64) return;
+        const url = danfeBlobUrl(nota);
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
+        a.href = url;
         a.download = `DANFE-NFCe-${nota.nNF || nota.chave || 'nota'}.pdf`;
         a.click();
         URL.revokeObjectURL(a.href);
+    }
+
+    // Abre o cupom (PDF de 80mm) numa aba nova e manda pra impressão direto —
+    // o visualizador de PDF nativo do navegador cuida do resto (escolher a
+    // impressora térmica, etc.). A janela precisa ser aberta de forma síncrona
+    // no clique (window.open aqui, ainda dentro do handler), senão o
+    // navegador bloqueia por não ser mais um gesto do usuário.
+    function imprimirDanfe(nota) {
+        if (!nota?.danfeBase64) return;
+        const url = danfeBlobUrl(nota);
+        const janela = window.open(url, '_blank');
+        if (!janela) { window.open(url, '_blank'); return; }
+        janela.addEventListener('load', () => {
+            try { janela.print(); } catch (e) { /* navegador não deixou automatizar — usuário imprime pelo próprio visualizador */ }
+        });
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
     }
 
     function baixarXml(nota) {
