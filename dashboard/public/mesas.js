@@ -417,19 +417,6 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) { alert("Erro ao enviar para o caixa: " + err.message); }
     }
 
-    // Emissão fiscal automática (respeita Configurações → Fiscal)
-    // FiscalClient.emitirAutomatico já marca o pedido como pendente quando falha
-    // (ex.: sem internet no momento da venda) — o retry automático do
-    // fiscal-client.js tenta de novo sozinho assim que a conexão voltar.
-    async function autoEmitirNFCe(pedidoId, pedido) {
-        if (!window.FiscalClient) return;
-        try {
-            const nota = await FiscalClient.emitirAutomatico(pedidoId, pedido);
-            if (nota) alert(`NFC-e emitida automaticamente (nº ${nota.nNF}).`);
-        } catch (err) {
-            console.warn('NFC-e automática (mesa) não emitida — tentaremos de novo quando a conexão voltar:', err.message);
-        }
-    }
 
     async function cancelarComanda() {
         if (!comandaAberta) return;
@@ -440,8 +427,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 status: 'CANCELADA', fechada_em: FieldValue.serverTimestamp()
             });
             batch.update(db.collection(COL_MESAS).doc(comandaAberta.mesa_id), {
-                status: 'LIVRE', comanda_id: null, total_atual: 0
+                status: 'LIVRE', comanda_id: null, pedido_id: null, total_atual: 0
             });
+            // Comanda já enviada ao caixa (tem pedido_id) tem um pedido
+            // "AGUARDANDO_PAGAMENTO" pendurado esperando ser recebido — sem
+            // cancelar ele também, a mesa some/libera aqui mas o pedido
+            // continua aparecendo pra sempre na lista de comandas do caixa.
+            if (comandaAberta.pedido_id) {
+                batch.update(db.collection(COL_PEDIDOS).doc(comandaAberta.pedido_id), {
+                    status: 'CANCELADO', cancelado_em: FieldValue.serverTimestamp()
+                });
+            }
             await batch.commit();
             fecharModal();
         } catch (err) { alert("Erro: " + err.message); }

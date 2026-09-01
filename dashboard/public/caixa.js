@@ -338,7 +338,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const itensHtml = (p.itens || []).map(i => {
                 const itemQtd = Number(i.quantidade || i.qtd) || 1;
                 const nome = i.nome_exibicao || i.nome || 'Item';
-                const subtotal = (Number(i.preco) || 0) * itemQtd;
+                // Item de mesa: i.preco é o preço unitário. Item de totem
+                // (totem.js) grava os dois: preco_unitario (unitário de
+                // verdade) e preco já multiplicado pela quantidade — usar
+                // i.preco direto aqui duplicava a conta pro totem.
+                const precoUnitario = i.preco_unitario != null ? Number(i.preco_unitario) : (Number(i.preco) || 0);
+                const subtotal = precoUnitario * itemQtd;
                 return `<li><span>${itemQtd}x ${escapeHtml(nome)}</span><strong>${money(subtotal)}</strong></li>`;
             }).join('');
             const disabled = sessaoAtual ? '' : 'disabled';
@@ -362,9 +367,13 @@ document.addEventListener('DOMContentLoaded', () => {
                         <option value="Cartão">Cartão</option>
                     </select>
                     <button data-receber-mesa="${p.id}" ${disabled}>${label}</button>
+                    <button class="btn-cancelar-mesa" data-cancelar-mesa="${p.id}">Cancelar</button>
                 </div>
             </div>`;
         }).join('');
+        lista.querySelectorAll('[data-cancelar-mesa]').forEach(btn => {
+            btn.addEventListener('click', () => cancelarComandaPendente(btn.dataset.cancelarMesa));
+        });
         lista.querySelectorAll('[data-receber-mesa]').forEach(btn => {
             btn.addEventListener('click', () => {
                 const linha = btn.closest('.mesa-pendente');
@@ -444,6 +453,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         flash(`${rotulo} recebida - ${money(total)} (${formaRecebimento})`);
         autoEmitirNFCe(pedidoId, { ...pedido, status: statusFinal, forma_pagamento: formaRecebimento });
+    }
+
+    // Cancela uma comanda pendente direto do caixa (cliente foi embora, pedido
+    // duplicado, engano etc.) sem precisar voltar em Mesas & Comandas. Não
+    // mexe em sessão/movimento de caixa nem emite nota -- é só descartar um
+    // pedido que ainda não foi pago.
+    async function cancelarComandaPendente(pedidoId) {
+        const pedido = comandasPendentes.find(p => p.id === pedidoId);
+        if (!pedido) return;
+        const consumoTotem = pedido.tipo_consumo === 'LOCAL' ? ' (Comer aqui)' : (pedido.origem === 'TOTEM' ? ' (Levar)' : '');
+        const rotulo = pedido.origem === 'TOTEM' ? `Senha ${pedido.senha}${consumoTotem}` : `Mesa ${pedido.mesa_numero}`;
+        if (!confirm(`Cancelar ${rotulo}? O pedido será descartado sem cobrança.`)) return;
+
+        const batch = db.batch();
+        batch.update(db.collection(COL_PEDIDOS).doc(pedidoId), {
+            status: "CANCELADO",
+            cancelado_em: FieldValue.serverTimestamp()
+        });
+        if (pedido.comanda_id) {
+            batch.update(db.collection(COL_COMANDAS).doc(pedido.comanda_id), {
+                status: "CANCELADA",
+                fechada_em: FieldValue.serverTimestamp()
+            });
+        }
+        if (pedido.mesa_id) {
+            batch.update(db.collection(COL_MESAS).doc(pedido.mesa_id), {
+                status: "LIVRE",
+                comanda_id: null,
+                pedido_id: null,
+                total_atual: 0
+            });
+        }
+        batch.commit().catch(err => {
+            flash(`⚠️ Falha ao sincronizar cancelamento de ${rotulo}: ${err.message}`);
+        });
+        flash(`${rotulo} cancelada.`);
     }
     // URLs das Cloud Functions que criam a cobrança na maquininha (Point ou Stone).
     // Mesmo projeto/região das outras functions (WEBHOOK_URL não é acessível aqui,
