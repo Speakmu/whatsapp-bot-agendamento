@@ -84,10 +84,10 @@
         .comandas-mini { flex:0 0 auto; max-height:220px; display:flex; flex-direction:column; border-bottom:1px solid var(--line); }
         .comandas-mini-head { padding:10px 14px; font-weight:700; font-size:.85rem; display:flex; justify-content:space-between; align-items:center; color:var(--muted); background:#fafbfc; flex:0 0 auto; }
         .comandas-mini-lista { overflow-y:auto; padding:6px 12px; flex:1; }
-        /* Sem comandas pendentes: não reserva os 220px cheios só pra caber
-           uma linha de texto — encolhe pro tamanho do próprio aviso. */
-        .comandas-mini.vazia { max-height:none; }
-        .comandas-mini.vazia .comandas-mini-lista { flex:0 0 auto; }
+        /* Sem comandas pendentes: some de vez (cabeçalho incluso) em vez de
+           só encolher — essa faixa fixa é o que mais rouba espaço do
+           carrinho, que é o que o operador realmente usa no balcão. */
+        .comandas-mini.vazia { display:none; }
         .mesa-pendente { display:flex; flex-direction:column; gap:6px; padding:8px 0; border-bottom:1px dashed var(--line); font-size:.85rem; }
         .mesa-pendente .linha-topo { display:flex; justify-content:space-between; align-items:center; }
         .mesa-pendente .mesa-num { font-weight:900; font-size:.95rem; }
@@ -105,12 +105,12 @@
         .qty { display:flex; align-items:center; gap:8px; }
         .qty button { width:40px; height:40px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font-weight:700; font-size:1.05rem; }
         .ci-rm { color:var(--danger); cursor:pointer; font-size:.85rem; background:none; border:none; padding:10px; min-width:44px; min-height:44px; }
-        .cart-total { font-size:1.5rem; font-weight:800; text-align:right; padding:10px 0; }
-        .pag-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:10px; }
-        .pag-btn { padding:14px 10px; min-height:48px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; font-size:.9rem; }
+        .cart-total { font-size:1.3rem; font-weight:800; text-align:right; padding:6px 0; }
+        .pag-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:8px; }
+        .pag-btn { padding:10px; min-height:40px; border:1px solid var(--line); border-radius:8px; background:#fff; cursor:pointer; font-size:.9rem; }
         .pag-btn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
-        .check-cozinha { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--muted); margin-bottom:10px; }
-        .btn-finalizar { width:100%; padding:14px; border:none; border-radius:10px; background:var(--ok); color:#fff; font-size:1.1rem; font-weight:700; cursor:pointer; }
+        .check-cozinha { display:flex; align-items:center; gap:8px; font-size:.85rem; color:var(--muted); margin-bottom:8px; }
+        .btn-finalizar { width:100%; padding:12px; border:none; border-radius:10px; background:var(--ok); color:#fff; font-size:1.1rem; font-weight:700; cursor:pointer; }
         .btn-finalizar:disabled { background:#bdc3c7; cursor:not-allowed; }
         .btn-limpar { background:none; border:none; color:var(--danger); cursor:pointer; font-size:.85rem; }
         .mesa-itens { margin-top:4px; }
@@ -235,7 +235,7 @@
                     </div>
                     <div id="cart-itens"></div>
                 </div>
-                <div style="padding:12px; border-top:1px solid var(--line);">
+                <div style="padding:10px 12px; border-top:1px solid var(--line);">
                     <div class="campo">
                         <label>Cliente (opcional)</label>
                         <input id="cliente-nome" placeholder="Nome do cliente">
