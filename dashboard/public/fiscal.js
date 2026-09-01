@@ -7,7 +7,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const auth = firebase.auth();
     const $ = (id) => document.getElementById(id);
 
-    const state = { tab: 'overview', cfg: {}, notas: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, relatorioMes: mesAtualStr() };
+    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, relatorioMes: mesAtualStr() };
+    let unsubRelatorio = null;
     const tabs = [
         ['overview', 'Visao Geral'],
         ['settings', 'Config fiscal'],
@@ -43,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderTabs();
         await loadConfig();
         listenNotes();
+        listenRelatorio(state.relatorioMes);
         listenOrders();
         listenProducts();
         listenIbptCache();
@@ -93,6 +95,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.notas.sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
                 render();
             }, err => console.warn('notas_fiscais:', err.message));
+    }
+
+    // O Relatorio pra contabilidade precisa de qualquer mes, não só hoje —
+    // por isso tem sua própria consulta (state.notas do listenNotes() acima
+    // é sempre "hoje em diante", só serve pra aba Documentos). Reconsulta
+    // sempre que o mes selecionado no relatorio muda.
+    function listenRelatorio(mes) {
+        if (unsubRelatorio) unsubRelatorio();
+        const { inicio, fim } = limitesDoMes(mes);
+        unsubRelatorio = db.collection('notas_fiscais')
+            .where('criado_em', '>=', inicio)
+            .where('criado_em', '<', fim)
+            .onSnapshot(snap => {
+                state.notasRelatorio = [];
+                snap.forEach(doc => state.notasRelatorio.push({ id: doc.id, ...doc.data() }));
+                state.notasRelatorio.sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
+                if (state.tab === 'report') render();
+            }, err => console.warn('notas_fiscais (relatorio):', err.message));
     }
 
     function listenOrders() {
@@ -242,11 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // em CSV e download de todos os XMLs do periodo num .zip so.
     function renderReport() {
         const mes = state.relatorioMes || mesAtualStr();
-        const { inicio, fim } = limitesDoMes(mes);
-        const notasDoMes = state.notas.filter(n => {
-            const d = n.criado_em?.toDate?.();
-            return d && d >= inicio && d < fim;
-        });
+        const notasDoMes = state.notasRelatorio;
         const validas = notasDoMes.filter(n => n.tipo !== 'INUTILIZACAO' && (n.status === 'AUTORIZADA' || n.status === 'CONTINGENCIA'));
         const canceladas = notasDoMes.filter(n => n.status === 'CANCELADA');
         const totalFaturado = validas.reduce((s, n) => s + Number(n.valor || 0), 0);
@@ -635,8 +651,12 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[data-refresh-config]').forEach(btn => btn.onclick = loadConfig);
         document.querySelectorAll('[data-emitir]').forEach(btn => btn.onclick = () => emitir(btn));
         document.querySelectorAll('[data-cancelar-venda]').forEach(btn => btn.onclick = () => cancelarVenda(btn));
-        document.querySelectorAll('[data-danfe]').forEach(btn => btn.onclick = () => baixarDanfe(state.notas.find(n => n.id === btn.dataset.danfe)));
-        document.querySelectorAll('[data-xml]').forEach(btn => btn.onclick = () => baixarXml(state.notas.find(n => n.id === btn.dataset.xml)));
+        // A tabela de documentos e reaproveitada pela aba Relatorio (que pode
+        // mostrar notas de meses passados, fora de state.notas — que so tem
+        // as de hoje), entao o botao de cada linha precisa procurar nas duas.
+        const notaPorId = (id) => state.notas.find(n => n.id === id) || state.notasRelatorio.find(n => n.id === id);
+        document.querySelectorAll('[data-danfe]').forEach(btn => btn.onclick = () => baixarDanfe(notaPorId(btn.dataset.danfe)));
+        document.querySelectorAll('[data-xml]').forEach(btn => btn.onclick = () => baixarXml(notaPorId(btn.dataset.xml)));
         document.querySelectorAll('[data-transmitir]').forEach(btn => btn.onclick = () => transmitir(btn));
         document.querySelectorAll('[data-cancelar]').forEach(btn => btn.onclick = () => cancelar(btn));
         const inut = $('btn-inutilizar-range');
@@ -688,18 +708,18 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[data-dfe-confirmar]').forEach(btn => btn.onclick = () => confirmarEntradaEstoque(btn));
 
         const relatorioMes = $('relatorio-mes');
-        if (relatorioMes) relatorioMes.onchange = () => { state.relatorioMes = relatorioMes.value || mesAtualStr(); render(); };
+        if (relatorioMes) relatorioMes.onchange = () => {
+            state.relatorioMes = relatorioMes.value || mesAtualStr();
+            listenRelatorio(state.relatorioMes);
+            render();
+        };
         const relatorioCsv = $('btn-relatorio-csv');
         if (relatorioCsv) relatorioCsv.onclick = () => {
-            const { inicio, fim } = limitesDoMes(state.relatorioMes);
-            const notasDoMes = state.notas.filter(n => { const d = n.criado_em?.toDate?.(); return d && d >= inicio && d < fim; });
-            exportarRelatorioCsv(notasDoMes, state.relatorioMes || mesAtualStr());
+            exportarRelatorioCsv(state.notasRelatorio, state.relatorioMes || mesAtualStr());
         };
         const relatorioZip = $('btn-relatorio-zip');
         if (relatorioZip) relatorioZip.onclick = () => {
-            const { inicio, fim } = limitesDoMes(state.relatorioMes);
-            const notasDoMes = state.notas.filter(n => { const d = n.criado_em?.toDate?.(); return d && d >= inicio && d < fim; });
-            exportarXmlsZip(notasDoMes, state.relatorioMes || mesAtualStr(), relatorioZip);
+            exportarXmlsZip(state.notasRelatorio, state.relatorioMes || mesAtualStr(), relatorioZip);
         };
     }
 
