@@ -209,7 +209,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (c.qtd <= 0) carrinho = carrinho.filter(x => x.id !== id);
         renderCarrinho();
     }
-    function removerItem(id) { carrinho = carrinho.filter(x => x.id !== id); renderCarrinho(); }
     function totalCarrinho() { return carrinho.reduce((s, c) => s + c.preco * c.qtd, 0); }
 
     function renderCarrinho() {
@@ -217,10 +216,9 @@ document.addEventListener('DOMContentLoaded', () => {
         $('cart-vazio').style.display = carrinho.length ? 'none' : 'block';
         wrap.innerHTML = carrinho.map(c => `
             <div class="cart-item">
-                <div>
-                    <div class="ci-nome">${escapeHtml(c.nome)}</div>
+                <div class="ci-info">
+                    <div class="ci-nome" title="${escapeHtml(c.nome)}">${escapeHtml(c.nome)}</div>
                     <div class="ci-sub">${money(c.preco)} • subtotal ${money(c.preco * c.qtd)}</div>
-                    <button class="ci-rm" data-rm="${c.id}">remover</button>
                 </div>
                 <div class="qty">
                     <button data-menos="${c.id}">−</button>
@@ -230,7 +228,6 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`).join('');
         wrap.querySelectorAll('[data-mais]').forEach(b => b.onclick = () => mudarQtd(b.dataset.mais, +1));
         wrap.querySelectorAll('[data-menos]').forEach(b => b.onclick = () => mudarQtd(b.dataset.menos, -1));
-        wrap.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => removerItem(b.dataset.rm));
         $('cart-total').textContent = money(totalCarrinho());
         atualizarBotaoFinalizar();
     }
