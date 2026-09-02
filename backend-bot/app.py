@@ -1,6 +1,7 @@
 import re
 import unicodedata
 import threading
+import concurrent.futures
 from flask import Flask, request, jsonify
 import requests
 import os
@@ -1603,10 +1604,30 @@ def _lock_do_cliente(wa_id):
         return lock
 
 
+_executor_mensagens = concurrent.futures.ThreadPoolExecutor(max_workers=16, thread_name_prefix="msg")
+
+
 def processar_mensagem_recebida(message, from_number):
     with _lock_do_cliente(from_number):
+        # Teto absoluto de tempo pro processamento inteiro (Firestore + OpenAI
+        # + envio), não importa ONDE trave. Já vimos em produção uma chamada
+        # ao Firestore ficar pendurada por minutos mesmo com timeout=10 no
+        # nível da chamada — não deu pra confirmar a causa raiz exata (nem
+        # é rede lenta: a mesma consulta rodou em 1s de fora do Cloud Run),
+        # então isso aqui é a rede de segurança final: o cliente NUNCA fica
+        # sem nenhuma resposta. Roda o trabalho de verdade num executor à
+        # parte e só espera até 90s por ele — se estourar, a thread original
+        # pode continuar presa em segundo plano (é um vazamento aceitável
+        # frente à alternativa de silêncio total), mas o cliente já recebe
+        # um aviso na hora. Se o trabalho travado eventualmente terminar
+        # sozinho depois, pode gerar uma segunda mensagem duplicada — pior
+        # cenário aceitável comparado a nunca responder.
+        futuro = _executor_mensagens.submit(_processar_mensagem_recebida, message, from_number)
         try:
-            _processar_mensagem_recebida(message, from_number)
+            futuro.result(timeout=90)
+        except concurrent.futures.TimeoutError:
+            print(f"⏱️ Timeout absoluto (90s) processando mensagem de {from_number} — avisando o cliente e seguindo em frente.")
+            send_message(from_number, "Desculpe, tive um problema técnico bem na hora de te responder. Pode mandar sua mensagem de novo, por favor?")
         except Exception as e:
             print(f"❌ Erro ao processar mensagem de {from_number}: {e}")
 
