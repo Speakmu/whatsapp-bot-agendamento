@@ -1498,17 +1498,74 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     )
                 )
                 if soa_como_confirmado and not pedido_registrado_ok:
-                    marcar_atencao(
-                        id_usuario,
-                        "IA disse que o pedido foi registrado sem ter chamado registrar_pedido — confirme com o cliente.",
-                        tipo="pedido_falhou",
-                        dados={"resposta_suspeita": final_text}
-                    )
-                    final_text = (
-                        "Deixa eu confirmar certinho os detalhes do seu pedido antes de "
-                        "fechar — pode me confirmar os itens e a forma de entrega/pagamento "
-                        "mais uma vez?"
-                    )
+                    # Retentativa forçada, determinística: em vez de só avisar
+                    # o cliente que algo deu errado, obriga a IA a chamar
+                    # registrar_pedido AGORA (tool_choice fixo nessa função —
+                    # ela não tem mais a opção de "só responder em texto").
+                    # Só cai no aviso genérico se essa segunda tentativa
+                    # também não conseguir.
+                    ck("antes retentativa forcada registrar_pedido")
+                    resposta_forcada = None
+                    try:
+                        tool_registrar = next(t for t in tools if t["function"]["name"] == "registrar_pedido")
+                        msgs_forcada = messages + [{
+                            "role": "system",
+                            "content": (
+                                "IMPORTANTE: você acabou de dizer que ia registrar o pedido "
+                                "mas esqueceu de chamar a função. Chame 'registrar_pedido' "
+                                "AGORA MESMO, com os itens, forma de pagamento, tipo de "
+                                "entrega (e endereço, se for entrega) que já foram "
+                                "confirmados nesta conversa."
+                            )
+                        }]
+                        resposta_forcada = openai.chat.completions.create(
+                            model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"],
+                            messages=msgs_forcada,
+                            tools=[tool_registrar],
+                            tool_choice={"type": "function", "function": {"name": "registrar_pedido"}},
+                            timeout=30
+                        )
+                    except Exception as e:
+                        print(f"❌ Erro na retentativa forçada de registrar_pedido: {e}")
+                    ck("depois retentativa forcada registrar_pedido")
+
+                    registrado_na_retentativa = False
+                    if resposta_forcada and resposta_forcada.choices[0].message.tool_calls:
+                        args_forcados = json.loads(resposta_forcada.choices[0].message.tool_calls[0].function.arguments)
+                        resultado_forcado = json.loads(registrar_pedido(
+                            wa_id=wa_id,
+                            nome_cliente=args_forcados.get("nome_cliente"),
+                            itens=args_forcados.get("itens"),
+                            valor_total=args_forcados.get("valor_total"),
+                            observacao=args_forcados.get("observacao", "Nenhuma"),
+                            endereco_completo=args_forcados.get("endereco_completo"),
+                            bairro=args_forcados.get("bairro"),
+                            forma_pagamento=args_forcados.get("forma_pagamento"),
+                            tipo_entrega=args_forcados.get("tipo_entrega"),
+                            telefone=wa_id,
+                            id_usuario_cache=id_usuario
+                        ))
+                        if resultado_forcado.get("status") == "ok":
+                            registrado_na_retentativa = True
+                            itens_txt = ", ".join(resultado_forcado.get("itens_confirmados") or [])
+                            final_text = (
+                                f"Pedido registrado: {itens_txt}, totalizando "
+                                f"R$ {resultado_forcado.get('valor_total'):.2f}. "
+                                "Já vamos providenciar!"
+                            )
+
+                    if not registrado_na_retentativa:
+                        marcar_atencao(
+                            id_usuario,
+                            "IA disse que o pedido foi registrado sem ter chamado registrar_pedido, e a retentativa forçada também falhou — confirme com o cliente manualmente.",
+                            tipo="pedido_falhou",
+                            dados={"resposta_suspeita": final_text}
+                        )
+                        final_text = (
+                            "Deixa eu confirmar certinho os detalhes do seu pedido antes de "
+                            "fechar — pode me confirmar os itens e a forma de entrega/pagamento "
+                            "mais uma vez?"
+                        )
         else:
             final_text = response_message.content
 
