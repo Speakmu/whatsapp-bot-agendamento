@@ -1255,6 +1255,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          o resumo do passo (e) acima. Nunca pule direto pra 'registrar_pedido'
          sem antes ter mostrado o resumo via 'calcular_pedido' e recebido um
          "sim"/confirmação clara.
+       - REGRA CRÍTICA: 'calcular_pedido' só CALCULA e MOSTRA o resumo — ela
+         NÃO salva nada. A ÚNICA função que registra o pedido de verdade é
+         'registrar_pedido'. Quando o cliente confirmar ("sim", "pode
+         confirmar", etc.) depois de ver o resumo, você é OBRIGADO a chamar
+         'registrar_pedido' NESTA MESMA resposta — nunca chame
+         'calcular_pedido' de novo nesse momento. E JAMAIS diga "pedido
+         registrado", "pedido confirmado" ou qualquer variação disso se você
+         não chamou 'registrar_pedido' e ela não retornou status "ok" nesta
+         resposta — isso é mentir pro cliente que o pedido existe quando não
+         existe.
        - Se for ENTREGA, o parâmetro "endereco_completo" da função tem que
          ser o endereço de verdade (rua e número) que o cliente te passou
          no passo (c2) — NUNCA mande só o nome do bairro nesse campo. Já
@@ -1364,6 +1374,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             # nunca foi pro Firestore). Por isso: quando isso acontece, a
             # resposta final é fixa (não vem da IA) e a equipe é avisada.
             falha_sistema_pedido = None
+            pedido_registrado_ok = False
             for tool_call in response_message.tool_calls:
                 function_name = tool_call.function.name
                 args = json.loads(tool_call.function.arguments)
@@ -1395,6 +1406,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         telefone=wa_id,
                         id_usuario_cache=id_usuario
                     )
+                    try:
+                        if json.loads(content).get("status") == "ok":
+                            pedido_registrado_ok = True
+                    except (ValueError, TypeError):
+                        pass
 
                 # Sinaliza no painel de Atendimento quando o bot bate numa
                 # situação que não consegue resolver sozinho — dá pra ver
@@ -1454,6 +1470,32 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages, timeout=60)
                 final_text = second_res.choices[0].message.content
                 ck("depois 2a chamada OpenAI")
+
+                # Rede de segurança contra alucinação: já aconteceu em produção
+                # a IA chamar calcular_pedido (só recalcula/mostra resumo, não
+                # salva nada) numa rodada onde o cliente confirmou o pedido, e
+                # mesmo assim escrever "Pedido registrado!" no texto final —
+                # sem NUNCA ter chamado registrar_pedido. O cliente saiu
+                # achando que fechou pedido, e não tinha nada no Firestore.
+                # Se o texto soa como confirmação mas registrar_pedido não
+                # rodou com sucesso NESTA rodada, troca por um texto seguro.
+                texto_lower = (final_text or "").lower()
+                soa_como_confirmado = "pedido" in texto_lower and any(
+                    palavra in texto_lower for palavra in
+                    ("registrado", "registramos", "confirmado", "confirmamos", "foi registrad")
+                )
+                if soa_como_confirmado and not pedido_registrado_ok:
+                    marcar_atencao(
+                        id_usuario,
+                        "IA disse que o pedido foi registrado sem ter chamado registrar_pedido — confirme com o cliente.",
+                        tipo="pedido_falhou",
+                        dados={"resposta_suspeita": final_text}
+                    )
+                    final_text = (
+                        "Deixa eu confirmar certinho os detalhes do seu pedido antes de "
+                        "fechar — pode me confirmar os itens e a forma de entrega/pagamento "
+                        "mais uma vez?"
+                    )
         else:
             final_text = response_message.content
 
