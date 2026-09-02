@@ -398,6 +398,36 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
     fuso_br = timezone(timedelta(hours=-3))
     agora_br = datetime.now(fuso_br)
 
+    # Trava de duplicidade: se o cliente mandar duas confirmações seguidas
+    # (ex.: "Nada mais" + "Pode sim" logo em seguida), cada uma é uma
+    # mensagem própria e pode gerar sua própria chamada a registrar_pedido —
+    # sem isso, vira DOIS pedidos reais no Firestore pro mesmo pedido (já
+    # aconteceu). Se já existe um pedido pendente desse mesmo cliente, com o
+    # mesmo valor, criado nos últimos 5 minutos, devolve ele em vez de criar
+    # outro.
+    try:
+        recentes = db.collection('pedidos') \
+            .where('telefone_cliente', '==', str(wa_id)) \
+            .where('status', '==', 'PENDENTE_PREPARO') \
+            .order_by('hora_pedido', direction=firestore.Query.DESCENDING) \
+            .limit(3).get(timeout=10)
+        for doc in recentes:
+            dpedido = doc.to_dict()
+            hp = dpedido.get('hora_pedido')
+            if hp and (agora_br - hp).total_seconds() < 300 and abs(float(dpedido.get('valor_total') or 0) - float(valor_total or 0)) < 0.01:
+                return json.dumps({
+                    "status": "ok",
+                    "pedido_id": doc.id,
+                    "itens_confirmados": [i.get("nome") for i in (dpedido.get("itens") or [])],
+                    "itens_nao_reconhecidos": [],
+                    "itens_indisponiveis": [],
+                    "valor_itens": dpedido.get("valor_total"),
+                    "taxa_entrega": dpedido.get("taxa_entrega", 0),
+                    "valor_total": dpedido.get("valor_total")
+                })
+    except Exception as e:
+        print(f"Erro ao checar duplicidade de pedido: {e}")
+
     print(f"\n--- [REGISTRO: {agora_br.strftime('%H:%M:%S')}] ---")
 
     try:
