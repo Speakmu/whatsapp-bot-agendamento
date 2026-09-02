@@ -67,7 +67,7 @@ BOT_CONFIG_DEFAULTS = {
 def obter_config_bot():
     cfg = dict(BOT_CONFIG_DEFAULTS)
     try:
-        doc = db.collection("configuracoes").document("bot").get()
+        doc = db.collection("configuracoes").document("bot").get(timeout=10)
         if doc.exists:
             dados = doc.to_dict() or {}
             cfg.update({k: v for k, v in dados.items() if v is not None})
@@ -590,7 +590,12 @@ def baixar_imagem_whatsapp(media_id, tipo):
        
 def obter_historico_firestore(wa_id, limite=None):
     try:
-        doc = db.collection("historico_conversas").document(wa_id).get()
+        # timeout explicito: sem isso, uma chamada ao Firestore que trave (ex.:
+        # canal gRPC "morto" apos o container ficar horas ocioso) prende essa
+        # thread pra sempre — e como cada mensagem roda na sua propria thread
+        # (travada so por cliente), o cliente afetado fica sem resposta
+        # indefinidamente, sem nenhum erro no log. Ja aconteceu em producao.
+        doc = db.collection("historico_conversas").document(wa_id).get(timeout=10)
         if doc.exists:
             historico_bruto = doc.to_dict().get("mensagens", [])
             
@@ -621,25 +626,25 @@ def salvar_historico_firestore(wa_id, role, content, limite=None):
             "timestamp": datetime.now(timezone.utc)
         }
         
-        doc = doc_ref.get()
+        doc = doc_ref.get(timeout=10)
         if doc.exists:
             historico_atual = doc.to_dict().get("mensagens", [])
             historico_atual.append(nova_msg)
-            
+
             # 2. LOGICA DE CORTE: Mantém apenas as últimas 15 mensagens
             # Isso garante que o documento nunca cresça demais
             limite = limite or 15
             historico_reduzido = historico_atual[-limite:]
-            
+
             doc_ref.update({
                 "mensagens": historico_reduzido,
                 "ultima_interacao": datetime.now(timezone.utc) # Útil para limpeza automática
-            })
+            }, timeout=10)
         else:
             doc_ref.set({
                 "mensagens": [nova_msg],
                 "ultima_interacao": datetime.now(timezone.utc)
-            })
+            }, timeout=10)
     except Exception as e:
         print(f"Erro ao salvar histórico: {e}")
 
@@ -678,7 +683,7 @@ def texto_atencao_pendente_antiga(wa_id, minutos_limite=10):
     rodando o tempo todo; a checagem acontece na próxima mensagem que o
     cliente mandar (verificado aqui, no início de cada resposta)."""
     try:
-        doc = db.collection("historico_conversas").document(wa_id).get()
+        doc = db.collection("historico_conversas").document(wa_id).get(timeout=10)
         if not doc.exists:
             return ""
         dados = doc.to_dict()
@@ -846,7 +851,7 @@ def verificar_horario_funcionamento(bot_cfg):
 def is_modo_manual(wa_id):
     """Conversa assumida manualmente por um atendente no painel: bot não responde."""
     try:
-        doc = db.collection("historico_conversas").document(wa_id).get()
+        doc = db.collection("historico_conversas").document(wa_id).get(timeout=10)
         return doc.exists and doc.to_dict().get("modo_manual") is True
     except Exception as e:
         print(f"Erro ao checar modo manual: {e}")
@@ -895,7 +900,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # 2. Busca no Firestore
     try:
         usuarios_ref = db.collection("usuarios_app")
-        query = usuarios_ref.where("telefone", "==", id_usuario).limit(1).stream()
+        query = usuarios_ref.where("telefone", "==", id_usuario).limit(1).stream(timeout=10)
         for doc in query:
             dados = doc.to_dict()
             nome_cliente = dados.get('nome')
