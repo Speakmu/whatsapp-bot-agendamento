@@ -1480,9 +1480,22 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 # Se o texto soa como confirmação mas registrar_pedido não
                 # rodou com sucesso NESTA rodada, troca por um texto seguro.
                 texto_lower = (final_text or "").lower()
-                soa_como_confirmado = "pedido" in texto_lower and any(
-                    palavra in texto_lower for palavra in
-                    ("registrado", "registramos", "confirmado", "confirmamos", "foi registrad")
+                # Radical, não frase exata: "registrar" pega registrado/
+                # registramos/registrando/vou registrar/registro — já vimos
+                # em produção o texto usar futuro ("vou registrar") em vez de
+                # particípio ("registrado"), passando batido por uma lista de
+                # frases fixas.
+                # "?" no texto exclui: é o caso legítimo de PERGUNTAR se pode
+                # registrar ("Confere? Posso registrar o pedido?"), depois de
+                # calcular_pedido — isso não é uma alucinação, é o fluxo
+                # normal antes da confirmação do cliente.
+                soa_como_confirmado = (
+                    "pedido" in texto_lower
+                    and "?" not in final_text
+                    and any(
+                        radical in texto_lower for radical in
+                        ("registr", "confirm", "anotei", "anotad", "pedido feito", "pedido pronto")
+                    )
                 )
                 if soa_como_confirmado and not pedido_registrado_ok:
                     marcar_atencao(
