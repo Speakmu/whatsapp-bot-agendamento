@@ -1,4 +1,5 @@
 import re
+import time
 import unicodedata
 import threading
 import concurrent.futures
@@ -863,42 +864,62 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     import re
     import json
 
+    # Checkpoints temporarios pra achar onde exatamente o processamento
+    # trava (visto em produção travando minutos sem nenhum erro no log,
+    # mesmo com timeout=10 nas chamadas do Firestore) — remover depois de
+    # identificada a causa raiz.
+    t0 = time.time()
+    def ck(marca):
+        print(f"⏱️ CKPT [{wa_id}] {marca} — {time.time() - t0:.2f}s")
+
     # 1. Limpeza do ID
     id_usuario = str(wa_id).split('@')[0]
     id_usuario = re.sub(r'\D', '', id_usuario)
 
+    ck("antes obter_config_bot")
     bot_cfg = obter_config_bot()
+    ck("depois obter_config_bot")
 
     # Conversa assumida manualmente pelo atendente: só registra a mensagem
     # do cliente no histórico (pro painel exibir) e não responde.
+    ck("antes is_modo_manual")
     if is_modo_manual(id_usuario):
+        ck("depois is_modo_manual (True)")
         salvar_historico_firestore(id_usuario, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        ck("depois salvar_historico_firestore (modo manual)")
         return None
+    ck("depois is_modo_manual (False)")
 
     if not bot_cfg.get("ativo", True):
         return bot_cfg.get("mensagem_inativo") or BOT_CONFIG_DEFAULTS["mensagem_inativo"]
 
     aberto, texto_horario = verificar_horario_funcionamento(bot_cfg)
+    ck("depois verificar_horario_funcionamento")
     if not aberto:
         horario_cfg = bot_cfg.get("horario_funcionamento") or {}
         msg_fechado = horario_cfg.get("mensagem_fechado") or "No momento estamos fechados. Nosso horário de funcionamento: {horario}"
         return msg_fechado.replace("{horario}", texto_horario)
 
     aviso_atencao_antiga = texto_atencao_pendente_antiga(id_usuario)
+    ck("depois texto_atencao_pendente_antiga")
 
     # Primeiro contato deste cliente (sem histórico ainda): manda a saudação
     # configurada em vez de chamar a IA. Se ele já tiver perguntado algo
     # junto com o "oi", essa pergunta fica salva no histórico e é respondida
     # normalmente na mensagem seguinte dele.
-    if not obter_historico_firestore(id_usuario, limite=1):
+    historico_check = obter_historico_firestore(id_usuario, limite=1)
+    ck("depois obter_historico_firestore (checagem primeiro contato)")
+    if not historico_check:
         saudacao = bot_cfg.get("mensagem_inicial") or BOT_CONFIG_DEFAULTS["mensagem_inicial"]
         salvar_historico_firestore(id_usuario, "user", prompt, bot_cfg.get("max_historico_salvar"))
         salvar_historico_firestore(id_usuario, "assistant", saudacao, bot_cfg.get("max_historico_salvar"))
+        ck("retornou saudacao inicial")
         return saudacao
 
     nome_cliente = None
-    
+
     # 2. Busca no Firestore
+    ck("antes query usuarios_app")
     try:
         usuarios_ref = db.collection("usuarios_app")
         query = usuarios_ref.where("telefone", "==", id_usuario).limit(1).stream(timeout=10)
@@ -907,6 +928,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             nome_cliente = dados.get('nome')
     except Exception as e:
         print(f"❌ Erro na busca: {e}")
+    ck("depois query usuarios_app")
 
     # 3. Definição do Contexto (Separado das Instruções)
     if nome_cliente:
@@ -1302,7 +1324,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     """
 
     # 6. Carregar Histórico
+    ck("antes obter_historico_firestore (contexto completo)")
     historico_msgs = obter_historico_firestore(wa_id, bot_cfg.get("max_historico_contexto"))
+    ck("depois obter_historico_firestore (contexto completo)")
 
     # Montagem
     messages = [{"role": "system", "content": system_prompt}]
@@ -1310,6 +1334,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     messages.append({"role": "user", "content": prompt})
 
     try:
+        ck("antes 1a chamada OpenAI")
         # timeout explícito: sem isso, uma resposta lenta/pendurada da OpenAI
         # prende essa thread indefinidamente. Como cada mensagem já roda numa
         # thread própria (travada só por cliente, não globalmente), isso por
@@ -1323,7 +1348,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             tool_choice="auto",
             timeout=60
         )
-        
+        ck("depois 1a chamada OpenAI")
+
         response_message = response.choices[0].message
         
         if response_message.tool_calls:
@@ -1424,15 +1450,19 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     "transtorno!"
                 )
             else:
+                ck("antes 2a chamada OpenAI")
                 second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages, timeout=60)
                 final_text = second_res.choices[0].message.content
+                ck("depois 2a chamada OpenAI")
         else:
             final_text = response_message.content
 
+        ck("antes salvar_historico_firestore final")
         salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
         salvar_historico_firestore(wa_id, "assistant", final_text, bot_cfg.get("max_historico_salvar"))
+        ck("depois salvar_historico_firestore final")
         return final_text
-    
+
     except Exception as e:
         print(f"Erro OpenAI: {e}")
         return bot_cfg.get("mensagem_erro") or BOT_CONFIG_DEFAULTS["mensagem_erro"]
