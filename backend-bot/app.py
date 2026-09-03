@@ -1079,6 +1079,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     chave_pix = (bot_cfg.get("chave_pix") or "").strip() or "consulte a equipe"
     instrucoes_extras = bot_cfg.get("instrucoes_extras") or ""
     cidade_atendida = bot_cfg.get("cidade_atendida") or ""
+    # Telefone de contato da loja — mesma fonte que o painel usa (Config >
+    # Estabelecimento). Sem isso, quando o cliente pede "o contato" a IA não
+    # tinha nenhum número de verdade pra dar e ACABAVA INVENTANDO um número
+    # parecido mas errado (aconteceu em produção). Se não estiver configurado,
+    # cai no fallback explícito abaixo, nunca inventa.
+    try:
+        doc_sistema = db.collection("configuracoes").document("sistema").get(timeout=10)
+        telefone_contato = (doc_sistema.to_dict() or {}).get("telefone") if doc_sistema.exists else None
+    except Exception:
+        telefone_contato = None
+    telefone_contato = str(telefone_contato or "").strip() or "não tenho esse número aqui, peça pra equipe confirmar"
 
     # 5. Prompt Otimizado (Limpo e Direto)
     system_prompt = f"""
@@ -1086,7 +1097,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
 
     --- DADOS DO SISTEMA ---
     {contexto_identificacao}
-    Telefone do Cliente: {id_usuario}
+    TELEFONE_DO_CLIENTE (uso interno do sistema, NUNCA fale esse número pro
+    cliente, ele já sabe o próprio número): {id_usuario}
+    TELEFONE_DE_CONTATO_DA_LOJA (é ESTE que você informa se o cliente pedir
+    "o contato"/"o telefone de vocês"/"o whatsapp da loja" — use EXATAMENTE
+    este valor, nunca o TELEFONE_DO_CLIENTE acima, nunca invente outro número,
+    nem parecido): {telefone_contato}
     {f"Cidade onde a loja entrega: {cidade_atendida} (só entrega dentro dessa cidade, nenhuma outra)." if cidade_atendida else ""}
     {aviso_atencao_antiga}
     
