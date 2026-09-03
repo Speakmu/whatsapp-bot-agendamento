@@ -262,6 +262,13 @@ def _montar_itens_pedido(itens, tipo_entrega):
     valor_itens = 0.0
     itens_nao_reconhecidos = []
     itens_indisponiveis = []
+    # Casamento aceito (>= 70) mas não muito confiante (< 92): já aconteceu
+    # de virar item ERRADO em vez de "não reconhecido" — "enroladinho de
+    # salsicha" casou com "enroladinho de presunto e queijo" (86 de
+    # pontuação, pontuação alta o bastante pra passar direto sem alerta
+    # nenhum, palavra errada). Continua aceitando (não trava o pedido por
+    # causa disso), mas avisa a equipe pra revisar/ensinar o apelido certo.
+    itens_confianca_baixa = []
 
     for item in (itens or []):
         nome_pedido = str((item or {}).get('nome_produto') or '').strip().lower()
@@ -315,6 +322,11 @@ def _montar_itens_pedido(itens, tipo_entrega):
                 itens_nao_reconhecidos.append(nome_pedido)
                 continue
 
+            if pontuacao < 92:
+                itens_confianca_baixa.append({
+                    "pedido": nome_pedido, "casou_com": melhor_match, "pontuacao": pontuacao
+                })
+
             dados = cardapio_por_nome[melhor_match]
 
         if dados.get('disponivel') is False or not _disponivel_online(dados):
@@ -350,6 +362,7 @@ def _montar_itens_pedido(itens, tipo_entrega):
         "lista_itens_tsx": lista_itens_tsx,
         "itens_nao_reconhecidos": itens_nao_reconhecidos,
         "itens_indisponiveis": itens_indisponiveis,
+        "itens_confianca_baixa": itens_confianca_baixa,
         "valor_itens": round(valor_itens, 2),
         "taxa_entrega": taxa_entrega,
         "valor_total": valor_total_final,
@@ -562,6 +575,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
             "itens_confirmados": [i["nome"] for i in lista_itens_tsx],
             "itens_nao_reconhecidos": itens_nao_reconhecidos,
             "itens_indisponiveis": itens_indisponiveis,
+            "itens_confianca_baixa": montado.get("itens_confianca_baixa", []),
             "valor_itens": montado["valor_itens"],
             "taxa_entrega": taxa_entrega,
             "valor_total": valor_total_final
@@ -1615,6 +1629,21 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                 f"Item(ns) não reconhecido(s) no pedido: {', '.join(nao_reconhecidos)}",
                                 tipo="item",
                                 dados={"nome_produto": nao_reconhecidos[0], "todos": nao_reconhecidos}
+                            )
+                        # Casou com algo (aceitou o item), mas com pontuação
+                        # baixa o bastante pra valer a pena a equipe conferir
+                        # se é o produto certo mesmo — só no pedido de
+                        # verdade, não em cada recálculo de prévia.
+                        confianca_baixa = resultado_pedido.get("itens_confianca_baixa") or []
+                        if function_name == "registrar_pedido" and confianca_baixa:
+                            resumo = '; '.join(
+                                f'"{c["pedido"]}" → "{c["casou_com"]}" ({c["pontuacao"]}%)' for c in confianca_baixa
+                            )
+                            marcar_atencao(
+                                id_usuario,
+                                f"Item do pedido casou com pontuação baixa, confira se é o produto certo: {resumo}",
+                                tipo="item",
+                                dados={"itens_confianca_baixa": confianca_baixa}
                             )
                         if (function_name == "registrar_pedido"
                                 and resultado_pedido.get("status") == "erro"
