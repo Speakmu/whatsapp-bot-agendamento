@@ -278,8 +278,23 @@ def _montar_itens_pedido(itens, tipo_entrega):
             # Sem acento dos dois lados (mesmo motivo do verificar_bairro_entrega):
             # uma palavra comum acentuada entre vários itens (ex.: "pastéis")
             # infla a pontuação de itens errados só por ela.
+            nome_pedido_norm = _normalizar_termo(nome_pedido)
             nomes_normalizados = [_normalizar_termo(n) for n in nomes_cardapio]
-            melhor_match_norm, pontuacao = process.extractOne(_normalizar_termo(nome_pedido), nomes_normalizados)
+
+            # "zero" é uma palavra curta demais pra pesar na pontuação de
+            # similaridade — já aconteceu em produção "coca cola ZERO lata
+            # 350ml" casar com "coca cola lata 350ml" (sem zero, produto
+            # diferente de verdade, com açúcar). Se o cardápio tem as duas
+            # variantes, restringe a busca à que bate no "é zero ou não" do
+            # pedido antes de rankear por similaridade — só cai pra lista
+            # cheia se não existir nenhuma variante com esse status.
+            pediu_zero = bool(re.search(r'\bzero\b', nome_pedido_norm))
+            candidatos_com_status_certo = [
+                n for n in nomes_normalizados if bool(re.search(r'\bzero\b', n)) == pediu_zero
+            ]
+            pool_busca = candidatos_com_status_certo or nomes_normalizados
+
+            melhor_match_norm, pontuacao = process.extractOne(nome_pedido_norm, pool_busca)
             melhor_match = nomes_cardapio[nomes_normalizados.index(melhor_match_norm)]
             print(f"DEBUG: item do pedido '{nome_pedido}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
 
@@ -384,6 +399,13 @@ def calcular_pedido(id_usuario, itens, tipo_entrega=None):
 
 def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, tipo_entrega=None, telefone=None, id_usuario_cache=None, bairro=None):
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
+
+    # A IA às vezes manda a string literal "None" (não o valor nulo de
+    # verdade) quando não sabe o nome do cliente — isso ia parar salvo assim
+    # no Firestore e aparecia como "Cliente: None" no painel e no cupom
+    # impresso.
+    if str(nome_cliente or "").strip().lower() in ("", "none", "null", "n/a"):
+        nome_cliente = None
 
     # Segunda checagem de horário: cobre o caso raro de a conversa ter
     # começado antes de fechar e só terminar (chamar essa função) depois.

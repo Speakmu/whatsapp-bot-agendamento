@@ -1085,7 +1085,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <button type="button" class="btn-imprimir" data-imprimir="${id}" title="Imprimir pedido">🖨️</button>
             </div>
             <div class="order-details">
-                <p class="order-cliente"><strong>${pedido.nome_cliente || 'N/I'}</strong></p>
+                <p class="order-cliente"><strong>${(pedido.nome_cliente && pedido.nome_cliente !== 'None') ? pedido.nome_cliente : 'N/I'}</strong></p>
                 <div class="order-itens">${itensHTML}</div>
                 ${enderecoLinha}
                 <div class="order-footer-info">
@@ -1121,20 +1121,29 @@ document.addEventListener('DOMContentLoaded', () => {
         const enderecoHtml = ehRetirada
             ? '<div class="linha"><strong>RETIRADA NO LOCAL</strong></div>'
             : `<div class="linha"><strong>Bairro:</strong> ${pedido.bairro || '-'}</div><div class="linha"><strong>Endereço:</strong> ${pedido.endereco || '-'}</div>`;
+        // "None" (string, não null) já apareceu vindo do backend quando o
+        // nome do cliente nunca foi capturado na conversa — trata igual a
+        // campo vazio aqui, senão imprime "Cliente: None" no cupom.
+        const nomeClienteExibicao = (pedido.nome_cliente && pedido.nome_cliente !== 'None') ? pedido.nome_cliente : 'N/I';
         const janela = window.open('', '_blank', 'width=400,height=600');
         janela.document.write(`
             <html><head><title>Pedido #${id.substring(0, 5)}</title>
             <style>
-                body { font-family: 'Courier New', monospace; font-size: 14px; padding: 10px; color: #000; }
-                h1 { font-size: 16px; text-align: center; margin: 0 0 6px; }
-                .linha { padding: 3px 0; border-bottom: 1px dashed #999; }
-                hr { border: none; border-top: 1px solid #000; margin: 8px 0; }
-                .total { font-weight: bold; font-size: 15px; }
+                /* Tamanho de página pra bobina de 80mm — sem isso o navegador
+                   imprime em papel A4 padrão, desperdiçando muito mais papel
+                   do que o conteúdo (poucas linhas) realmente precisa. */
+                @page { size: 80mm auto; margin: 4mm; }
+                * { box-sizing: border-box; }
+                body { font-family: 'Courier New', monospace; font-size: 12px; padding: 0; color: #000; width: 72mm; }
+                h1 { font-size: 13px; text-align: center; margin: 0 0 4px; }
+                .linha { padding: 2px 0; border-bottom: 1px dashed #999; word-break: break-word; }
+                hr { border: none; border-top: 1px solid #000; margin: 5px 0; }
+                .total { font-weight: bold; font-size: 13px; }
                 .center { text-align: center; }
             </style>
             </head><body>
                 <h1>Pedido #${id.substring(0, 5)} — ${ehRetirada ? 'RETIRADA' : 'ENTREGA'}</h1>
-                <div class="linha"><strong>Cliente:</strong> ${pedido.nome_cliente || 'N/I'}</div>
+                <div class="linha"><strong>Cliente:</strong> ${nomeClienteExibicao}</div>
                 ${pedido.telefone_cliente ? `<div class="linha"><strong>Tel:</strong> ${pedido.telefone_cliente}</div>` : ''}
                 <hr>
                 ${linhasItens}
