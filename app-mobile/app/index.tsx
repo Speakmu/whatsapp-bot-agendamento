@@ -2207,11 +2207,15 @@ function AppCliente() {
           <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
             <View style={styles.containerCentro}>
               <View style={styles.cardCadastro}>
-                <Image source={BRAND_LOGO} style={styles.logoLogin} contentFit="contain" />
                 {usaLogotipo && appCfg.logoUrl ? (
+                  // Logo configurável (Marketing > Identidade no painel) substitui a
+                  // logo fixa abaixo — mostrar as duas juntas duplicava a marca na tela.
                   <Image source={{ uri: appCfg.logoUrl }} style={styles.marcaLogoLogin} contentFit="contain" />
                 ) : (
-                  <Text style={[styles.tituloCadastro, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeAppExibicao}</Text>
+                  <>
+                    <Image source={BRAND_LOGO} style={styles.logoLogin} contentFit="contain" />
+                    <Text style={[styles.tituloCadastro, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeAppExibicao}</Text>
+                  </>
                 )}
 
                 {/* --- ESTADO 1: SELEÇÃO INICIAL --- */}
