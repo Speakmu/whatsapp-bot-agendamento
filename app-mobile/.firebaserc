@@ -1,5 +1,15 @@
 {
   "projects": {
     "default": "salgadinhos-lileamar"
-  }
+  },
+  "targets": {
+    "salgadinhos-lileamar": {
+      "hosting": {
+        "appweb": [
+          "lileamar-app-web"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

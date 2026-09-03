@@ -38,5 +38,10 @@
         "*.local"
       ]
     }
-  ]
+  ],
+  "hosting": {
+    "target": "appweb",
+    "public": "dist",
+    "ignore": ["firebase.json", "**/.*"]
+  }
 }
