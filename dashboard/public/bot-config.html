@@ -117,6 +117,22 @@
             </div>
             <div class="acoes"><button class="btn btn-salvar" id="salvar-bairros">Salvar bairros e taxa</button></div>
         </div>
+
+        <div class="box">
+            <h2>Apelidos de itens</h2>
+            <div class="sub">
+                Quando um cliente chama um produto por um nome diferente do cadastrado
+                (ex.: "enroladinho de salsicha" pro item "salsicha"), o bot confere essa
+                lista ANTES de tentar adivinhar por conta pr&oacute;pria &mdash; evita casar
+                com o produto errado.
+            </div>
+            <div class="grid2">
+                <div class="campo"><label>Apelido usado pelo cliente</label><input id="apelido-texto" placeholder="Ex: enroladinho de salsicha"></div>
+                <div class="campo"><label>Produto real do card&aacute;pio</label><select id="apelido-item"></select></div>
+            </div>
+            <div class="acoes"><button class="btn btn-salvar" id="ensinar-apelido">Ensinar apelido</button></div>
+            <div id="lista-apelidos" style="margin-top:16px;display:grid;gap:8px"></div>
+        </div>
     </div>
     <p style="max-width:900px;margin:0 auto 24px;padding:0 24px;color:var(--muted);font-size:.85rem;">
         Horário de funcionamento agora fica em

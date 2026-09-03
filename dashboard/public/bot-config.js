@@ -33,7 +33,77 @@ document.addEventListener('DOMContentLoaded', () => {
         $('salvar-bot').addEventListener('click', salvarBot);
         $('salvar-bairros').addEventListener('click', salvarBairros);
         $('bot-bairros-entrega').addEventListener('input', atualizarContagemBairros);
+        carregarApelidos();
+        $('ensinar-apelido').addEventListener('click', ensinarApelido);
     });
+
+    // Mesma normalização usada no backend (backend-bot/app.py, _normalizar_termo)
+    // pra chave do apelido bater certinho com o que o bot procura.
+    function normalizarTermo(s) {
+        const semAcento = String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+        return semAcento.replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    let cardapioCacheApelidos = [];
+
+    async function carregarApelidos() {
+        try {
+            const cardapioSnap = await db.collection('cardapio').orderBy('nome').get();
+            cardapioCacheApelidos = cardapioSnap.docs.map(d => ({ id: d.id, nome: d.data().nome || d.id }));
+            $('apelido-item').innerHTML = cardapioCacheApelidos
+                .map(p => `<option value="${p.id}">${escapeHtmlApelido(p.nome)}</option>`).join('');
+
+            const apelidosSnap = await db.collection('itens_aprendizado').get();
+            const nomesPorId = Object.fromEntries(cardapioCacheApelidos.map(p => [p.id, p.nome]));
+            const lista = $('lista-apelidos');
+            if (apelidosSnap.empty) {
+                lista.innerHTML = '<div class="sub">Nenhum apelido ensinado ainda.</div>';
+                return;
+            }
+            lista.innerHTML = apelidosSnap.docs.map(d => {
+                const dados = d.data();
+                const nomeReal = nomesPorId[dados.item_id] || '(produto não encontrado)';
+                return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px">
+                    <span><strong>${escapeHtmlApelido(dados.nome_original || d.id)}</strong> → ${escapeHtmlApelido(nomeReal)}</span>
+                    <button class="link" data-remover-apelido="${d.id}" style="color:var(--danger);cursor:pointer">Remover</button>
+                </div>`;
+            }).join('');
+            lista.querySelectorAll('[data-remover-apelido]').forEach(btn => {
+                btn.addEventListener('click', () => removerApelido(btn.dataset.removerApelido));
+            });
+        } catch (err) {
+            console.warn('apelidos:', err.message);
+        }
+    }
+
+    function escapeHtmlApelido(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    async function ensinarApelido() {
+        const texto = $('apelido-texto').value.trim();
+        const itemId = $('apelido-item').value;
+        if (!texto || !itemId) { alert('Preencha o apelido e escolha o produto.'); return; }
+        const chave = normalizarTermo(texto);
+        try {
+            await db.collection('itens_aprendizado').doc(chave).set({ item_id: itemId, nome_original: texto });
+            $('apelido-texto').value = '';
+            flash('Apelido ensinado.');
+            carregarApelidos();
+        } catch (err) {
+            alert('Erro ao ensinar apelido: ' + err.message);
+        }
+    }
+
+    async function removerApelido(chave) {
+        if (!confirm('Remover esse apelido?')) return;
+        try {
+            await db.collection('itens_aprendizado').doc(chave).delete();
+            carregarApelidos();
+        } catch (err) {
+            alert('Erro ao remover: ' + err.message);
+        }
+    }
 
     function bairrosDoTexto() {
         // Aceita um por linha OU separados por vírgula (ou os dois misturados).
