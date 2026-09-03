@@ -37,6 +37,42 @@ import { finalizarPedido, checarDisponibilidadeCarrinho } from '../services/pedi
 import { firebaseConfig } from '../firebaseConfig';
 import { clientConfig } from '../clientConfig';
 
+// expo-secure-store usa o Keychain/Keystore nativo — não existe na web, e
+// SecureStore.setItemAsync/getItemAsync lá simplesmente rejeitam a Promise.
+// Isso quebrava silenciosamente o login (o catch chamava Alert.alert, que
+// também não mostra nada na web — parecia que o botão "não fazia nada").
+// Na web cai pra localStorage; fora da web, comportamento igual a antes.
+async function storageSet(key: string, value: string): Promise<void> {
+  if (Platform.OS === 'web') { try { window.localStorage.setItem(key, value); } catch { } return; }
+  await storageSet(key, value);
+}
+async function storageGet(key: string): Promise<string | null> {
+  if (Platform.OS === 'web') { try { return window.localStorage.getItem(key); } catch { return null; } }
+  return storageGet(key);
+}
+async function storageDelete(key: string): Promise<void> {
+  if (Platform.OS === 'web') { try { window.localStorage.removeItem(key); } catch { } return; }
+  await storageDelete(key);
+}
+
+// Alert.alert do react-native não mostra nada visível na web (só loga no
+// console) — troca por window.alert/confirm nesse caso, mantendo a mesma
+// assinatura (title, message, botões) usada no resto do arquivo.
+function showAlert(title: string, message?: string, buttons?: { text: string; style?: string; onPress?: () => void }[]): void {
+  if (Platform.OS !== 'web') { Alert.alert(title, message, buttons as any); return; }
+  const texto = message ? `${title}\n\n${message}` : title;
+  if (buttons && buttons.length > 1) {
+    const confirmou = window.confirm(texto);
+    const escolhido = confirmou
+      ? buttons.find(b => b.style !== 'cancel')
+      : buttons.find(b => b.style === 'cancel') || buttons[0];
+    escolhido?.onPress?.();
+  } else {
+    window.alert(texto);
+    buttons?.[0]?.onPress?.();
+  }
+}
+
 // --- CONFIGURAÇÃO FIREBASE (centralizada em firebaseConfig.ts) ---
 if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -531,14 +567,14 @@ const SecaoSacola = ({
               disabled={carregandoLogin || lojaFechada}
               onPress={() => {
                 if (lojaFechada) {
-                  Alert.alert(
+                  showAlert(
                     'Estamos fechados',
                     `No momento não estamos recebendo pedidos.${horarioTexto ? `\n\nHorário de funcionamento: ${horarioTexto}` : ''}`
                   );
                   return;
                 }
                 if (tipoEntrega === 'entrega' && bairrosEntrega.length > 0 && !bairro) {
-                  Alert.alert('Bairro', 'Selecione o bairro da entrega.');
+                  showAlert('Bairro', 'Selecione o bairro da entrega.');
                   return;
                 }
                 if (metodoPagamento === 'cartao') {
@@ -1055,7 +1091,7 @@ const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, set
 
   const salvarDadosLocalmente = async (dados: any) => {
     try {
-      await SecureStore.setItemAsync('dados_usuario', JSON.stringify(dados));
+      await storageSet('dados_usuario', JSON.stringify(dados));
     } catch (e) {
       console.error("Erro ao salvar cache local", e);
     }
@@ -1085,7 +1121,7 @@ const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, set
         cpf: novoCpf // <--- ADICIONE ESTA LINHA AQUI
       };
 
-      await SecureStore.setItemAsync('dados_usuario', JSON.stringify(novosDados));
+      await storageSet('dados_usuario', JSON.stringify(novosDados));
 
       // 3. Atualiza os estados globais para refletir na UI imediatamente
       setNome(novoNome);
@@ -1436,15 +1472,15 @@ function AppCliente() {
         where('codigo', '==', code),
         where('ativo', '==', true)
       ));
-      if (snap.empty) { Alert.alert('Cupom', 'Cupom inválido ou inativo.'); setCupomAplicado(null); return; }
+      if (snap.empty) { showAlert('Cupom', 'Cupom inválido ou inativo.'); setCupomAplicado(null); return; }
       const c: any = snap.docs[0].data();
       if (c.validade && c.validade.toDate && c.validade.toDate() < new Date()) {
-        Alert.alert('Cupom', 'Este cupom está expirado.'); setCupomAplicado(null); return;
+        showAlert('Cupom', 'Este cupom está expirado.'); setCupomAplicado(null); return;
       }
       setCupomAplicado(c);
-      Alert.alert('Cupom', 'Cupom aplicado com sucesso! 🎉');
+      showAlert('Cupom', 'Cupom aplicado com sucesso! 🎉');
     } catch (e: any) {
-      Alert.alert('Cupom', 'Não foi possível validar: ' + (e?.message || e));
+      showAlert('Cupom', 'Não foi possível validar: ' + (e?.message || e));
     }
   };
 
@@ -1508,7 +1544,7 @@ function AppCliente() {
   }, [usuarioId, abaAtiva]);
   const iniciarPagamentoMercadoPago = async () => {
     if (!endereco || endereco.trim() === '') {
-      Alert.alert("Atenção", "Por favor, preencha o endereço de entrega antes de pagar.");
+      showAlert("Atenção", "Por favor, preencha o endereço de entrega antes de pagar.");
       setAbaAtiva('sacola'); // Garante que ele veja o erro no campo
       return;
     }
@@ -1536,11 +1572,11 @@ function AppCliente() {
       if (urlPagamento) {
         Linking.openURL(urlPagamento);
       } else {
-        Alert.alert("Erro", "Não foi possível gerar o link de pagamento.");
+        showAlert("Erro", "Não foi possível gerar o link de pagamento.");
       }
     } catch (error) {
       console.error(error);
-      Alert.alert("Erro", "Falha ao conectar com o servidor.");
+      showAlert("Erro", "Falha ao conectar com o servidor.");
     } finally {
       setCarregandoLogin(false);
     }
@@ -1549,12 +1585,12 @@ function AppCliente() {
   const processarPagamentoPix = async () => {
     // 0. Endereço/bairro obrigatórios apenas em entrega
     if (tipoEntrega === 'entrega' && (!endereco || endereco.trim() === '')) {
-      Alert.alert("Atenção", "Preencha o endereço de entrega antes de pagar.");
+      showAlert("Atenção", "Preencha o endereço de entrega antes de pagar.");
       setAbaAtiva('sacola');
       return;
     }
     if (tipoEntrega === 'entrega' && bairrosEntrega.length > 0 && !bairro) {
-      Alert.alert("Atenção", "Selecione o bairro da entrega.");
+      showAlert("Atenção", "Selecione o bairro da entrega.");
       setAbaAtiva('sacola');
       return;
     }
@@ -1562,7 +1598,7 @@ function AppCliente() {
     // 1. Validação de CPF
     const cpfLimpo = cpf.replace(/\D/g, '');
     if (cpfLimpo.length !== 11) {
-      Alert.alert("Erro", "Por favor, preencha seu CPF corretamente na aba Perfil.");
+      showAlert("Erro", "Por favor, preencha seu CPF corretamente na aba Perfil.");
       return;
     }
 
@@ -1658,11 +1694,11 @@ function AppCliente() {
         setUsarPontos(false);
 
       } else {
-        Alert.alert("Erro no PIX", resultado.message || "Não foi possível gerar o código.");
+        showAlert("Erro no PIX", resultado.message || "Não foi possível gerar o código.");
       }
     } catch (error) {
       console.error("Erro ao processar PIX:", error);
-      Alert.alert("Erro de Conexão", "Não conseguimos falar com o servidor.");
+      showAlert("Erro de Conexão", "Não conseguimos falar com o servidor.");
     } finally {
       setCarregandoLogin(false);
     }
@@ -1673,20 +1709,20 @@ function AppCliente() {
 
     // 1. Verificação inicial "blindada" contra campos vazios ou nulos
     if (!dadosCartaoEnviados?.numero || !dadosCartaoEnviados?.cvv || !dadosCartaoEnviados?.validade) {
-      Alert.alert("Erro", "Preencha todos os dados do cartão.");
+      showAlert("Erro", "Preencha todos os dados do cartão.");
       return;
     }
     if (cpfFinal.length !== 11) {
-      Alert.alert("Erro", "Preencha seu CPF corretamente na aba Perfil.");
+      showAlert("Erro", "Preencha seu CPF corretamente na aba Perfil.");
       return;
     }
     if (tipoEntrega === 'entrega' && (!endereco || endereco.trim() === '')) {
-      Alert.alert("Atenção", "Preencha o endereço de entrega antes de pagar.");
+      showAlert("Atenção", "Preencha o endereço de entrega antes de pagar.");
       setAbaAtiva('sacola');
       return;
     }
     if (tipoEntrega === 'entrega' && bairrosEntrega.length > 0 && !bairro) {
-      Alert.alert("Atenção", "Selecione o bairro da entrega.");
+      showAlert("Atenção", "Selecione o bairro da entrega.");
       setAbaAtiva('sacola');
       return;
     }
@@ -1790,7 +1826,7 @@ function AppCliente() {
         // Validação de Segurança do TypeScript
         if (!usuarioId) {
           console.error("ERRO CRÍTICO: Usuário ID indefinido ao processar pagamento.");
-          Alert.alert("Erro", "Não foi possível identificar o usuário para creditar pontos.");
+          showAlert("Erro", "Não foi possível identificar o usuário para creditar pontos.");
           return;
         }
 
@@ -1806,7 +1842,7 @@ function AppCliente() {
           await updateDoc(clienteRef, {
             pontos: increment(totalPontosGanhos - pontosUsados())
           });
-          Alert.alert(
+          showAlert(
             "🎉 Parabéns!",
             `Pagamento aprovado!\n\nVocê acaba de ganhar +${totalPontosGanhos} pontos fidelidade. Continue assim para trocar por pizzas grátis! 🍕`,
             [{ text: "Sensacional!", onPress: () => console.log("Feedback fechado") }]
@@ -1823,7 +1859,7 @@ function AppCliente() {
           }
         }
         // 3. Salva os dados locais (Segurança e Cache)
-        await SecureStore.setItemAsync('endereco_salvo', endereco);
+        await storageSet('endereco_salvo', endereco);
         // Cartão só é salvo se o cliente marcou a opção no modal — antes
         // salvava sempre, sem pedir permissão.
         if (salvarCartao) {
@@ -1833,9 +1869,9 @@ function AppCliente() {
             cpf: dadosCartaoEnviados.cpf,
             validade: dadosCartaoEnviados.validade
           };
-          await SecureStore.setItemAsync('dados_cartao', JSON.stringify(dadosParaSalvar));
+          await storageSet('dados_cartao', JSON.stringify(dadosParaSalvar));
         } else {
-          await SecureStore.deleteItemAsync('dados_cartao');
+          await storageDelete('dados_cartao');
         }
 
         // 4. Registra o pedido no Firestore
@@ -1863,7 +1899,7 @@ function AppCliente() {
             data_formatada: new Date().toLocaleString('pt-BR')
           });
 
-          await SecureStore.setItemAsync('dados_usuario', JSON.stringify({ nome, telefone, endereco }));
+          await storageSet('dados_usuario', JSON.stringify({ nome, telefone, endereco }));
 
           // Sucesso Final
           setStatusPagamento('sucesso');
@@ -1873,16 +1909,16 @@ function AppCliente() {
 
         } catch (dbError) {
           console.error("Erro ao salvar pedido:", dbError);
-          Alert.alert("Aviso", "Pagamento aprovado, mas o registro falhou. Fale com a loja.");
+          showAlert("Aviso", "Pagamento aprovado, mas o registro falhou. Fale com a loja.");
         }
 
       } else {
-        Alert.alert("Pagamento Recusado", `Motivo: ${resultado.status_detail || resultado.status || resultado.message || 'não foi possível processar o cartão.'}`);
+        showAlert("Pagamento Recusado", `Motivo: ${resultado.status_detail || resultado.status || resultado.message || 'não foi possível processar o cartão.'}`);
       }
 
     } catch (error: any) {
       console.error("Erro geral na função:", error);
-      Alert.alert("Erro no Pagamento", error.message);
+      showAlert("Erro no Pagamento", error.message);
     } finally {
       setCarregandoLogin(false);
     }
@@ -1903,7 +1939,7 @@ function AppCliente() {
   };
   const salvarCacheLocal = async (dados: any) => {
     try {
-      await SecureStore.setItemAsync('dados_usuario', JSON.stringify(dados));
+      await storageSet('dados_usuario', JSON.stringify(dados));
     } catch (e) { console.error("Erro ao salvar cache", e); }
   };
 
@@ -1977,9 +2013,9 @@ function AppCliente() {
     async function inicializar() {
       try {
         // 1. Tenta carregar ID e Dados do Cache Local
-        const idSalvo = await SecureStore.getItemAsync('user_id');
-        const cacheDados = await SecureStore.getItemAsync('dados_usuario');
-        const cartaoSalvo = await SecureStore.getItemAsync('dados_cartao');
+        const idSalvo = await storageGet('user_id');
+        const cacheDados = await storageGet('dados_usuario');
+        const cartaoSalvo = await storageGet('dados_cartao');
 
         if (idSalvo) {
           setUsuarioId(idSalvo);
@@ -2054,7 +2090,7 @@ function AppCliente() {
     // 1. Limpeza e Validação Básica de CPF
     const cpfLimpo = cpf.replace(/\D/g, '');
     if (cpfLimpo.length !== 11) {
-      return Alert.alert("CPF Inválido", "Por favor, insira o CPF completo com 11 dígitos.");
+      return showAlert("CPF Inválido", "Por favor, insira o CPF completo com 11 dígitos.");
     }
 
     setCarregandoLogin(true);
@@ -2072,7 +2108,7 @@ function AppCliente() {
         const dados = userDoc.data();
 
         // Salva no cache local para evitar futuras consultas
-        await SecureStore.setItemAsync('user_id', userDoc.id);
+        await storageSet('user_id', userDoc.id);
         await salvarCacheLocal(dados);
 
         setNome(dados.nome || '');
@@ -2082,14 +2118,14 @@ function AppCliente() {
         setEstaCadastrado(true);
         setAbaAtiva('home');
 
-        Alert.alert("Sucesso", `Bem-vindo de volta, ${dados.nome}!`);
+        showAlert("Sucesso", `Bem-vindo de volta, ${dados.nome}!`);
       } else {
         // --- CASO: USUÁRIO NÃO ENCONTRADO ---
 
         // Se o usuário clicou em "Já sou cliente" (Login), mas o CPF não existe:
         if (modoAcesso === 'login') {
           setCarregandoLogin(false);
-          return Alert.alert(
+          return showAlert(
             "Conta não encontrada",
             "Este CPF não possui cadastro. Deseja criar uma conta agora?",
             [
@@ -2102,7 +2138,7 @@ function AppCliente() {
         // Se ele está na tela de "Cadastrar", validamos Nome e Telefone
         if (!nome.trim() || !telefone.trim()) {
           setCarregandoLogin(false);
-          return Alert.alert(
+          return showAlert(
             "Dados Incompletos",
             "Para realizar seu primeiro cadastro, precisamos do seu Nome e WhatsApp."
           );
@@ -2129,7 +2165,7 @@ function AppCliente() {
         await db.collection('usuarios_app').doc(novoId).set(novoUsuario);
 
         // Salva localmente
-        await SecureStore.setItemAsync('user_id', novoId);
+        await storageSet('user_id', novoId);
         await salvarCacheLocal(novoUsuario);
 
         setUsuarioId(novoId);
@@ -2137,11 +2173,11 @@ function AppCliente() {
         setTelefone(novoUsuario.telefone);
         setEstaCadastrado(true);
 
-        Alert.alert("Sucesso!", "Seu cadastro foi realizado com sucesso.");
+        showAlert("Sucesso!", "Seu cadastro foi realizado com sucesso.");
       }
     } catch (error) {
       console.error("Erro no Login/Cadastro:", error);
-      Alert.alert("Erro", "Não foi possível conectar ao servidor.");
+      showAlert("Erro", "Não foi possível conectar ao servidor.");
     } finally {
       setCarregandoLogin(false);
     }
@@ -2326,7 +2362,7 @@ function AppCliente() {
                 valorPorPonto={valorPorPonto}
                 corMarca={corMarca}
                 onSair={async () => {
-                  Alert.alert(
+                  showAlert(
                     "Sair",
                     "Deseja realmente sair da conta?",
                     [
@@ -2335,8 +2371,8 @@ function AppCliente() {
                         text: "Sair",
                         style: "destructive",
                         onPress: async () => {
-                          await SecureStore.deleteItemAsync('user_id');
-                          await SecureStore.deleteItemAsync('user_phone');
+                          await storageDelete('user_id');
+                          await storageDelete('user_phone');
                           setUsuarioId(undefined);
                           setEstaCadastrado(false);
                           setNome('');
@@ -2624,7 +2660,7 @@ function AppCliente() {
               style={styles.btnCopiar}
               onPress={async () => {
                 await Clipboard.setStringAsync(pixCopiaECola);
-                Alert.alert("Copiado!", "O código PIX foi copiado para sua área de transferência.");
+                showAlert("Copiado!", "O código PIX foi copiado para sua área de transferência.");
               }}
             >
               <Text style={{ color: '#fff', fontWeight: 'bold' }}>Copiar Código PIX</Text>
