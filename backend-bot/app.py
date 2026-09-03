@@ -188,10 +188,10 @@ def upload_comprovante_firebase(caminho_local, nome_arquivo):
         blob = bucket.blob(f"comprovantes/{nome_arquivo}")
         
         # Faz o upload do arquivo
-        blob.upload_from_filename(caminho_local)
-        
+        blob.upload_from_filename(caminho_local, timeout=30)
+
         # Torna o arquivo público para visualização (opcional) ou gera URL assinada
-        blob.make_public()
+        blob.make_public(timeout=30)
         
         print(f"DEBUG: Arquivo {nome_arquivo} enviado para o Storage.")
         return blob.public_url
@@ -563,20 +563,35 @@ def registrar_comprovante(wa_id: str, imagem_url: str):
         query = pedidos_ref.where('telefone_cliente', '==', str(wa_id))\
                           .order_by('hora_pedido', direction=firestore.Query.DESCENDING)\
                           .limit(1)
-        
-        docs = query.get()
-        
+
+        docs = query.get(timeout=10)
+
         if docs:
             doc = docs[0]
             dados = doc.to_dict()
-            
-            # 2. Só vincula o comprovante se for um pedido de PIX
-            # ou se estiver realmente aguardando validação
+
+            # 2. Só vincula o comprovante se for um pedido de PIX ainda em
+            # aberto — sem isso, um comprovante mandado por engano (ou um
+            # pedido novo por cartão/dinheiro feito logo depois) reverte pro
+            # status "aguardando validação" um pedido que já pode estar
+            # EM_PREPARO ou CONCLUIDO, bagunçando a fila da cozinha.
+            forma_pagamento = str(dados.get('forma_pagamento') or '').upper()
+            status_atual = dados.get('status')
+            STATUS_ACEITA_COMPROVANTE = ('PENDENTE_PREPARO', 'PENDENTE_VALIDACAO', 'AGUARDANDO_PIX')
+            if 'PIX' not in forma_pagamento or status_atual not in STATUS_ACEITA_COMPROVANTE:
+                marcar_atencao(
+                    wa_id,
+                    "Cliente mandou um comprovante, mas o pedido mais recente não é PIX pendente — confira manualmente.",
+                    tipo="pedido_falhou",
+                    dados={"pedido_id": doc.id, "forma_pagamento": forma_pagamento, "status": status_atual}
+                )
+                return "Recebi sua imagem! Como seu pedido mais recente não está aguardando PIX, já avisei nossa equipe pra conferir manualmente — eles confirmam com você em instantes."
+
             doc.reference.update({
                 'comprovante_url': imagem_url,
                 'status': "PENDENTE_VALIDACAO"
-            })
-            
+            }, timeout=10)
+
             print(f"DEBUG: Comprovante vinculado ao pedido {doc.id}")
             return f"Obrigado! Recebi o comprovante do seu pedido. 🎉 Nossa equipe já está validando o pagamento para iniciar o preparo."
 
@@ -595,15 +610,15 @@ def baixar_imagem_whatsapp(media_id, tipo):
     
     try:
         # 1. Busca a URL de download
-        response_info = requests.get(url_info, headers=headers)
+        response_info = requests.get(url_info, headers=headers, timeout=15)
         if response_info.status_code != 200:
             print(f"Erro ao obter info da mídia: {response_info.text}")
             return None
-            
+
         url_download = response_info.json().get("url")
-        
+
         # 2. Faz o download do arquivo real
-        media_res = requests.get(url_download, headers=headers)
+        media_res = requests.get(url_download, headers=headers, timeout=15)
         if media_res.status_code == 200:
             # Define a extensão do arquivo
             ext = "jpg" if tipo == 'image' else "pdf"
