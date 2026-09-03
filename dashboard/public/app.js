@@ -1161,7 +1161,7 @@ document.addEventListener('DOMContentLoaded', () => {
             "AGUARDANDO_PIX": ["CANCELADO"],
             "PENDENTE_VALIDACAO": ["EM_PREPARO", "CANCELADO"],
             "PENDENTE_PREPARO": ["EM_PREPARO", "CANCELADO"],
-            "EM_PREPARO": ["PRONTO_PARA_ENTREGA"],
+            "EM_PREPARO": ["PRONTO_PARA_ENTREGA", "CANCELADO"],
             "PRONTO_PARA_ENTREGA": ["CONCLUIDO"],
             // Faltava esse passo: pedido despachado (via "Despachar"/tela de
             // Entregas) ficava parado aqui pra sempre, sem nenhum botão pra
