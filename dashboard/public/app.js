@@ -1227,15 +1227,18 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const doc = await db.collection(COLECAO_PEDIDOS).doc(id).get();
             const pedido = doc.data() || {};
-            fetch(`${ngrokUrl}/notificar_saiu`, {
+            // Apontava pra /notificar_saiu, que nunca existiu no bot — falhava
+            // silencioso (o catch vazio escondia o 404). É o mesmo endpoint
+            // usado pra "pedido pronto", só troca o status do evento.
+            fetch(`${ngrokUrl}/notificar_pronto`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     wa_id: pedido.telefone_cliente || pedido.wa_id || pedido.telefone,
                     nome: pedido.nome_cliente || pedido.nome,
-                    evento: 'SAIU'
+                    status: 'saiu_entrega'
                 })
-            }).catch(() => { /* endpoint opcional no bot */ });
+            }).catch(err => console.error("❌ Erro ao avisar saída para entrega:", err));
         } catch (err) {
             alert("Erro ao despachar: " + err.message);
         }
@@ -1320,6 +1323,22 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                         })
                         .catch(err => console.error("❌ Erro na requisição:", err));
+                } else if (novoStatus === "SAIU_PARA_ENTREGA") {
+                    // Antes não existia aviso nenhum pra esse status — o
+                    // cliente só sabia que o pedido "estava pronto" (se o
+                    // fluxo passou por PRONTO_PARA_ENTREGA), nunca que já
+                    // tinha saído pra entrega de verdade.
+                    const doc = await db.collection(COLECAO_PEDIDOS).doc(id).get();
+                    const pedido = doc.data();
+                    fetch(`${ngrokUrl}/notificar_pronto`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            wa_id: pedido.telefone_cliente || pedido.wa_id || pedido.telefone,
+                            nome: pedido.nome_cliente || pedido.nome,
+                            status: 'saiu_entrega'
+                        })
+                    }).catch(err => console.error("❌ Erro na requisição:", err));
                 }
             } catch (err) {
                 alert("Erro ao atualizar: " + err.message);

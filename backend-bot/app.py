@@ -60,6 +60,7 @@ BOT_CONFIG_DEFAULTS = {
     "mensagem_inativo": "No momento o atendimento automatico esta pausado. Em breve nossa equipe responde por aqui.",
     "mensagem_pronto": "Oi {nome_cliente}! Seu pedido esta pronto!",
     "mensagem_retirada": "Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!",
+    "mensagem_saiu_entrega": "Oi {nome_cliente}! Seu pedido saiu para entrega e ja esta a caminho! 🛵",
     "instrucoes_extras": "",
     "bairros_entrega": [],
     "taxa_entrega": 0,
@@ -1724,14 +1725,21 @@ def notificar_pronto():
         telefone = data.get('wa_id') or data.get('telefone')
         nome_cliente = data.get('nome', 'Cliente')
         tipo_servico = data.get('tipo_servico')
-        
+        # 'pronto' (padrão, comportamento de sempre) ou 'saiu_entrega' — usado
+        # quando o pedido muda pra SAIU_PARA_ENTREGA (inclusive pelo atalho
+        # "Despachar", que antes pulava esse status sem avisar o cliente).
+        status_evento = data.get('status') or 'pronto'
+
         if not telefone:
             return jsonify({"erro": "Número de telefone (wa_id) não fornecido"}), 400
 
         # Montagem da mensagem a partir do template configurado
         bot_cfg = obter_config_bot()
-        template = bot_cfg.get("mensagem_pronto") if tipo_servico != 'RETIRADA' else bot_cfg.get("mensagem_retirada")
-        template = template or (BOT_CONFIG_DEFAULTS["mensagem_pronto"] if tipo_servico != 'RETIRADA' else BOT_CONFIG_DEFAULTS["mensagem_retirada"])
+        if status_evento == 'saiu_entrega':
+            template = bot_cfg.get("mensagem_saiu_entrega") or BOT_CONFIG_DEFAULTS["mensagem_saiu_entrega"]
+        else:
+            template = bot_cfg.get("mensagem_pronto") if tipo_servico != 'RETIRADA' else bot_cfg.get("mensagem_retirada")
+            template = template or (BOT_CONFIG_DEFAULTS["mensagem_pronto"] if tipo_servico != 'RETIRADA' else BOT_CONFIG_DEFAULTS["mensagem_retirada"])
         mensagem = template.format(
             nome_cliente=primeiro_nome(nome_cliente),
             nome=primeiro_nome(nome_cliente),
