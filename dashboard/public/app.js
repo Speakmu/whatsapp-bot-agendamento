@@ -1298,6 +1298,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (novoStatus === "PRONTO_PARA_ENTREGA" || novoStatus === "PRONTO_ENTREGA") {
                     const doc = await db.collection(COLECAO_PEDIDOS).doc(id).get();
                     const pedido = doc.data();
+                    const tipoServico = pedido.tipo_entrega
+                        ? pedido.tipo_entrega
+                        : ((!pedido.endereco || /retirada/i.test(pedido.endereco)) ? "RETIRADA" : "ENTREGA");
+
+                    // Pra ENTREGA, "pronto" é um passo interno da cozinha — o
+                    // cliente só precisa saber quando o pedido REALMENTE sai
+                    // (SAIU_PARA_ENTREGA, notificado em outro ponto). Só
+                    // RETIRADA avisa aqui, porque não existe um próximo passo
+                    // de "saiu" pra quem vai buscar no balcão.
+                    if (tipoServico !== "RETIRADA") return;
 
                     const endpoint = `${ngrokUrl}/notificar_pronto`;
                     console.log("Chamando bot em:", endpoint);
@@ -1309,9 +1319,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         body: JSON.stringify({
                             wa_id: pedido.telefone_cliente || pedido.wa_id || pedido.telefone,
                             nome: pedido.nome_cliente || pedido.nome,
-                            tipo_servico: pedido.tipo_entrega
-                                ? pedido.tipo_entrega
-                                : ((!pedido.endereco || /retirada/i.test(pedido.endereco)) ? "RETIRADA" : "ENTREGA")
+                            tipo_servico: tipoServico
                         })
                     })
                         .then(async response => {
