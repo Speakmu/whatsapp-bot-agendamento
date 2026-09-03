@@ -470,14 +470,24 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
                 cache = (hist_doc.to_dict() or {}).get("ultimo_calculo") if hist_doc.exists else None
                 calculado_em = cache.get("calculado_em") if cache else None
                 if cache and cache.get("itens") and calculado_em and (datetime.now(timezone.utc) - calculado_em) < timedelta(minutes=30):
+                    # A taxa de entrega NUNCA vem do cache — ela é lida de novo
+                    # aqui, na hora de registrar de verdade. Se o valor mudou
+                    # no painel entre o cálculo e a confirmação do cliente
+                    # (mesmo minutos depois), o pedido tem que sair com a taxa
+                    # atual, não com a que estava valendo quando calculou.
+                    tipo_entrega_cache = cache.get("tipo_entrega") or "RETIRADA"
+                    valor_itens_cache = cache.get("valor_itens", 0)
+                    taxa_entrega_atual = 0.0
+                    if tipo_entrega_cache == "ENTREGA":
+                        taxa_entrega_atual = float(obter_config_bot().get("taxa_entrega") or 0)
                     montado = {
                         "lista_itens_tsx": cache["itens"],
                         "itens_nao_reconhecidos": [],
                         "itens_indisponiveis": [],
-                        "valor_itens": cache.get("valor_itens", 0),
-                        "taxa_entrega": cache.get("taxa_entrega", 0),
-                        "valor_total": cache.get("valor_total", 0),
-                        "tipo_entrega": cache.get("tipo_entrega") or "RETIRADA",
+                        "valor_itens": valor_itens_cache,
+                        "taxa_entrega": taxa_entrega_atual,
+                        "valor_total": round(valor_itens_cache + taxa_entrega_atual, 2),
+                        "tipo_entrega": tipo_entrega_cache,
                         "total_pontos": cache.get("total_pontos", 0)
                     }
                     hist_ref.update({"ultimo_calculo": firestore.DELETE_FIELD})
@@ -1329,8 +1339,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          numa pergunta própria — o nome do bairro sozinho não é suficiente.
 
        IMPORTANTE SOBRE PIX:
-       - Se for "PIX AGORA": Chave e {chave_pix}. Aguarde o comprovante.
-       - Se for "PIX NA ENTREGA": Não precisa de comprovante agora.
+       - PIX é SEMPRE antecipado — não existe mais "PIX na entrega"/"pago na
+         entrega" pra essa forma de pagamento. Se o cliente escolher PIX,
+         passe a chave ({chave_pix}) e diga que precisa do comprovante antes
+         de o pedido seguir pra preparo — NUNCA ofereça pagar o PIX só na
+         hora da entrega/retirada.
+       - Se o cliente pedir explicitamente pra pagar "na entrega", isso só é
+         possível com Cartão ou Dinheiro, não com PIX — explique isso a ele
+         se insistir em PIX na entrega.
 
     4. FINALIZAÇÃO:
        - Use a função 'registrar_pedido' APENAS quando tiver: Itens, Forma de
