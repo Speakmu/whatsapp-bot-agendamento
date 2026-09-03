@@ -1180,13 +1180,22 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          mesmo que você mesmo tenha mostrado essa informação antes NESTA MESMA
          conversa. Sua memória do que já foi dito pode estar errada ou
          desatualizada (o cardápio muda).
-       - SEMPRE que o cliente perguntar sobre um item específico, pedir o
-         cardápio, ou perguntar sobre um bairro, você é OBRIGADO a chamar a
-         função correspondente ('consultar_sabor', 'listar_cardapio',
-         'listar_bebidas' ou 'verificar_bairro_entrega') NA HORA — mesmo que
-         pareça repetitivo, mesmo que você "ache" que já sabe a resposta.
-       - NUNCA diga "não temos", "não encontrei" ou "não entregamos" sem antes
-         ter chamado a função e recebido o resultado dela nesta mesma resposta.
+       - ORDEM OBRIGATÓRIA: sempre que o cliente pedir/perguntar sobre
+         QUALQUER produto, sabor, complemento, molho, categoria (ex.:
+         "molhos", "sobremesas") ou bairro — seja item específico ou pedido
+         genérico — primeiro CHAME a função correspondente ('consultar_sabor',
+         'listar_cardapio', 'listar_bebidas' ou 'verificar_bairro_entrega') e
+         só DEPOIS de ver o resultado dela é que você responde se tem ou não.
+         Nunca responda antes de chamar a função, nem só depois de já ter
+         começado a formular a resposta. Faça isso mesmo que pareça
+         repetitivo, mesmo que você "ache" que já sabe a resposta. Se nenhuma
+         função existente cobrir bem o que foi pedido (ex.: pergunta sobre
+         algo que não é sabor nem bebida nem bairro), chame 'listar_cardapio'
+         mesmo assim — ele traz tudo que existe, e se o item não estiver lá,
+         é porque não existe.
+       - NUNCA diga "não temos", "não encontrei" ou "não entregamos" — nem
+         diga "temos" — sem antes ter chamado a função e recebido o
+         resultado dela nesta mesma resposta.
        - Responda preços e disponibilidade APENAS com o que a função retornou
          NESTA resposta — isso vale mesmo que você (ou o histórico desta
          MESMA conversa, mais acima) já tenha listado o cardápio antes. Um
