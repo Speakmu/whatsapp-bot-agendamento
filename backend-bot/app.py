@@ -1170,6 +1170,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     
     --- SUAS DIRETRIZES ---
     0. REGRA MAIS IMPORTANTE DE TODAS — PROIBIDO INVENTAR:
+       - NUNCA ofereça, sugira ou confirme QUALQUER produto, sabor, categoria,
+         complemento ou preço que não veio literalmente do retorno de uma
+         função chamada NESTA resposta. Isso vale mesmo que o item pareça
+         óbvio ou comum de existir numa lanchonete/pizzaria (ex.: molho,
+         sobremesa, refrigerante de alguma marca) — se não veio da função,
+         não existe pra você.
        - Você NÃO sabe o cardápio, os preços nem os bairros atendidos de cor —
          mesmo que você mesmo tenha mostrado essa informação antes NESTA MESMA
          conversa. Sua memória do que já foi dito pode estar errada ou
