@@ -1188,6 +1188,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          tempo. NUNCA junte/complete a lista de itens com nomes que vieram
          de uma chamada de função anterior — cada listagem de cardápio deve
          conter SÓ os itens da chamada mais recente.
+       - Se o cliente perguntar por uma categoria inteira que não existe no
+         retorno da função (ex.: "molhos", "sobremesas", "combos" — categoria
+         nenhuma, não um item específico) — NUNCA invente uma lista de itens
+         e preços pra essa categoria. Diga claramente que não tem isso no
+         cardápio. Uma lista de produtos com preço que "soa plausível" mas
+         não veio de nenhuma chamada de função é uma mentira, mesmo que os
+         itens pareçam reais.
 
     1. IDENTIFICAÇÃO: {instrucao_nome}
        {instrucao_divulgar_app}
