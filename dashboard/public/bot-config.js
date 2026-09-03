@@ -19,7 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
         mensagem_pronto: 'Oi {nome_cliente}! Seu pedido esta pronto!',
         mensagem_retirada: 'Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!',
         mensagem_erro: 'Desculpe, tive um probleminha aqui. Pode repetir?',
-        instrucoes_extras: ''
+        instrucoes_extras: '',
+        divulgar_app: false
     };
 
     auth.onAuthStateChanged(user => {
@@ -48,6 +49,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const snap = await DOC_BOT.get();
             const d = { ...BOT_DEFAULTS, ...(snap.exists ? (snap.data() || {}) : {}) };
             $('bot-ativo').checked = d.ativo !== false;
+            $('bot-divulgar-app').checked = d.divulgar_app === true;
             $('bot-nome-atendente').value = d.nome_atendente || '';
             $('bot-nome-empresa').value = d.nome_empresa || '';
             $('bot-chave-pix').value = d.chave_pix || '';
@@ -85,6 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
     async function salvarBot() {
         const payload = {
             ativo: $('bot-ativo').checked,
+            divulgar_app: $('bot-divulgar-app').checked,
             nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,
             nome_empresa: $('bot-nome-empresa').value.trim() || BOT_DEFAULTS.nome_empresa,
             chave_pix: $('bot-chave-pix').value.trim(),

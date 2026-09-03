@@ -64,7 +64,11 @@ BOT_CONFIG_DEFAULTS = {
     "instrucoes_extras": "",
     "bairros_entrega": [],
     "taxa_entrega": 0,
-    "cidade_atendida": ""
+    "cidade_atendida": "",
+    # Desligado por padrão: antes era texto fixo no prompt convidando o
+    # cliente a baixar o app pra ganhar pontos, mesmo em lojas onde o app
+    # ainda não está no ar. Configurável em Config do Bot.
+    "divulgar_app": False
 }
 
 def obter_config_bot():
@@ -1016,6 +1020,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         contexto_identificacao = "CLIENTE NOVO: Nome desconhecido."
         instrucao_nome = "Descubra o nome do cliente antes de finalizar o pedido."
 
+    if bot_cfg.get("divulgar_app"):
+        instrucao_divulgar_app = (
+            "Se o nome for desconhecido, avise sobre baixar o app para ganhar pontos. "
+            "Se o nome já for conhecido, apenas lembre-o de conferir os pontos no app."
+        )
+    else:
+        # App ainda não está no ar pra essa loja — não convida o cliente pra
+        # baixar nada que não existe de verdade ainda.
+        instrucao_divulgar_app = ""
+
     # 4. Ferramentas (Tools) - Mantive igual
     tools = [
         {
@@ -1176,8 +1190,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          conter SÓ os itens da chamada mais recente.
 
     1. IDENTIFICAÇÃO: {instrucao_nome}
-       - Se o nome for desconhecido, avise sobre baixar o app para ganhar pontos.
-       - Se o nome já for conhecido, apenas lembre-o de conferir os pontos no app.
+       {instrucao_divulgar_app}
        - Sempre que for se dirigir ao cliente pelo nome (identificado ou se
          ele informar o nome completo na conversa), use só o primeiro nome
          — nunca o nome completo, soa mais natural e menos formal.
