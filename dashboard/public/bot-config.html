@@ -76,6 +76,18 @@
                 <small>Use este campo para regras comerciais. N&atilde;o coloque senhas, tokens ou chaves privadas.</small>
             </div>
             <div class="campo"><label>Mensagem de erro</label><input id="bot-mensagem-erro" placeholder="Desculpe, tive um probleminha aqui. Pode repetir?"></div>
+
+            <label class="check-line"><input id="bot-ferias-ativo" type="checkbox"> Loja de f&eacute;rias / fechada por per&iacute;odo (bot n&atilde;o registra pedido nesse intervalo)</label>
+            <div class="grid2">
+                <div class="campo"><label>De (primeiro dia fechado)</label><input id="bot-ferias-inicio" type="date"></div>
+                <div class="campo"><label>At&eacute; (&uacute;ltimo dia fechado)</label><input id="bot-ferias-fim" type="date"></div>
+            </div>
+            <div class="campo">
+                <label>Mensagem durante as f&eacute;rias</label>
+                <input id="bot-ferias-mensagem" placeholder="Estamos de f&eacute;rias no momento e voltamos no dia {data_volta}. At&eacute; l&aacute;!">
+                <small>Use <code>{data_volta}</code> que o bot troca pela data certa (dia seguinte ao "At&eacute;").</small>
+            </div>
+
             <div class="acoes"><button class="btn btn-salvar" id="salvar-bot">Salvar configura&ccedil;&otilde;es do bot</button></div>
         </div>
 

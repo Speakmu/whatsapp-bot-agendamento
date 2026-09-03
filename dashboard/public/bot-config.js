@@ -20,7 +20,11 @@ document.addEventListener('DOMContentLoaded', () => {
         mensagem_retirada: 'Boa noticia, {nome_cliente}! Seu pedido ja pode ser retirado!',
         mensagem_erro: 'Desculpe, tive um probleminha aqui. Pode repetir?',
         instrucoes_extras: '',
-        divulgar_app: false
+        divulgar_app: false,
+        ferias_ativo: false,
+        ferias_inicio: '',
+        ferias_fim: '',
+        ferias_mensagem: 'Estamos de férias no momento e voltamos no dia {data_volta}. Até lá!'
     };
 
     auth.onAuthStateChanged(user => {
@@ -50,6 +54,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = { ...BOT_DEFAULTS, ...(snap.exists ? (snap.data() || {}) : {}) };
             $('bot-ativo').checked = d.ativo !== false;
             $('bot-divulgar-app').checked = d.divulgar_app === true;
+            $('bot-ferias-ativo').checked = d.ferias_ativo === true;
+            $('bot-ferias-inicio').value = d.ferias_inicio || '';
+            $('bot-ferias-fim').value = d.ferias_fim || '';
+            $('bot-ferias-mensagem').value = d.ferias_mensagem || '';
             $('bot-nome-atendente').value = d.nome_atendente || '';
             $('bot-nome-empresa').value = d.nome_empresa || '';
             $('bot-chave-pix').value = d.chave_pix || '';
@@ -88,6 +96,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const payload = {
             ativo: $('bot-ativo').checked,
             divulgar_app: $('bot-divulgar-app').checked,
+            ferias_ativo: $('bot-ferias-ativo').checked,
+            ferias_inicio: $('bot-ferias-inicio').value || '',
+            ferias_fim: $('bot-ferias-fim').value || '',
+            ferias_mensagem: $('bot-ferias-mensagem').value.trim() || BOT_DEFAULTS.ferias_mensagem,
             nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,
             nome_empresa: $('bot-nome-empresa').value.trim() || BOT_DEFAULTS.nome_empresa,
             chave_pix: $('bot-chave-pix').value.trim(),

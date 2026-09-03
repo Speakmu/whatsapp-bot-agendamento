@@ -68,7 +68,15 @@ BOT_CONFIG_DEFAULTS = {
     # Desligado por padrão: antes era texto fixo no prompt convidando o
     # cliente a baixar o app pra ganhar pontos, mesmo em lojas onde o app
     # ainda não está no ar. Configurável em Config do Bot.
-    "divulgar_app": False
+    "divulgar_app": False,
+    # Período de férias/fechamento — data (não horário) configurável no
+    # painel. Enquanto ativo, bloqueia o bot igual ao horário de
+    # funcionamento fechado, mas por um intervalo de dias em vez de horário
+    # diário.
+    "ferias_ativo": False,
+    "ferias_inicio": "",  # "YYYY-MM-DD"
+    "ferias_fim": "",     # "YYYY-MM-DD"
+    "ferias_mensagem": "Estamos de férias no momento e voltamos no dia {data_volta}. Até lá!"
 }
 
 def obter_config_bot():
@@ -414,7 +422,12 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
 
     # Segunda checagem de horário: cobre o caso raro de a conversa ter
     # começado antes de fechar e só terminar (chamar essa função) depois.
-    aberto, texto_horario = verificar_horario_funcionamento(obter_config_bot())
+    bot_cfg_ferias = obter_config_bot()
+    em_ferias, msg_ferias = verificar_ferias(bot_cfg_ferias)
+    if em_ferias:
+        return json.dumps({"status": "erro", "motivo": msg_ferias})
+
+    aberto, texto_horario = verificar_horario_funcionamento(bot_cfg_ferias)
     if not aberto:
         return json.dumps({
             "status": "erro",
@@ -890,6 +903,29 @@ def verificar_bairro_entrega(bairro_cliente):
 NOMES_DIAS_SEMANA = {"seg": "Segunda", "ter": "Terça", "qua": "Quarta", "qui": "Quinta", "sex": "Sexta", "sab": "Sábado", "dom": "Domingo"}
 ORDEM_DIAS_SEMANA = ["seg", "ter", "qua", "qui", "sex", "sab", "dom"]
 
+def verificar_ferias(bot_cfg):
+    """Confere se hoje (data, fuso BR) cai dentro do período de férias
+    configurado em configuracoes/bot -> ferias_inicio/ferias_fim. Retorna
+    (em_ferias: bool, mensagem: str) — mensagem já com {data_volta} formatado,
+    pronta pra mandar pro cliente."""
+    if not bot_cfg.get("ferias_ativo"):
+        return False, ""
+    inicio_str = str(bot_cfg.get("ferias_inicio") or "").strip()
+    fim_str = str(bot_cfg.get("ferias_fim") or "").strip()
+    if not inicio_str or not fim_str:
+        return False, ""
+    try:
+        inicio = datetime.strptime(inicio_str, "%Y-%m-%d").date()
+        fim = datetime.strptime(fim_str, "%Y-%m-%d").date()
+    except ValueError:
+        return False, ""
+    hoje = datetime.now(timezone(timedelta(hours=-3))).date()
+    if not (inicio <= hoje <= fim):
+        return False, ""
+    template = bot_cfg.get("ferias_mensagem") or BOT_CONFIG_DEFAULTS["ferias_mensagem"]
+    data_volta = (fim + timedelta(days=1)).strftime("%d/%m/%Y")
+    return True, template.replace("{data_volta}", data_volta)
+
 def verificar_horario_funcionamento(bot_cfg):
     """Confere se agora (fuso BR) está dentro do horário de funcionamento
     configurado em configuracoes/bot -> horario_funcionamento. Se a chave
@@ -974,6 +1010,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
 
     if not bot_cfg.get("ativo", True):
         return bot_cfg.get("mensagem_inativo") or BOT_CONFIG_DEFAULTS["mensagem_inativo"]
+
+    em_ferias, msg_ferias = verificar_ferias(bot_cfg)
+    if em_ferias:
+        return msg_ferias
 
     aberto, texto_horario = verificar_horario_funcionamento(bot_cfg)
     ck("depois verificar_horario_funcionamento")
