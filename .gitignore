@@ -5,6 +5,11 @@
 !app-mobile/google-services.json
 whatsapp-bot-agendamentos.json
 
+# ===== Testes do bot (snapshot da producao tem chave PIX/telefone; relatorios sao locais) =====
+backend-bot/tests/snapshot*.json
+backend-bot/tests/relatorios/
+backend-bot/tests/ultimo_teste.log
+
 # ===== Python (backend-bot) =====
 **/__pycache__/
 *.pyc

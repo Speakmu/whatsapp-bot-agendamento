@@ -46,7 +46,11 @@ BOT_CONFIG_DEFAULTS = {
     # quando o campo não tinha sido configurado no painel ainda). Sem chave
     # configurada, o bot deve dizer pra falar com a equipe, não inventar uma.
     "chave_pix": "",
-    "modelo": "gpt-4o",
+    # Padrão só quando o campo não existe em configuracoes/bot — o painel
+    # grava "modelo" lá e esse valor VENCE este. Fase 5: mini é ~15x mais
+    # barato que o gpt-4o e, com o prompt curto da Fase 4, aprova os mesmos
+    # casos do harness (confira antes de trocar no painel).
+    "modelo": "gpt-4o-mini",
     # Fechar um pedido hoje passa por bem mais etapas do que antes (confirmar
     # bairro, pedir endereço completo, forma de pagamento, resumo antes de
     # fechar) — uma conversa real já passou de 17 mensagens antes do cliente
@@ -221,7 +225,570 @@ from thefuzz import process, fuzz # <--- Adicione 'fuzz' aqui
 
 # ... (restante do código) ...
 
-def _montar_itens_pedido(itens, tipo_entrega):
+# ---------- CARDÁPIO NO PROMPT (Fase 3) ----------
+# O cardápio inteiro (com um código curto por item) vai no system prompt a
+# cada mensagem. Antes a IA não tinha o cardápio e precisava chamar
+# listar_cardapio/consultar_sabor e depois passar o NOME do item pra
+# calcular/registrar, que refazia uma busca aproximada por texto — foi essa
+# busca que produziu "enroladinho de salsicha → presunto e queijo",
+# "coca zero → coca normal" e "pastel de salsicha → Salsicha avulsa".
+# Agora a IA escolhe o item pelo CÓDIGO e o servidor resolve por id: não há
+# mais casamento aproximado no caminho do pedido.
+
+_CACHE_CARDAPIO = {"quando": 0.0, "itens": None}
+_CACHE_CARDAPIO_LOCK = threading.Lock()
+CACHE_CARDAPIO_SEGUNDOS = 20
+
+
+def carregar_cardapio(forcar=False):
+    """Lista de itens do cardápio (todos, disponíveis ou não), cada um com
+    'id' (doc do Firestore) e 'codigo' (prefixo curto e único do id, que é
+    o que a IA usa). Cache curto em memória: o cardápio é lido pelo prompt
+    E pelas ferramentas na mesma mensagem, e uma leitura por mensagem basta.
+    20s é curto o bastante pra um item desativado no painel (ou pela baixa
+    de estoque) sumir do prompt antes da próxima mensagem do cliente."""
+    agora = time.time()
+    with _CACHE_CARDAPIO_LOCK:
+        if not forcar and _CACHE_CARDAPIO["itens"] is not None and agora - _CACHE_CARDAPIO["quando"] < CACHE_CARDAPIO_SEGUNDOS:
+            return _CACHE_CARDAPIO["itens"]
+    itens = []
+    for doc in db.collection('cardapio').get():
+        dados = doc.to_dict() or {}
+        itens.append({**dados, "id": doc.id})
+    # Código = menor prefixo do id que seja único entre os itens (mín. 4).
+    tamanho = 4
+    while True:
+        codigos = [it["id"][:tamanho] for it in itens]
+        if len(set(codigos)) == len(codigos) or tamanho >= 20:
+            break
+        tamanho += 1
+    for it, cod in zip(itens, codigos):
+        it["codigo"] = cod
+    with _CACHE_CARDAPIO_LOCK:
+        _CACHE_CARDAPIO["itens"] = itens
+        _CACHE_CARDAPIO["quando"] = agora
+    return itens
+
+
+def _resolver_item(item_id, cardapio):
+    """Acha o item pelo código curto OU pelo id completo (a IA pode mandar
+    qualquer um). None se não existir — nunca "o mais parecido"."""
+    chave = str(item_id or "").strip()
+    if not chave:
+        return None
+    for it in cardapio:
+        if it["id"] == chave or it["codigo"] == chave:
+            return it
+    # Prefixo mais longo que o código (IA copiou mais caracteres do id)
+    candidatos = [it for it in cardapio if it["id"].startswith(chave)] if len(chave) >= 4 else []
+    return candidatos[0] if len(candidatos) == 1 else None
+
+
+def _apelidos_aprendidos():
+    """{item_id: [apelido, ...]} ensinados pela equipe no painel (coleção
+    itens_aprendizado, doc id = apelido normalizado). Vão pro prompt junto
+    do item pra IA reconhecer o jeito que o cliente costuma pedir."""
+    apelidos = {}
+    try:
+        for doc in db.collection("itens_aprendizado").get():
+            item_id = (doc.to_dict() or {}).get("item_id")
+            if item_id:
+                apelidos.setdefault(item_id, []).append(doc.id)
+    except Exception as e:
+        print(f"Erro ao ler itens_aprendizado: {e}")
+    return apelidos
+
+
+def montar_cardapio_prompt(cardapio=None):
+    """Texto do cardápio pro system prompt: por categoria, um item por
+    linha, "[codigo] Nome — R$ preço", com apelidos quando houver e
+    "(ESGOTADO)" pros indisponíveis (a IA precisa saber que o item EXISTE
+    mas está em falta, que é diferente de não existir). Itens só de balcão
+    (disponivel_online=False) ficam de fora — pro WhatsApp eles não existem."""
+    cardapio = cardapio if cardapio is not None else carregar_cardapio()
+    apelidos = _apelidos_aprendidos()
+    por_categoria = {}
+    for it in cardapio:
+        if not _disponivel_online(it):
+            continue
+        cat = str(it.get('categoria') or 'Outros').strip().title()
+        nome = it.get('nome_exibicao') or it.get('nome') or '?'
+        try:
+            preco = f"R$ {float(it.get('preco') or 0):.2f}".replace('.', ',')
+        except (TypeError, ValueError):
+            preco = "R$ ?"
+        linha = f"[{it['codigo']}] {nome} — {preco}"
+        if it.get('disponivel') is False:
+            linha += " (ESGOTADO hoje)"
+        if apelidos.get(it['id']):
+            linha += f" (o cliente também chama de: {', '.join(apelidos[it['id']])})"
+        por_categoria.setdefault(cat, []).append(linha)
+    if not por_categoria:
+        return "CARDÁPIO: nenhum item cadastrado no momento."
+    partes = []
+    for cat, linhas in por_categoria.items():
+        partes.append(f"{cat}:\n" + "\n".join("  " + l for l in linhas))
+
+    # Bloco separado de apelidos: além da nota entre parênteses no item, uma
+    # lista "o cliente diz X → é o item Y" no fim do cardápio. Já vimos o
+    # modelo ignorar a nota no meio de 80+ linhas e responder "não temos
+    # enroladinho de salsicha" com o apelido cadastrado exatamente assim.
+    linhas_apelidos = []
+    visiveis = {it['id']: it for it in cardapio if _disponivel_online(it)}
+    for item_id, nomes in apelidos.items():
+        it = visiveis.get(item_id)
+        if not it:
+            continue
+        nome = it.get('nome_exibicao') or it.get('nome') or '?'
+        for ap in nomes:
+            linhas_apelidos.append(f'  "{ap}" → é o item [{it["codigo"]}] {nome}')
+    if linhas_apelidos:
+        partes.append("APELIDOS QUE OS CLIENTES USAM (ensinados pela equipe — quando o cliente pedir "
+                      "por um desses nomes, ou algo muito parecido/com erro de digitação, é ESTE item; "
+                      "não diga que não tem):\n" + "\n".join(linhas_apelidos))
+    return "\n".join(partes)
+
+
+def detalhar_item(item_id, cardapio=None):
+    """Ferramenta: ingredientes/detalhes de UM item pelo código. Ingredientes
+    ficam fora do prompt de propósito (custo por mensagem) — só entram
+    quando o cliente pergunta."""
+    cardapio = cardapio if cardapio is not None else carregar_cardapio()
+    it = _resolver_item(item_id, cardapio)
+    if not it or not _disponivel_online(it):
+        return {"status": "nao_encontrado", "item_id": item_id}
+    return {
+        "status": "ok",
+        "codigo": it["codigo"],
+        "nome": it.get('nome_exibicao') or it.get('nome'),
+        "categoria": it.get('categoria'),
+        "preco": it.get('preco'),
+        "disponivel": it.get('disponivel') is not False,
+        "ingredientes": it.get('ingredientes') or "não informado",
+    }
+
+
+# ====================== RASCUNHO DE PEDIDO (Fase 4) ======================
+# O pedido em andamento vive em 'pedidos_rascunho/{wa_id}', não na memória
+# da IA. Antes, itens/entrega/pagamento só existiam no texto das últimas 24
+# mensagens e a IA tinha que reconstruir tudo a cada resposta e mandar a
+# lista inteira de novo em registrar_pedido — daí o carrinho "esquecido",
+# o item que mudava entre cálculo e registro, o total somado de cabeça e o
+# pedido duplicado na confirmação dupla. Agora as ferramentas são operações
+# pequenas sobre o rascunho, e fechar_pedido() não recebe NADA: só lê o
+# rascunho e recusa (com motivo) se faltar algo. Regra em código, não em
+# prompt.
+
+FORMAS_PAGAMENTO = {"PIX": "PIX", "CARTAO": "CARTÃO", "CARTÃO": "CARTÃO", "DINHEIRO": "DINHEIRO",
+                    "DEBITO": "CARTÃO", "DÉBITO": "CARTÃO", "CREDITO": "CARTÃO", "CRÉDITO": "CARTÃO"}
+MINUTOS_TRAVA_REFECHAMENTO = 5
+
+
+def _rascunho_ref(wa_id):
+    return db.collection("pedidos_rascunho").document(str(wa_id))
+
+
+def _rascunho_vazio():
+    return {"itens": [], "tipo_entrega": None, "bairro": None, "endereco": None,
+            "forma_pagamento": None, "nome_cliente": None, "observacao": None,
+            "resumo_visto_em": None, "atualizado_em": None, "criado_em": datetime.now(timezone.utc),
+            "pedido_id": None, "fechado_em": None, "ultimo_pedido": None}
+
+
+def obter_rascunho(wa_id):
+    """Rascunho atual do cliente. Um rascunho já FECHADO (pedido criado)
+    conta como vazio: o próximo item começa um pedido novo e independente —
+    é o caso "cliente fechou e depois pediu mais uma coisa"."""
+    try:
+        doc = _rascunho_ref(wa_id).get(timeout=10)
+        if doc.exists:
+            r = doc.to_dict() or {}
+            if not r.get("pedido_id"):
+                base = _rascunho_vazio()
+                base.update(r)
+                return base
+            # Marcador de pedido fechado: o rascunho novo nasce vazio, mas
+            # LEMBRA do último pedido (pra fechar_pedido reconhecer o cliente
+            # que "confirma" de novo depois da IA remontar o carrinho igual).
+            base = _rascunho_vazio()
+            base["ultimo_pedido"] = {"pedido_id": r.get("pedido_id"), "fechado_em": r.get("fechado_em"),
+                                     "valor_total": r.get("valor_total"), "itens_fechados": r.get("itens_fechados") or []}
+            return base
+    except Exception as e:
+        print(f"Erro ao ler rascunho: {e}")
+    return _rascunho_vazio()
+
+
+def _mesmo_pedido(r, fechado):
+    """Rascunho atual tem exatamente os itens (id, quantidade) do pedido fechado?"""
+    atual = sorted((str(i.get("id")), int(i.get("quantidade") or 0)) for i in r.get("itens") or [])
+    antigo = sorted((str(i.get("id")), int(i.get("quantidade") or 0)) for i in fechado.get("itens_fechados") or [] if isinstance(i, dict))
+    return bool(atual) and atual == antigo
+
+
+def _salvar_rascunho(wa_id, r, tocou=True):
+    if tocou:
+        r["atualizado_em"] = datetime.now(timezone.utc)
+    try:
+        _rascunho_ref(wa_id).set(r, timeout=10)
+    except Exception as e:
+        print(f"Erro ao salvar rascunho: {e}")
+
+
+def _totais_rascunho(r, bot_cfg):
+    valor_itens = round(sum(float(i.get("preco") or 0) for i in r.get("itens") or []), 2)
+    taxa = 0.0
+    if r.get("tipo_entrega") == "ENTREGA":
+        taxa = float((bot_cfg or {}).get("taxa_entrega") or 0)
+    return valor_itens, taxa, round(valor_itens + taxa, 2)
+
+
+def _faltando(r):
+    """O que ainda impede fechar — na ordem em que o atendente deve perguntar."""
+    f = []
+    if not r.get("itens"):
+        f.append("itens")
+    if r.get("tipo_entrega") not in ("ENTREGA", "RETIRADA"):
+        f.append("tipo_entrega")
+    elif r.get("tipo_entrega") == "ENTREGA":
+        if not r.get("bairro"):
+            f.append("bairro")
+        if not any(ch.isdigit() for ch in str(r.get("endereco") or "")):
+            f.append("endereco_com_numero")
+    if not r.get("forma_pagamento"):
+        f.append("forma_pagamento")
+    # Nome NÃO bloqueia: no harness o gpt-4o-mini pediu "nome completo" três
+    # vezes seguidas e gastou os "sim" do cliente nisso — 13 de 19 casos sem
+    # pedido nenhum. fechar_pedido usa "Cliente" se não souber.
+    return f
+
+
+def _resumo_rascunho(r, bot_cfg, status="ok", **extra):
+    """Formato que TODAS as ferramentas do rascunho devolvem: o estado
+    inteiro, com totais do servidor e a lista do que falta. A IA responde
+    olhando pra isto, nunca pra memória dela."""
+    valor_itens, taxa, total = _totais_rascunho(r, bot_cfg)
+    out = {
+        "status": status,
+        "itens": [{"item_id": i.get("codigo") or i.get("id"), "nome": i.get("nome_exibicao") or i.get("nome"),
+                   "quantidade": i.get("quantidade"), "preco_unitario": i.get("preco_unitario"), "subtotal": i.get("preco")}
+                  for i in r.get("itens") or []],
+        "tipo_entrega": r.get("tipo_entrega"),
+        "bairro": r.get("bairro"),
+        "endereco": r.get("endereco"),
+        "forma_pagamento": r.get("forma_pagamento"),
+        "nome_cliente": r.get("nome_cliente"),
+        "observacao": r.get("observacao"),
+        "valor_itens": valor_itens,
+        "taxa_entrega": taxa,
+        "valor_total": total,
+        "falta_para_fechar": _faltando(r),
+        "nome_pendente": not r.get("nome_cliente"),
+    }
+    if not r.get("nome_cliente"):
+        out["dica_nome"] = "Ainda não sei o nome: pergunte JUNTO com a confirmação do resumo (não numa rodada só pra isso). Se o cliente não quiser dizer, feche mesmo assim."
+    out.update(extra)
+    return out
+
+
+def rascunho_adicionar_item(wa_id, item_id, quantidade, bot_cfg, cardapio=None):
+    cardapio = cardapio if cardapio is not None else carregar_cardapio()
+    r = obter_rascunho(wa_id)
+    it = _resolver_item(item_id, cardapio)
+    if not it or not _disponivel_online(it):
+        return _resumo_rascunho(r, bot_cfg, status="erro",
+                                motivo=f"Código '{item_id}' não existe no cardápio de agora. Use um código da lista do prompt.")
+    if it.get("disponivel") is False:
+        return _resumo_rascunho(r, bot_cfg, status="erro",
+                                motivo=f"'{it.get('nome_exibicao') or it.get('nome')}' está ESGOTADO hoje — avise o cliente e ofereça outro item.")
+    try:
+        qtd = max(1, int(quantidade or 1))
+    except (TypeError, ValueError):
+        qtd = 1
+    preco_unit = float(it.get("preco") or 0)
+    for existente in r["itens"]:
+        if existente.get("id") == it["id"]:
+            existente["quantidade"] = int(existente.get("quantidade") or 0) + qtd
+            existente["preco"] = round(preco_unit * existente["quantidade"], 2)
+            existente["nome"] = f"{existente['quantidade']}x {it.get('nome')}" if existente["quantidade"] > 1 else it.get("nome")
+            break
+    else:
+        r["itens"].append({
+            "id": it["id"], "codigo": it["codigo"],
+            "nome": f"{qtd}x {it.get('nome')}" if qtd > 1 else it.get("nome"),
+            "nome_exibicao": it.get("nome_exibicao") or it.get("nome"),
+            "quantidade": qtd, "preco_unitario": preco_unit, "preco": round(preco_unit * qtd, 2),
+            "pontos_fidelidade": int(it.get("pontos_fidelidade", 0) or 0),
+        })
+    r["resumo_visto_em"] = None          # carrinho mudou: o cliente precisa ver o resumo de novo antes de fechar
+    _salvar_rascunho(wa_id, r)
+    return _resumo_rascunho(r, bot_cfg)
+
+
+def rascunho_remover_item(wa_id, item_id, quantidade, bot_cfg, cardapio=None):
+    cardapio = cardapio if cardapio is not None else carregar_cardapio()
+    r = obter_rascunho(wa_id)
+    it = _resolver_item(item_id, cardapio)
+    alvo = next((i for i in r["itens"] if it and i.get("id") == it["id"]), None)
+    if not alvo:
+        return _resumo_rascunho(r, bot_cfg, status="erro", motivo=f"Código '{item_id}' não está no pedido.")
+    try:
+        qtd = int(quantidade) if quantidade is not None else None
+    except (TypeError, ValueError):
+        qtd = None
+    if qtd is None or qtd >= int(alvo.get("quantidade") or 0):
+        r["itens"].remove(alvo)
+    else:
+        alvo["quantidade"] = int(alvo["quantidade"]) - qtd
+        alvo["preco"] = round(float(alvo["preco_unitario"]) * alvo["quantidade"], 2)
+        nome_base = alvo.get("nome_exibicao") or alvo.get("nome")
+        alvo["nome"] = f"{alvo['quantidade']}x {nome_base}" if alvo["quantidade"] > 1 else nome_base
+    r["resumo_visto_em"] = None
+    _salvar_rascunho(wa_id, r)
+    return _resumo_rascunho(r, bot_cfg)
+
+
+def rascunho_definir_entrega(wa_id, tipo, bairro, endereco, bot_cfg):
+    r = obter_rascunho(wa_id)
+    tipo = str(tipo or "").strip().upper()
+    if tipo not in ("ENTREGA", "RETIRADA"):
+        return _resumo_rascunho(r, bot_cfg, status="erro", motivo="tipo deve ser ENTREGA ou RETIRADA.")
+    if tipo == "RETIRADA":
+        if r.get("tipo_entrega") == "RETIRADA":
+            return _resumo_rascunho(r, bot_cfg)          # já era retirada: nada mudou, não invalida o resumo
+        r.update({"tipo_entrega": "RETIRADA", "bairro": None, "endereco": "Retirada no balcão"})
+        r["resumo_visto_em"] = None
+        _salvar_rascunho(wa_id, r)
+        return _resumo_rascunho(r, bot_cfg)
+
+    antes = (r.get("tipo_entrega"), r.get("bairro"), r.get("endereco"))
+    r["tipo_entrega"] = "ENTREGA"
+    avisos = []
+    if bairro:
+        res = verificar_bairro_entrega(bairro, bot_cfg)
+        if res.get("status") == "atende":
+            r["bairro"] = res.get("bairro")
+        elif res.get("status") == "nao_atende_confirmado":
+            r["bairro"] = None
+            avisos.append(f"A equipe já confirmou que NÃO entregamos em '{bairro}'. Ofereça retirada.")
+        else:
+            r["bairro"] = None
+            marcar_atencao(wa_id, f"Bairro não reconhecido: \"{bairro}\"", tipo="bairro", dados={"bairro_cliente": bairro})
+            avisos.append(f"Bairro '{bairro}' não está na lista de entrega. Se for cidade vizinha, diga que só entregamos em "
+                          f"{(bot_cfg or {}).get('cidade_atendida') or 'nossa cidade'}; se for bairro local, a equipe foi avisada "
+                          f"— ofereça retirada enquanto isso.")
+    if endereco is not None:
+        end = str(endereco).strip()
+        if end and not any(ch.isdigit() for ch in end):
+            avisos.append("Endereço sem número — peça rua e número.")
+            r["endereco"] = None
+        else:
+            r["endereco"] = end or None
+    # Idempotência: o gpt-4o-mini "reconfirma" entrega/pagamento no turno do
+    # "sim". Se nada mudou de fato, não invalida o resumo já mostrado — senão
+    # fechar_pedido recusa e o "sim" do cliente é desperdiçado (harness).
+    if (r.get("tipo_entrega"), r.get("bairro"), r.get("endereco")) != antes:
+        r["resumo_visto_em"] = None
+        _salvar_rascunho(wa_id, r)
+    return _resumo_rascunho(r, bot_cfg, avisos=avisos) if avisos else _resumo_rascunho(r, bot_cfg)
+
+
+def rascunho_definir_pagamento(wa_id, forma, bot_cfg):
+    r = obter_rascunho(wa_id)
+    chave = _normalizar_termo(forma).upper().replace("Ã", "A")
+    forma_norm = None
+    for k, v in FORMAS_PAGAMENTO.items():
+        if _normalizar_termo(k).upper() in chave:
+            forma_norm = v
+            break
+    if not forma_norm:
+        return _resumo_rascunho(r, bot_cfg, status="erro", motivo="Forma de pagamento deve ser PIX, CARTÃO ou DINHEIRO.")
+    if r.get("forma_pagamento") != forma_norm:
+        r["forma_pagamento"] = forma_norm
+        r["resumo_visto_em"] = None
+        _salvar_rascunho(wa_id, r)
+    extra = {}
+    if forma_norm == "PIX":
+        chave_pix = ((bot_cfg or {}).get("chave_pix") or "").strip()
+        extra["chave_pix"] = chave_pix or "NÃO CONFIGURADA — diga pro cliente que a equipe passa a chave"
+        extra["aviso_pix"] = ("PIX é antecipado: passe a chave e diga que precisa do comprovante antes do preparo. "
+                              "Na MESMA resposta mostre o resumo (itens, taxa, valor_total) e pergunte 'Confere? Posso fechar?' — "
+                              "não termine a resposta sem essa pergunta.")
+    return _resumo_rascunho(r, bot_cfg, **extra)
+
+
+def rascunho_definir_nome(wa_id, nome, bot_cfg):
+    r = obter_rascunho(wa_id)
+    nome = str(nome or "").strip()
+    if nome.lower() in ("", "none", "null", "n/a"):
+        return _resumo_rascunho(r, bot_cfg, status="erro", motivo="Nome vazio.")
+    r["nome_cliente"] = nome
+    _salvar_rascunho(wa_id, r, tocou=False)
+    return _resumo_rascunho(r, bot_cfg)
+
+
+def rascunho_definir_observacao(wa_id, observacao, bot_cfg):
+    r = obter_rascunho(wa_id)
+    r["observacao"] = str(observacao or "").strip() or None
+    _salvar_rascunho(wa_id, r, tocou=False)
+    return _resumo_rascunho(r, bot_cfg)
+
+
+def rascunho_para_prompt(r, bot_cfg):
+    """Estado do pedido em andamento, injetado no system prompt a cada
+    mensagem — a IA sabe o que já está no carrinho e o que falta sem
+    precisar chamar ver_resumo nem reler a conversa."""
+    if not r.get("itens") and not r.get("tipo_entrega") and not r.get("forma_pagamento"):
+        return "PEDIDO EM ANDAMENTO: nenhum (carrinho vazio)."
+    valor_itens, taxa, total = _totais_rascunho(r, bot_cfg)
+    linhas = ["PEDIDO EM ANDAMENTO (do servidor — fonte da verdade):"]
+    for i in r.get("itens") or []:
+        linhas.append(f"  - {i.get('quantidade')}x {i.get('nome_exibicao') or i.get('nome')} [{i.get('codigo') or i.get('id')}] = R$ {float(i.get('preco') or 0):.2f}")
+    linhas.append(f"  entrega: {r.get('tipo_entrega') or '?'} | bairro: {r.get('bairro') or '?'} | endereço: {r.get('endereco') or '?'}")
+    linhas.append(f"  pagamento: {r.get('forma_pagamento') or '?'} | nome: {r.get('nome_cliente') or '?'}")
+    linhas.append(f"  itens R$ {valor_itens:.2f} + taxa R$ {taxa:.2f} = TOTAL R$ {total:.2f}")
+    faltando = _faltando(r)
+    linhas.append(f"  falta para fechar: {', '.join(faltando) if faltando else 'nada — mostre o resumo (ver_resumo) e peça confirmação'}")
+    return "\n".join(linhas)
+
+
+def _aplicar_nome_identificado(r, nome_identificado):
+    """Cliente com cadastro (usuarios_app): o nome já é conhecido, não
+    precisa perguntar nem chamar definir_nome."""
+    if not r.get("nome_cliente") and nome_identificado:
+        r["nome_cliente"] = str(nome_identificado).strip()
+    return r
+
+
+def rascunho_ver_resumo(wa_id, bot_cfg, nome_identificado=None):
+    """Marca que o resumo foi mostrado — fechar_pedido exige isso DEPOIS
+    da última alteração no carrinho/entrega/pagamento."""
+    r = _aplicar_nome_identificado(obter_rascunho(wa_id), nome_identificado)
+    r["resumo_visto_em"] = datetime.now(timezone.utc)
+    _salvar_rascunho(wa_id, r, tocou=False)
+    faltando = _faltando(r)
+    return _resumo_rascunho(r, bot_cfg, pode_fechar=not faltando,
+                            instrucao=("Mostre este resumo ao cliente (itens, taxa, total) e pergunte se pode fechar."
+                                       if not faltando else f"Ainda falta: {', '.join(faltando)}. Pergunte UMA coisa por vez."))
+
+
+def rascunho_fechar_pedido(wa_id, bot_cfg, nome_identificado=None, confirmacao_explicita=False):
+    """Cria o pedido REAL em 'pedidos' a partir do rascunho. Sem parâmetros:
+    tudo vem do rascunho. Recusa com motivo se faltar algo — é aqui que as
+    regras que antes eram prompt viram código.
+
+    'confirmacao_explicita': o cliente acabou de responder "sim" a "posso
+    fechar?" — a gate do resumo é dispensada (o resumo já foi mostrado, no
+    texto da IA, mesmo que ela não tenha chamado ver_resumo)."""
+    r = _aplicar_nome_identificado(obter_rascunho(wa_id), nome_identificado)
+
+    # Idempotência: cliente confirma duas vezes ("pode sim" + "confirma") →
+    # a segunda chamada devolve o MESMO pedido, não cria outro.
+    try:
+        doc = _rascunho_ref(wa_id).get(timeout=10)
+        bruto = (doc.to_dict() or {}) if doc.exists else {}
+        fechado = bruto if bruto.get("pedido_id") else (bruto.get("ultimo_pedido") or {})
+        if fechado.get("pedido_id") and fechado.get("fechado_em") \
+                and (datetime.now(timezone.utc) - fechado["fechado_em"]) < timedelta(minutes=MINUTOS_TRAVA_REFECHAMENTO) \
+                and (not r.get("itens") or _mesmo_pedido(r, fechado)):
+            # Carrinho vazio OU a IA remontou o MESMO pedido (harness: "pode
+            # sim" fechou, "confirma" → mini chamou adicionar_item/definir_*/
+            # fechar_pedido de novo e criava um 2º pedido idêntico). Devolve
+            # o pedido já feito e limpa a remontagem.
+            if r.get("itens"):
+                _rascunho_ref(wa_id).set({"pedido_id": fechado["pedido_id"], "fechado_em": fechado["fechado_em"],
+                                          "valor_total": fechado.get("valor_total"), "itens_fechados": fechado.get("itens_fechados") or [],
+                                          "nome_cliente": r.get("nome_cliente")}, timeout=10)
+            return {"status": "ok", "ja_estava_fechado": True, "pedido_id": fechado["pedido_id"],
+                    "valor_total": fechado.get("valor_total"),
+                    "itens": [i.get("nome") if isinstance(i, dict) else i for i in fechado.get("itens_fechados") or []],
+                    "instrucao": "Este pedido JÁ foi registrado há pouco. Não registre de novo; só confirme pro cliente."}
+    except Exception as e:
+        print(f"Erro ao checar refechamento: {e}")
+
+    faltando = _faltando(r)
+    if faltando:
+        return _resumo_rascunho(r, bot_cfg, status="erro",
+                                motivo=f"Não dá pra fechar: falta {', '.join(faltando)}. Pergunte UMA coisa por vez.")
+    resumo_pendente = not r.get("resumo_visto_em") or (r.get("atualizado_em") and r["resumo_visto_em"] < r["atualizado_em"])
+    if resumo_pendente and not confirmacao_explicita:
+        # O gpt-4o-mini escreve o resumo no texto sem chamar ver_resumo, e
+        # depois chama fechar_pedido. Em vez de recusar "pra sempre", esta
+        # chamada VALE como resumo: marca visto e devolve o estado pra IA
+        # mostrar e perguntar "posso fechar?". A próxima chamada (depois do
+        # "sim") fecha.
+        r["resumo_visto_em"] = datetime.now(timezone.utc)
+        _salvar_rascunho(wa_id, r, tocou=False)
+        return _resumo_rascunho(r, bot_cfg, status="precisa_confirmar",
+                                motivo="NÃO fechei ainda. Mostre este resumo ao cliente (itens, taxa, valor_total) e pergunte "
+                                       "'Confere? Posso fechar?'. Quando ele confirmar, chame fechar_pedido de novo.")
+
+    em_ferias, msg_ferias = verificar_ferias(bot_cfg)
+    if em_ferias:
+        return {"status": "erro", "motivo": msg_ferias}
+    aberto, texto_horario = verificar_horario_funcionamento(bot_cfg)
+    if not aberto:
+        return {"status": "erro", "motivo": "Loja fechada no momento.", "horario_funcionamento": texto_horario}
+
+    fuso_br = timezone(timedelta(hours=-3))
+    agora_br = datetime.now(fuso_br)
+    valor_itens, taxa, total = _totais_rascunho(r, bot_cfg)
+    itens_pedido = [{
+        "id": i["id"], "nome": i["nome"], "nome_exibicao": i.get("nome_exibicao"),
+        "quantidade": i["quantidade"], "preco_unitario": i["preco_unitario"], "preco": i["preco"],
+    } for i in r["itens"]]
+    total_pontos = sum(int(i.get("pontos_fidelidade", 0) or 0) * int(i.get("quantidade") or 0) for i in r["itens"])
+
+    try:
+        user_query = db.collection('usuarios_app').where('telefone', '==', str(wa_id)).limit(1).get()
+        user_doc = user_query[0] if user_query else None
+        usuario_id = user_doc.id if user_doc else f"wa_{wa_id}"
+
+        batch = db.batch()
+        pedido_ref = db.collection('pedidos').document()
+        dados_pedido = {
+            "origem": "WHATSAPP",
+            "data_formatada": agora_br.strftime('%d/%m/%Y %H:%M:%S'),
+            "endereco": r.get("endereco"),
+            "bairro": r.get("bairro"),
+            "tipo_entrega": r["tipo_entrega"],
+            "forma_pagamento": r["forma_pagamento"],
+            "hora_pedido": agora_br,
+            "itens": itens_pedido,
+            "nome_cliente": r.get("nome_cliente") or "Cliente",
+            "observacao": r.get("observacao") or "Nenhuma",
+            "pagamento_id": int(datetime.now().timestamp()),
+            "pontos_gerados": total_pontos,
+            "status": "PENDENTE_PREPARO",
+            "telefone_cliente": str(wa_id),
+            "usuario_id": usuario_id,
+            "valor_total": total,
+            "valor_itens": valor_itens,
+            "taxa_entrega": taxa,
+        }
+        batch.set(pedido_ref, dados_pedido)
+        if user_doc and total_pontos > 0:
+            batch.update(user_doc.reference, {"pontos": firestore.Increment(total_pontos)})
+        batch.commit()
+
+        # Rascunho vira "fechado": guarda o id pra idempotência e limpa o carrinho.
+        _rascunho_ref(wa_id).set({
+            "pedido_id": pedido_ref.id, "fechado_em": datetime.now(timezone.utc), "valor_total": total,
+            "itens_fechados": [{"id": i["id"], "nome": i["nome"], "quantidade": i["quantidade"]} for i in itens_pedido],
+            "nome_cliente": r.get("nome_cliente") or "Cliente",
+        }, timeout=10)
+        return {
+            "status": "ok", "pedido_id": pedido_ref.id,
+            "itens": [i["nome"] for i in itens_pedido], "valor_itens": valor_itens, "taxa_entrega": taxa,
+            "valor_total": total, "tipo_entrega": r["tipo_entrega"], "forma_pagamento": r["forma_pagamento"],
+            "instrucao": "Pedido registrado de verdade. Confirme pro cliente com o valor_total daqui.",
+        }
+    except Exception as e:
+        print(f"ERRO ao fechar pedido: {e}")
+        return {"status": "erro", "motivo": "Erro interno."}
+
+
+def _montar_itens_pedido(itens, tipo_entrega, bot_cfg=None):
     """Casa cada item pedido (nome + quantidade) contra o cardápio via busca
     aproximada e calcula o total — usada tanto por 'calcular_pedido' (só
     prévia, não escreve nada) quanto por 'registrar_pedido' (grava de
@@ -245,14 +812,12 @@ def _montar_itens_pedido(itens, tipo_entrega):
     automaticamente por falta de estoque (baixa-estoque.js) não pode ser
     aceito aqui, mesmo que o cliente peça pelo nome de cor.
     """
-    docs_cardapio = list(db.collection('cardapio').get())
+    cardapio = carregar_cardapio()
     cardapio_por_nome = {}
     cardapio_por_id = {}
-    for doc in docs_cardapio:
-        dados = doc.to_dict()
-        item_com_id = {**dados, "id": doc.id}
-        cardapio_por_id[doc.id] = item_com_id
-        nome_chave = str(dados.get('nome', '')).strip().lower()
+    for item_com_id in cardapio:
+        cardapio_por_id[item_com_id["id"]] = item_com_id
+        nome_chave = str(item_com_id.get('nome', '')).strip().lower()
         if nome_chave:
             cardapio_por_nome[nome_chave] = item_com_id
     nomes_cardapio = list(cardapio_por_nome.keys())
@@ -271,24 +836,38 @@ def _montar_itens_pedido(itens, tipo_entrega):
     itens_confianca_baixa = []
 
     for item in (itens or []):
-        nome_pedido = str((item or {}).get('nome_produto') or '').strip().lower()
+        item = item or {}
+        item_id = str(item.get('item_id') or '').strip()
+        nome_pedido = str(item.get('nome_produto') or '').strip().lower()
         try:
-            qtd = int((item or {}).get('quantidade') or 1)
+            qtd = int(item.get('quantidade') or 1)
         except (TypeError, ValueError):
             qtd = 1
-        if not nome_pedido:
+        if not item_id and not nome_pedido:
             continue
 
-        # Apelido já ensinado pela equipe (painel de Atendimento) pra esse
-        # nome exato — pula a busca aproximada e vai direto no item certo.
         dados = None
-        try:
-            aprendido = db.collection("itens_aprendizado").document(_normalizar_termo(nome_pedido)).get()
-            if aprendido.exists:
-                item_id_aprendido = aprendido.to_dict().get("item_id")
-                dados = cardapio_por_id.get(item_id_aprendido)
-        except Exception as e:
-            print(f"Erro ao checar item aprendido: {e}")
+
+        # Caminho principal (Fase 3): a IA manda o CÓDIGO do item que leu no
+        # cardápio do prompt. Resolve por id exato — se o código não existir,
+        # é "não reconhecido", nunca "o mais parecido".
+        if item_id:
+            dados = _resolver_item(item_id, cardapio)
+            if not dados:
+                itens_nao_reconhecidos.append(nome_pedido or item_id)
+                continue
+
+        # Caminho legado (só se vier 'nome_produto' SEM 'item_id'): apelido
+        # ensinado pela equipe, senão busca aproximada. Mantido pra não
+        # quebrar chamadas antigas, mas o schema da ferramenta exige item_id.
+        if not dados:
+            try:
+                aprendido = db.collection("itens_aprendizado").document(_normalizar_termo(nome_pedido)).get()
+                if aprendido.exists:
+                    item_id_aprendido = aprendido.to_dict().get("item_id")
+                    dados = cardapio_por_id.get(item_id_aprendido)
+            except Exception as e:
+                print(f"Erro ao checar item aprendido: {e}")
 
         if not dados:
             if not nomes_cardapio:
@@ -353,7 +932,9 @@ def _montar_itens_pedido(itens, tipo_entrega):
     # — só quando é entrega de verdade.
     taxa_entrega = 0.0
     if tipo_entrega == "ENTREGA":
-        bot_cfg = obter_config_bot()
+        # Config já lida uma vez por mensagem em get_openai_response e
+        # repassada — só cai numa leitura nova se chamada de fora.
+        bot_cfg = bot_cfg or obter_config_bot()
         taxa_entrega = float(bot_cfg.get("taxa_entrega") or 0)
 
     valor_total_final = round(valor_itens + taxa_entrega, 2)
@@ -370,7 +951,7 @@ def _montar_itens_pedido(itens, tipo_entrega):
         "total_pontos": total_pontos
     }
 
-def calcular_pedido(id_usuario, itens, tipo_entrega=None):
+def calcular_pedido(id_usuario, itens, tipo_entrega=None, bot_cfg=None):
     """Prévia do pedido (não grava nada) — mostra pro cliente exatamente os
     itens reconhecidos, a taxa de entrega e o total ANTES de confirmar de
     vez com 'registrar_pedido'. Existe pra evitar o bot fechar um pedido
@@ -385,7 +966,7 @@ def calcular_pedido(id_usuario, itens, tipo_entrega=None):
     valor e o pedido de verdade sai com outro."""
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
     try:
-        montado = _montar_itens_pedido(itens, tipo_entrega)
+        montado = _montar_itens_pedido(itens, tipo_entrega, bot_cfg)
         if not montado["lista_itens_tsx"]:
             return json.dumps({
                 "status": "erro",
@@ -423,7 +1004,7 @@ def calcular_pedido(id_usuario, itens, tipo_entrega=None):
         print(f"ERRO ao calcular pedido: {e}")
         return json.dumps({"status": "erro", "motivo": "Erro interno."})
 
-def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, tipo_entrega=None, telefone=None, id_usuario_cache=None, bairro=None):
+def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, observacao: str, endereco_completo: str, forma_pagamento: str, tipo_entrega=None, telefone=None, id_usuario_cache=None, bairro=None, bot_cfg=None):
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
 
     # A IA às vezes manda a string literal "None" (não o valor nulo de
@@ -435,7 +1016,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
 
     # Segunda checagem de horário: cobre o caso raro de a conversa ter
     # começado antes de fechar e só terminar (chamar essa função) depois.
-    bot_cfg_ferias = obter_config_bot()
+    bot_cfg_ferias = bot_cfg or obter_config_bot()
     em_ferias, msg_ferias = verificar_ferias(bot_cfg_ferias)
     if em_ferias:
         return json.dumps({"status": "erro", "motivo": msg_ferias})
@@ -464,10 +1045,30 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
             .where('status', '==', 'PENDENTE_PREPARO') \
             .order_by('hora_pedido', direction=firestore.Query.DESCENDING) \
             .limit(3).get(timeout=10)
+        try:
+            estimativa_ia = float(valor_total or 0)
+        except (TypeError, ValueError):
+            estimativa_ia = 0.0
         for doc in recentes:
             dpedido = doc.to_dict()
             hp = dpedido.get('hora_pedido')
-            if hp and (agora_br - hp).total_seconds() < 300 and abs(float(dpedido.get('valor_total') or 0) - float(valor_total or 0)) < 0.01:
+            if not hp or (agora_br - hp).total_seconds() >= 300:
+                continue
+            # BUG CORRIGIDO: antes comparava só com 'valor_total' gravado, que
+            # INCLUI a taxa de entrega — mas a descrição da ferramenta manda a
+            # IA passar "só os itens, sem taxa". Em qualquer entrega com taxa
+            # > 0 a trava nunca batia e o pedido duplicava justamente no caso
+            # mais comum. Agora compara com 'valor_itens' (gravado a partir
+            # desta versão) e, por compatibilidade com pedidos antigos sem
+            # esse campo, também com 'valor_total'.
+            candidatos = []
+            for chave in ('valor_itens', 'valor_total'):
+                try:
+                    if dpedido.get(chave) is not None:
+                        candidatos.append(float(dpedido.get(chave)))
+                except (TypeError, ValueError):
+                    pass
+            if any(abs(c - estimativa_ia) < 0.01 for c in candidatos):
                 return json.dumps({
                     "status": "ok",
                     "pedido_id": doc.id,
@@ -510,7 +1111,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
                     valor_itens_cache = cache.get("valor_itens", 0)
                     taxa_entrega_atual = 0.0
                     if tipo_entrega_cache == "ENTREGA":
-                        taxa_entrega_atual = float(obter_config_bot().get("taxa_entrega") or 0)
+                        taxa_entrega_atual = float(bot_cfg_ferias.get("taxa_entrega") or 0)
                     montado = {
                         "lista_itens_tsx": cache["itens"],
                         "itens_nao_reconhecidos": [],
@@ -526,7 +1127,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
                 print(f"Erro ao reaproveitar ultimo_calculo: {e}")
 
         if montado is None:
-            montado = _montar_itens_pedido(itens, tipo_entrega)
+            montado = _montar_itens_pedido(itens, tipo_entrega, bot_cfg_ferias)
         lista_itens_tsx = montado["lista_itens_tsx"]
         itens_nao_reconhecidos = montado["itens_nao_reconhecidos"]
         itens_indisponiveis = montado["itens_indisponiveis"]
@@ -561,6 +1162,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
             "telefone_cliente": str(wa_id),
             "usuario_id": usuario_id,
             "valor_total": valor_total_final,
+            "valor_itens": montado["valor_itens"],   # subtotal sem taxa (trava de duplicidade compara com isto)
             "taxa_entrega": taxa_entrega
         }
         batch.set(pedido_ref, dados_pedido)
@@ -759,6 +1361,51 @@ def salvar_historico_firestore(wa_id, role, content, limite=None):
     except Exception as e:
         print(f"Erro ao salvar histórico: {e}")
 
+def registrar_log_conversa(wa_id, origem, mensagem_cliente, resposta_final, modelo,
+                           ferramentas=None, usage=None, duracao_s=None, erro=None,
+                           chamadas_ia=0, observacao=None):
+    """Log APPEND-ONLY de cada turno, na coleção 'conversas_log' — um
+    documento por mensagem do cliente, nunca sobrescrito nem cortado.
+
+    Existe porque 'historico_conversas' guarda só as últimas N mensagens
+    por cliente (é contexto pra IA, não registro): a conversa de ontem some
+    quando o cliente pede de novo hoje. Sem este log não há como montar um
+    conjunto de teste com conversas reais, nem medir custo por conversa
+    (tokens) ou taxa de erro por tipo de ferramenta. Best-effort: nunca
+    derruba o atendimento se falhar."""
+    try:
+        doc = {
+            "wa_id": str(wa_id),
+            "origem": origem,
+            "mensagem_cliente": mensagem_cliente,
+            "resposta_final": resposta_final,
+            "modelo": modelo,
+            "ferramentas": ferramentas or [],
+            "chamadas_ia": chamadas_ia,
+            "tokens_entrada": (usage or {}).get("prompt_tokens", 0),
+            "tokens_saida": (usage or {}).get("completion_tokens", 0),
+            "duracao_s": round(duracao_s, 2) if duracao_s is not None else None,
+            "erro": erro,
+            "observacao": observacao,
+            "criado_em": datetime.now(timezone.utc),
+        }
+        db.collection("conversas_log").add(doc, timeout=10)
+    except Exception as e:
+        print(f"Erro ao gravar conversas_log: {e}")
+
+
+def _somar_usage(acumulado, response):
+    """Soma o 'usage' de uma resposta da OpenAI no dict acumulado (in-place)."""
+    try:
+        u = getattr(response, "usage", None)
+        if u:
+            acumulado["prompt_tokens"] = acumulado.get("prompt_tokens", 0) + int(getattr(u, "prompt_tokens", 0) or 0)
+            acumulado["completion_tokens"] = acumulado.get("completion_tokens", 0) + int(getattr(u, "completion_tokens", 0) or 0)
+    except Exception:
+        pass
+    return acumulado
+
+
 def _normalizar_termo(s):
     """Chave de comparação exata pra aprendizado (bairro/item): minúsculo,
     sem espaço sobrando, sem acento — pra 'Passos' e 'passos ' caírem na
@@ -861,7 +1508,7 @@ def consultar_sabor(sabor_cliente):
     print(f"DEBUG: Nenhuma pizza parecida com '{sabor_cliente}' foi encontrada.")
     return {"status": "indisponivel"}
 
-def verificar_bairro_entrega(bairro_cliente):
+def verificar_bairro_entrega(bairro_cliente, bot_cfg=None):
     """Confere se um bairro citado pelo cliente está na lista cadastrada em
     Configurações do Bot, usando busca aproximada (tolera erro de digitação/
     abreviação) — mesma lógica do consultar_sabor, mas pra bairro.
@@ -873,11 +1520,13 @@ def verificar_bairro_entrega(bairro_cliente):
     if not termo:
         return {"status": "nao_encontrado"}
 
+    bot_cfg = bot_cfg or obter_config_bot()
+
     try:
         aprendido = db.collection("bairros_aprendizado").document(_normalizar_termo(termo)).get()
         if aprendido.exists:
             dados_aprendido = aprendido.to_dict()
-            bot_cfg_taxa = obter_config_bot().get("taxa_entrega") or 0
+            bot_cfg_taxa = bot_cfg.get("taxa_entrega") or 0
             if dados_aprendido.get("atende"):
                 return {
                     "status": "atende",
@@ -888,7 +1537,6 @@ def verificar_bairro_entrega(bairro_cliente):
     except Exception as e:
         print(f"Erro ao checar bairro aprendido: {e}")
 
-    bot_cfg = obter_config_bot()
     bairros = [str(b).strip() for b in (bot_cfg.get("bairros_entrega") or []) if str(b).strip()]
 
     if not bairros:
@@ -991,6 +1639,163 @@ def is_modo_manual(wa_id):
         print(f"Erro ao checar modo manual: {e}")
         return False
 
+_RE_CONFIRMACAO_CLIENTE = re.compile(
+    r"^\s*(sim|s|ss|pode|pode sim|pode ser|pode fechar|fecha|fechar|confirma|confirmo|confirmado|confere|isso|isso mesmo|"
+    r"ok|okay|certo|correto|beleza|blz|show|perfeito|claro|manda|vai|bora|pode mandar|é isso|e isso|tá certo|ta certo|"
+    r"tá|ta|tudo certo|está certo|esta certo|pode confirmar|pode registrar|👍|✅)\s*[.!]*\s*$", re.I)
+
+
+def _cliente_confirmou(texto):
+    """Mensagem curta de confirmação ('sim', 'pode fechar', 'confere'...)."""
+    return bool(_RE_CONFIRMACAO_CLIENTE.match(_normalizar_termo(texto) if texto else ""))
+
+
+def _ultima_resposta_mostrou_total(historico):
+    """A última fala do bot exibiu o total do pedido ("Total: R$ 31,00")?
+    Um "sim" do cliente logo depois é "pode fechar", mesmo que o bot tenha
+    esquecido de perguntar (mini: passou a chave PIX e parou)."""
+    for m in reversed(historico or []):
+        if m.get("role") == "assistant":
+            t = _normalizar_termo(m.get("content") or "")
+            return "total" in t and "r$" in t
+    return False
+
+
+def _ultima_resposta_pediu_confirmacao(historico):
+    """A última fala do bot perguntou se pode fechar? (é o contexto em que
+    um 'sim' do cliente significa 'fecha o pedido')."""
+    for m in reversed(historico or []):
+        if m.get("role") == "assistant":
+            t = _normalizar_termo(m.get("content") or "")
+            # Radicais, não palavras: "posso seguir com o FECHAMENTO?" não
+            # continha "fechar" e o "sim" seguinte deixava de fechar.
+            return any(rad in t for rad in ("fech", "confer", "confirm", "finaliz", "conclu", "registr")) \
+                and "?" in (m.get("content") or "")
+    return False
+
+
+_RE_SLOT_RETIRADA = re.compile(r"^(retirada|retirar|retiro|vou retirar|pra retirar|para retirar|busco|vou buscar|pego ai|pego aí|balcao|balcão|no balcao|no balcão)$")
+_RE_SLOT_ENTREGA = re.compile(r"^(entrega|entregar|pra entregar|para entregar|para entrega|pra entrega|delivery|entregue|quero entrega)$")
+_RE_SLOT_PAGAMENTO = re.compile(r"^(no |em |vou pagar no |vou pagar em |pago no |pago em )?(pix|dinheiro|cartao|cartão|credito|crédito|debito|débito|cartao de credito|cartão de crédito|cartao de debito|cartão de débito|maquininha)$")
+
+
+_PALAVRAS_PAGAMENTO = {"PIX": ("pix",),
+                       "DINHEIRO": ("dinheiro", "especie", "troco", "grana"),
+                       "CARTAO": ("cartao", "credito", "debito", "maquininha", "maquina")}
+
+
+def _cliente_mencionou_pagamento(forma, mensagem_atual, historico):
+    """A forma de pagamento apareceu em alguma fala do CLIENTE? O gpt-4o-mini
+    chamava definir_pagamento("DINHEIRO") sem o cliente ter dito nada — o
+    resumo saía com pagamento inventado e, quando o cliente corrigia ("pix"),
+    a conversa perdia o fio e o pedido não fechava."""
+    chave = _normalizar_termo(forma).upper().replace("Ã", "A")
+    forma_norm = next((v for k, v in FORMAS_PAGAMENTO.items() if _normalizar_termo(k).upper() in chave), None)
+    grupo = _PALAVRAS_PAGAMENTO.get((forma_norm or "").replace("Ã", "A"))
+    if not grupo:
+        return True   # forma inválida: deixa rascunho_definir_pagamento devolver o erro certo
+    falas = [m.get("content") or "" for m in (historico or []) if m.get("role") == "user"] + [mensagem_atual or ""]
+    texto = " " + _normalizar_termo(" ".join(falas)) + " "
+    return any(p in texto for p in grupo)
+
+
+_PALAVRAS_GENERICAS_ITEM = {"de", "da", "do", "com", "e", "sem", "lata", "ml", "350ml", "600ml", "zero", "queijo", "carne", "frango"}
+
+
+def _tokens_item(it):
+    """Palavras distintivas do nome de um item (sem acento, sem genéricas)."""
+    nome = _normalizar_termo(f"{it.get('nome') or ''} {it.get('nome_exibicao') or ''}")
+    return {t for t in re.split(r"[^a-z0-9]+", nome) if len(t) >= 4 and t not in _PALAVRAS_GENERICAS_ITEM}
+
+
+def _itens_mencionados(mensagem, cardapio):
+    """ids dos itens do cardápio cujo nome (palavra distintiva) aparece na mensagem."""
+    m = " " + _normalizar_termo(mensagem or "") + " "
+    toks = set(re.split(r"[^a-z0-9]+", m))
+    return {it["id"] for it in (cardapio or []) if _tokens_item(it) & toks}
+
+
+_RE_PARECE_ENDERECO = re.compile(r"^(?=.*\d)(?=.*[a-z]{3,}).{5,80}$")
+
+
+def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
+    """Resposta de uma palavra a uma pergunta do fluxo ("retirada", "pix",
+    "dinheiro") não precisa da IA pra virar estado — e o gpt-4o-mini às
+    vezes responde "a retirada está confirmada" SEM chamar definir_entrega,
+    deixando o rascunho incompleto. Só age com carrinho não vazio e mensagem
+    curta exatamente igual a um slot. Devolve a lista de eventos pro log."""
+    eventos = []
+    m = _normalizar_termo(mensagem)
+    if not m or len(m) > 80:
+        return eventos
+    r = obter_rascunho(wa_id)
+    if not r.get("itens"):
+        return eventos
+    if len(m) > 30 and not _RE_PARECE_ENDERECO.match(m):
+        return eventos
+    if _RE_SLOT_RETIRADA.match(m):
+        res = rascunho_definir_entrega(wa_id, "RETIRADA", None, None, bot_cfg)
+        eventos.append({"nome": "definir_entrega[servidor]", "args": {"tipo": "RETIRADA"}, "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})
+    elif _RE_SLOT_ENTREGA.match(m) and r.get("tipo_entrega") != "ENTREGA":
+        res = rascunho_definir_entrega(wa_id, "ENTREGA", None, None, bot_cfg)
+        eventos.append({"nome": "definir_entrega[servidor]", "args": {"tipo": "ENTREGA"}, "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})
+    elif _RE_SLOT_PAGAMENTO.match(m):
+        forma = _RE_SLOT_PAGAMENTO.match(m).group(2)
+        res = rascunho_definir_pagamento(wa_id, forma, bot_cfg)
+        if res.get("status") == "ok":
+            eventos.append({"nome": "definir_pagamento[servidor]", "args": {"forma": forma}, "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})
+    elif (r.get("tipo_entrega") == "ENTREGA" and not r.get("bairro") and len(m) <= 40
+          and not any(ch.isdigit() for ch in m) and not _cliente_confirmou(m)
+          and not _itens_mencionados(mensagem, carregar_cardapio())
+          and verificar_bairro_entrega(mensagem, bot_cfg).get("status") == "atende"):
+        # Bot perguntou "qual o bairro?", cliente respondeu "San Genaro" e o
+        # mini chamou verificar_bairro_entrega (consulta) em vez de
+        # definir_entrega → bairro nunca entrava no rascunho (harness run 7).
+        res = rascunho_definir_entrega(wa_id, "ENTREGA", str(mensagem).strip(), None, bot_cfg)
+        if res.get("status") == "ok" and obter_rascunho(wa_id).get("bairro"):
+            eventos.append({"nome": "definir_entrega[servidor]", "args": {"tipo": "ENTREGA", "bairro": str(mensagem).strip()},
+                            "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})
+    elif (r.get("tipo_entrega") == "ENTREGA" and r.get("bairro") and not r.get("endereco")
+          and _RE_PARECE_ENDERECO.match(m) and not _cliente_confirmou(m)
+          and not _itens_mencionados(mensagem, carregar_cardapio())):
+        # Bot pediu "rua e número", cliente mandou "Av. Brasil, 45" e o
+        # gpt-4o-mini respondia "Perfeito, seu endereço é..." SEM chamar
+        # definir_entrega → fechar_pedido caía em "falta endereco" (harness
+        # run 5, dois casos). Só age no ponto exato do fluxo (entrega + bairro
+        # já definidos, endereço vazio) e se a mensagem não cita item do cardápio.
+        res = rascunho_definir_entrega(wa_id, "ENTREGA", None, str(mensagem).strip(), bot_cfg)
+        if res.get("status") == "ok" and obter_rascunho(wa_id).get("endereco"):
+            eventos.append({"nome": "definir_entrega[servidor]", "args": {"tipo": "ENTREGA", "endereco": str(mensagem).strip()},
+                            "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})
+    return eventos
+
+
+def _soa_como_confirmacao(texto):
+    """Heurística: o texto final da IA afirma que o pedido foi registrado?
+    Avaliada FRASE a frase (não no texto inteiro): antes, um único "?" em
+    qualquer lugar liberava o texto todo — "Pedido registrado! Quer mais
+    alguma coisa?" passava batido. Frases com "equipe" são ignoradas
+    ("vou confirmar com a equipe" é o fluxo legítimo de escalação de
+    bairro, não uma confirmação de pedido). Função pura: sem rede, sem
+    Firestore — coberta por tests/test_unidade.py."""
+    if not texto:
+        return False
+    # Só afirmações de que o PEDIDO foi registrado/fechado. "A retirada está
+    # confirmada" ou "pagamento confirmado" NÃO contam — o radical "confirm"
+    # solto comeu turnos legítimos (inclusive o que mostrava a chave PIX).
+    radicais = ("registr", "anotei", "anotad", "pedido feito", "pedido pronto", "pedido fechado", "pedido foi fechado",
+                "pedido finalizado", "pedido foi finalizado", "pedido confirmado", "pedido foi confirmado",
+                "pedido está confirmado", "pedido esta confirmado", "finalizei", "fechei o pedido", "fechamos o pedido",
+                "pedido concluído", "pedido concluido", "pedido foi concluído", "pedido foi concluido")
+    for frase in re.split(r'(?<=[.!?\n])\s+', texto):
+        f = frase.lower()
+        if "?" in f or "equipe" in f or "pedido" not in f:
+            continue
+        if any(r in f for r in radicais):
+            return True
+    return False
+
+
 # --- LÓGICA AGENTE OPENAI ---
 def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     import re
@@ -1072,7 +1877,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         instrucao_nome = f"Chame o cliente só pelo primeiro nome, '{primeiro_nome(nome_cliente)}' (nunca o nome completo, soa mais natural). NÃO pergunte o nome dele novamente."
     else:
         contexto_identificacao = "CLIENTE NOVO: Nome desconhecido."
-        instrucao_nome = "Descubra o nome do cliente antes de finalizar o pedido."
+        instrucao_nome = ("Cliente sem cadastro. Se ele disser o nome em QUALQUER momento — inclusive respondendo "
+                          "só 'Murilo' ou se apresentando — chame 'definir_nome' NA HORA. Primeiro nome basta; NUNCA "
+                          "peça 'nome completo'. Se ainda não souber na hora do resumo, pergunte junto com a "
+                          "confirmação ('Confere? Posso fechar? E me diz seu nome pra anotar'). Se ele não quiser "
+                          "informar, feche mesmo assim — o nome não é obrigatório.")
 
     if bot_cfg.get("divulgar_app"):
         instrucao_divulgar_app = (
@@ -1084,108 +1893,59 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         # baixar nada que não existe de verdade ainda.
         instrucao_divulgar_app = ""
 
-    # 4. Ferramentas (Tools) - Mantive igual
+    # 4. Ferramentas (Fase 4: operações sobre o RASCUNHO do pedido)
+    def _f(nome, descricao, props=None, required=None):
+        f = {"name": nome, "description": descricao}
+        if props is not None:
+            f["parameters"] = {"type": "object", "properties": props, "required": required or []}
+        return {"type": "function", "function": f}
+
+    P_ITEM = {"type": "string", "description": "Código entre colchetes do item no CARDÁPIO do prompt. Nunca o nome."}
     tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "calcular_pedido",
-                "description": "Calcula uma PRÉVIA do pedido (itens reconhecidos, taxa de entrega, total) SEM registrar nada. Use pra mostrar o resumo e pedir confirmação do cliente antes de chamar 'registrar_pedido' de vez.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "itens": {
-                            "type": "array",
-                            "description": "Um item por entrada — nunca junte vários itens numa frase só.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "nome_produto": {"type": "string", "description": "Nome do item exatamente como veio de 'consultar_sabor' ou 'listar_cardapio'."},
-                                    "quantidade": {"type": "integer"}
-                                },
-                                "required": ["nome_produto", "quantidade"]
-                            }
-                        },
-                        "tipo_entrega": {
-                            "type": "string",
-                            "enum": ["ENTREGA", "RETIRADA"],
-                            "description": "OBRIGATÓRIO e explícito — nunca deduza pelo texto do endereço. Se ainda não sabe se é entrega ou retirada, não chame esta função ainda."
-                        }
-                    },
-                    "required": ["itens", "tipo_entrega"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "registrar_pedido",
-                "description": "Registra o pedido final após coletar todos os dados. O valor total (incluindo taxa de entrega) é calculado pelo sistema, não pela IA.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "nome_cliente": {"type": "string"},
-                        "itens": {
-                            "type": "array",
-                            "description": "Um item por entrada — nunca junte vários itens numa frase só.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "nome_produto": {"type": "string", "description": "Nome do item exatamente como veio de 'consultar_sabor' ou 'listar_cardapio'."},
-                                    "quantidade": {"type": "integer"}
-                                },
-                                "required": ["nome_produto", "quantidade"]
-                            }
-                        },
-                        "valor_total": {"type": "number", "description": "Sua estimativa do total (só os itens, sem taxa) — o sistema recalcula e pode corrigir."},
-                        "telefone": {"type": "string"},
-                        "tipo_entrega": {
-                            "type": "string",
-                            "enum": ["ENTREGA", "RETIRADA"],
-                            "description": "OBRIGATÓRIO e explícito — nunca deduza pelo texto do endereço, mesmo que pareça óbvio."
-                        },
-                        "endereco_completo": {"type": "string", "description": "Se for ENTREGA: rua e número de verdade (não só o bairro). Se for RETIRADA, pode deixar vazio ou escrever 'Retirada no balcão'."},
-                        "bairro": {"type": "string", "description": "Se for ENTREGA: o nome do bairro exatamente como 'verificar_bairro_entrega' confirmou (campo \"bairro\" do retorno) — fica separado do endereço pro painel/impressão mostrarem sozinho. Deixe vazio se for RETIRADA."},
-                        "forma_pagamento": {"type": "string"},
-                        "observacao": {"type": "string"}
-                    },
-                    "required": ["nome_cliente", "itens", "valor_total", "tipo_entrega", "endereco_completo", "forma_pagamento"]
-                }
-            }
-        },
-        {"type": "function", "function": {"name": "listar_cardapio", "description": "Lista todos os itens de comida do cardápio (sem bebidas), organizados por categoria, com preços."}},
-        {"type": "function", "function": {"name": "listar_bebidas", "description": "Lista só as bebidas disponíveis, com preços."}},
-        {
-            "type": "function",
-            "function": {
-                "name": "consultar_sabor",
-                "description": "Consulta disponibilidade, preço e ingredientes de um item específico do cardápio pelo nome.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"sabor_cliente": {"type": "string"}},
-                    "required": ["sabor_cliente"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "verificar_bairro_entrega",
-                "description": "Verifica se a loja entrega em um bairro/região que o cliente mencionou.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"bairro_cliente": {"type": "string"}},
-                    "required": ["bairro_cliente"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "consultar_meu_pedido",
-                "description": "Busca o pedido mais recente que este cliente já fez (itens, valor total, forma de pagamento, status). Use quando ele perguntar sobre um pedido já realizado — NUNCA use 'registrar_pedido' pra responder esse tipo de pergunta."
-            }
-        }
+        _f("adicionar_item",
+           "Adiciona um item ao pedido em andamento (o servidor guarda o carrinho). Chame IMEDIATAMENTE quando o cliente "
+           "pedir um item, um por chamada. Adicione SOMENTE o que o cliente pediu: se o nome dito bate com o nome exato de um item "
+           "(ex.: 'pastel de carne'), é esse — NÃO adicione também os parecidos ('pastel de carne e queijo'). Se ficar em dúvida "
+           "entre dois, pergunte qual em vez de adicionar os dois. Devolve o pedido inteiro atualizado com totais.",
+           {"item_id": P_ITEM, "quantidade": {"type": "integer", "minimum": 1}}, ["item_id", "quantidade"]),
+        _f("remover_item",
+           "Remove um item do pedido (ou diminui a quantidade, se 'quantidade' for informada).",
+           {"item_id": P_ITEM, "quantidade": {"type": "integer", "description": "Quantas unidades tirar. Omita pra remover o item todo."}},
+           ["item_id"]),
+        _f("definir_entrega",
+           "Define se é ENTREGA ou RETIRADA. Para ENTREGA informe o bairro (o servidor confere se atendemos) e, quando o cliente "
+           "passar, o endereço completo com rua e número. Pode ser chamada mais de uma vez (ex.: primeiro só o bairro, depois o endereço).",
+           {"tipo": {"type": "string", "enum": ["ENTREGA", "RETIRADA"]},
+            "bairro": {"type": "string", "description": "Bairro dito pelo cliente (só ENTREGA)."},
+            "endereco": {"type": "string", "description": "Rua e número (e complemento). Só ENTREGA. Nunca só o bairro."}},
+           ["tipo"]),
+        _f("definir_pagamento", "Define a forma de pagamento: PIX, CARTÃO ou DINHEIRO. Se for PIX, a resposta traz a chave.",
+           {"forma": {"type": "string"}}, ["forma"]),
+        _f("definir_nome",
+           "Guarda o nome do cliente. Chame ASSIM QUE ele disser o nome, em qualquer ponto da conversa (ex.: responde "
+           "'Murilo', ou 'aqui é a Ana'). Primeiro nome basta.",
+           {"nome": {"type": "string"}}, ["nome"]),
+        _f("definir_observacao", "Observação do cliente sobre o pedido (ex.: 'sem cebola', 'troco pra 50').",
+           {"observacao": {"type": "string"}}, ["observacao"]),
+        _f("ver_resumo",
+           "Devolve o pedido completo com itens, taxa e TOTAL calculados pelo servidor, e o que ainda falta. OBRIGATÓRIO antes de "
+           "fechar_pedido: mostre esse resumo ao cliente e pergunte se pode fechar. Use também sempre que for citar valores."),
+        _f("fechar_pedido",
+           "Registra o pedido DE VERDADE a partir do rascunho. Sem parâmetros. Chame SÓ depois que o cliente confirmar o resumo "
+           "explicitamente ('sim', 'pode fechar'). Se devolver status 'erro', leia o 'motivo' e resolva com o cliente (uma pergunta por vez)."),
+        _f("item_nao_encontrado",
+           "Chame quando o cliente pedir algo que NÃO está no cardápio nem nos apelidos (ex.: 'pastel de salsicha' quando não existe). "
+           "Avisa a equipe pra cadastrar um apelido. Depois diga ao cliente que não temos e ofereça a categoria mais próxima.",
+           {"nome_pedido": {"type": "string", "description": "Exatamente como o cliente escreveu."}}, ["nome_pedido"]),
+        _f("detalhar_item",
+           "Ingredientes e detalhes de UM item do cardápio, pelo código. Use quando o cliente perguntar 'o que vem', 'tem cebola?', "
+           "'é assado ou frito?'. Não use pra preço ou disponibilidade — isso já está no CARDÁPIO.",
+           {"item_id": P_ITEM}, ["item_id"]),
+        _f("verificar_bairro_entrega",
+           "Só pra responder 'vocês entregam no bairro X?' quando o cliente ainda NÃO está fechando pedido. No fechamento use definir_entrega.",
+           {"bairro_cliente": {"type": "string"}}, ["bairro_cliente"]),
+        _f("consultar_meu_pedido",
+           "Pedido mais recente JÁ REGISTRADO deste cliente (itens, valor, status). Use quando ele perguntar de um pedido já feito."),
     ]
 
     nome_atendente = bot_cfg.get("nome_atendente") or BOT_CONFIG_DEFAULTS["nome_atendente"]
@@ -1195,6 +1955,19 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     chave_pix = (bot_cfg.get("chave_pix") or "").strip() or "consulte a equipe"
     instrucoes_extras = bot_cfg.get("instrucoes_extras") or ""
     cidade_atendida = bot_cfg.get("cidade_atendida") or ""
+    # Lista de bairros no prompt: sem ela o gpt-4o-mini respondia "entregam
+    # no São Genaro?" de cabeça ("só entregamos em <cidade>") sem chamar
+    # verificar_bairro_entrega. Com a lista à vista ele não precisa adivinhar;
+    # a função continua valendo pra nomes fora da lista (fuzzy + aprendizado).
+    _bairros_cfg = [str(b).strip() for b in (bot_cfg.get("bairros_entrega") or []) if str(b).strip()]
+    if _bairros_cfg:
+        _taxa_cfg = bot_cfg.get("taxa_entrega") or 0
+        bairros_texto = (f"BAIRROS ONDE ENTREGAMOS (taxa R$ {float(_taxa_cfg):.2f}): {', '.join(_bairros_cfg)}. "
+                         "Cliente perguntou de um bairro parecido com um desses (acento/grafia diferente) → é esse, confirme. "
+                         "Bairro que NÃO está na lista → chame verificar_bairro_entrega antes de responder; nunca diga "
+                         "'não entregamos' de cabeça.")
+    else:
+        bairros_texto = ""
     # Telefone de contato da loja — mesma fonte que o painel usa (Config >
     # Estabelecimento). Sem isso, quando o cliente pede "o contato" a IA não
     # tinha nenhum número de verdade pra dar e ACABAVA INVENTANDO um número
@@ -1206,6 +1979,24 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     except Exception:
         telefone_contato = None
     telefone_contato = str(telefone_contato or "").strip() or "não tenho esse número aqui, peça pra equipe confirmar"
+
+    # 5. Cardápio pro prompt (Fase 3) — uma leitura por mensagem, com cache.
+    ck("antes carregar_cardapio")
+    cardapio_atual = carregar_cardapio()
+    cardapio_texto = montar_cardapio_prompt(cardapio_atual)
+    ck("depois carregar_cardapio")
+
+    # Slots óbvios ("retirada", "pix", "dinheiro") registrados pelo servidor
+    # ANTES da IA — o prompt já reflete, e a IA não precisa chamar a função.
+    eventos_servidor = _preencher_slots_obvios(id_usuario, prompt, bot_cfg)
+
+    # Estado do pedido em andamento (Fase 4) — uma leitura por mensagem.
+    rascunho_inicio_turno = _aplicar_nome_identificado(obter_rascunho(id_usuario), nome_cliente)
+    rascunho_texto = rascunho_para_prompt(rascunho_inicio_turno, bot_cfg)
+    if eventos_servidor:
+        rascunho_texto += "\n  (o servidor acabou de registrar, a partir desta mensagem do cliente: " + \
+            ", ".join(e["nome"].replace("[servidor]", "") + "=" + json.dumps(e["args"], ensure_ascii=False) for e in eventos_servidor) + \
+            " — NÃO chame essa função de novo; siga pro próximo passo)"
 
     # 5. Prompt Otimizado (Limpo e Direto)
     system_prompt = f"""
@@ -1220,50 +2011,35 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     este valor, nunca o TELEFONE_DO_CLIENTE acima, nunca invente outro número,
     nem parecido): {telefone_contato}
     {f"Cidade onde a loja entrega: {cidade_atendida} (só entrega dentro dessa cidade, nenhuma outra)." if cidade_atendida else ""}
+    {bairros_texto}
     {aviso_atencao_antiga}
+
+    {rascunho_texto}
+
+    --- CARDÁPIO DE AGORA (lido do sistema nesta mensagem; código entre colchetes) ---
+{cardapio_texto}
     
     --- SUAS DIRETRIZES ---
-    0. REGRA MAIS IMPORTANTE DE TODAS — PROIBIDO INVENTAR:
-       - NUNCA ofereça, sugira ou confirme QUALQUER produto, sabor, categoria,
-         complemento ou preço que não veio literalmente do retorno de uma
-         função chamada NESTA resposta. Isso vale mesmo que o item pareça
-         óbvio ou comum de existir numa lanchonete/pizzaria (ex.: molho,
-         sobremesa, refrigerante de alguma marca) — se não veio da função,
-         não existe pra você.
-       - Você NÃO sabe o cardápio, os preços nem os bairros atendidos de cor —
-         mesmo que você mesmo tenha mostrado essa informação antes NESTA MESMA
-         conversa. Sua memória do que já foi dito pode estar errada ou
-         desatualizada (o cardápio muda).
-       - ORDEM OBRIGATÓRIA: sempre que o cliente pedir/perguntar sobre
-         QUALQUER produto, sabor, complemento, molho, categoria (ex.:
-         "molhos", "sobremesas") ou bairro — seja item específico ou pedido
-         genérico — primeiro CHAME a função correspondente ('consultar_sabor',
-         'listar_cardapio', 'listar_bebidas' ou 'verificar_bairro_entrega') e
-         só DEPOIS de ver o resultado dela é que você responde se tem ou não.
-         Nunca responda antes de chamar a função, nem só depois de já ter
-         começado a formular a resposta. Faça isso mesmo que pareça
-         repetitivo, mesmo que você "ache" que já sabe a resposta. Se nenhuma
-         função existente cobrir bem o que foi pedido (ex.: pergunta sobre
-         algo que não é sabor nem bebida nem bairro), chame 'listar_cardapio'
-         mesmo assim — ele traz tudo que existe, e se o item não estiver lá,
-         é porque não existe.
-       - NUNCA diga "não temos", "não encontrei" ou "não entregamos" — nem
-         diga "temos" — sem antes ter chamado a função e recebido o
-         resultado dela nesta mesma resposta.
-       - Responda preços e disponibilidade APENAS com o que a função retornou
-         NESTA resposta — isso vale mesmo que você (ou o histórico desta
-         MESMA conversa, mais acima) já tenha listado o cardápio antes. Um
-         item que apareceu há 5 mensagens pode ter esgotado nesse meio
-         tempo. NUNCA junte/complete a lista de itens com nomes que vieram
-         de uma chamada de função anterior — cada listagem de cardápio deve
-         conter SÓ os itens da chamada mais recente.
-       - Se o cliente perguntar por uma categoria inteira que não existe no
-         retorno da função (ex.: "molhos", "sobremesas", "combos" — categoria
-         nenhuma, não um item específico) — NUNCA invente uma lista de itens
-         e preços pra essa categoria. Diga claramente que não tem isso no
-         cardápio. Uma lista de produtos com preço que "soa plausível" mas
-         não veio de nenhuma chamada de função é uma mentira, mesmo que os
-         itens pareçam reais.
+    0. O CARDÁPIO É A ÚNICA VERDADE — PROIBIDO INVENTAR:
+       - O bloco "CARDÁPIO DE AGORA" acima foi lido do sistema NESTA mensagem
+         e é a única fonte de produtos, preços e disponibilidade. Se um
+         produto, sabor, categoria, complemento ou molho não está lá, ele
+         NÃO EXISTE — mesmo que seja comum numa lanchonete, mesmo que o
+         cliente afirme que já comprou, mesmo que apareça em mensagens
+         antigas desta conversa (o cardápio muda; vale só o de agora).
+       - Item marcado "(ESGOTADO hoje)": existe, mas está em falta — diga
+         isso e ofereça outro da mesma categoria. Não aceite no pedido.
+       - Cliente pede algo que não está no cardápio (ex.: "pastel de
+         salsicha" quando só existe "Salsicha" avulsa e "Pastel de Carne"):
+         diga que não tem ESSE item e mostre as opções da categoria mais
+         próxima. NUNCA confirme com o nome que o cliente usou se o nome
+         real for outro — fale sempre o nome como está no cardápio.
+       - Preços: só os do cardápio, copiados exatamente. Nunca some totais
+         de cabeça (o servidor calcula em 'ver_resumo').
+       - Categoria que não existe no cardápio ("sobremesas", "combos",
+         "molhos"): diga que não tem, sem inventar lista.
+       - Em 'adicionar_item'/'remover_item', identifique o item pelo CÓDIGO
+         entre colchetes ("item_id"), nunca pelo nome.
 
     1. IDENTIFICAÇÃO: {instrucao_nome}
        {instrucao_divulgar_app}
@@ -1272,241 +2048,76 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          — nunca o nome completo, soa mais natural e menos formal.
 
     2. APRESENTAÇÃO DE PRODUTOS:
-       - Use 'consultar_sabor' SÓ quando o cliente disser o nome de um prato
-         específico (ex.: "tem pastel de queijo?", "quanto é a esfirra de
-         carne?"). Essa função compara o nome com os itens um a um — se o
-         cliente perguntar de forma genérica/por categoria (ex.: "tem
-         salgado assado?", "tem esfirra?", "tem pastel?"), NÃO existe item
-         chamado literalmente "salgado assado", então 'consultar_sabor' vai
-         sempre dizer que não achou, mesmo se a categoria existir. Nesses
-         casos genéricos use 'listar_cardapio' e veja se aquela categoria
-         aparece no resultado — se aparecer, responda com os itens dela; se
-         não aparecer, aí sim diga que não tem no momento.
-       - Use 'listar_cardapio' para o menu geral, promoções, ou qualquer
-         pergunta por categoria/tipo de produto.
-       - Use 'listar_bebidas' só quando o cliente pedir bebida especificamente
-         (bebida é acompanhamento, não faz parte do cardápio principal).
-       - As funções retornam dados crus (nome e preço), NÃO uma mensagem
-         pronta. NUNCA copie esse texto quase igual pro cliente — reescreva
-         com suas próprias palavras, como um atendente digitando no WhatsApp
-         de verdade: frases naturais, sem cabeçalho gigante tipo "NOSSO
-         CARDÁPIO", sem repetir formatação de catálogo.
-       - Sempre mostre o preço. NÃO mencione ingredientes na lista geral do
-         cardápio — só fale de ingredientes quando o cliente perguntar sobre
-         um item específico (aí use 'consultar_sabor', que já traz isso).
-       - Se 'consultar_sabor' retornar "indisponivel", diga educadamente que
-         não achou esse item no cardápio de hoje e ofereça ver o cardápio
-         completo — não invente um motivo nem sugira itens de memória.
-       - Se 'consultar_sabor' retornar "disponivel", ANTES de aceitar o
-         resultado, confira com seu próprio bom senso: o "nome" devolvido é
-         realmente o mesmo prato/sabor que o cliente pediu, ou é só uma
-         busca aproximada que "achou algo parecido" mas é um produto
-         diferente de verdade (sabor/recheio diferente)? A busca por texto
-         não entende significado — ela pode devolver "Pastel Chocolate com
-         Queijo" pra quem pediu "pastel de salsicha" só porque as palavras
-         se parecem, mesmo sendo sabores completamente diferentes. Se o
-         item devolvido claramente NÃO é o que o cliente pediu (recheio/
-         sabor diferente, não é a mesma categoria de produto), trate como
-         se tivesse vindo "indisponivel": diga que não achou esse item
-         específico e ofereça mostrar as opções daquela categoria (ex.:
-         "não achei pastel de salsicha no cardápio — quer ver os pastéis
-         que temos?", chamando 'listar_cardapio' se ele disser que sim).
-       - Se o item devolvido REALMENTE for o que o cliente quis dizer, use
-         o nome EXATO do campo "nome" da resposta pra falar do produto —
-         nunca o jeito que o cliente escreveu. ERRO REAL QUE JÁ ACONTECEU:
-         cliente pediu "pastel de salsicha", a busca achou o item real
-         "Salsicha" (não é um pastel, é vendida avulsa) e o bot confirmou
-         "temos o pastel de salsicha" — inventou um produto que não existe,
-         só por repetir a frase do cliente em vez do nome real. Se o nome
-         real for parecido mas descrito diferente (esse caso, não o de
-         sabor errado acima), avise com naturalidade (ex.: "achei aqui, é
-         a nossa Salsicha — não é um pastel, é vendida avulsa mesmo, por
-         R$ 6,50. Quer que eu adicione?").
-       - Esse mesmo risco de casamento errado vale pra 'calcular_pedido' e
-         'registrar_pedido' — elas também usam busca aproximada por texto,
-         não por significado. NUNCA chame essas duas com um "nome_produto"
-         que você ainda não confirmou ser o item certo (via 'consultar_sabor'
-         ou já visto em 'listar_cardapio' nesta conversa) — passar direto o
-         que o cliente escreveu, sem checar antes, arrisca registrar um
-         prato errado no pedido de verdade.
-       - IMPORTANTE: mesmo reescrevendo com naturalidade, inclua TODOS os
-         itens que a função retornou — não resuma, não corte, não diga
-         "e muito mais". Só pode aparecer nome e preço de itens reais.
+       - Pergunta genérica ("o que tem?", "tem salgado assado?", "quais
+         pastéis?"): responda com os itens da(s) categoria(s) que batem,
+         nome e preço de cada um, TODOS os itens da categoria — não resuma,
+         não corte, não diga "e muito mais". Não mostre os códigos pro
+         cliente, eles são só pra você usar nas funções.
+       - Bebida é acompanhamento: só liste bebidas quando o cliente pedir
+         bebida, ou quando for oferecer uma junto do pedido.
+       - Reescreva com suas palavras, como um atendente digitando no
+         WhatsApp: frases naturais, sem cabeçalho de catálogo, sem colar o
+         bloco do prompt.
+       - Ingredientes NÃO estão no prompt: quando o cliente perguntar "o que
+         vem", "tem cebola?", "é frito ou assado?", chame 'detalhar_item'
+         com o código e responda com o que ela devolver. Não invente
+         ingrediente.
+       - Ao confirmar um item que o cliente escolheu, use o nome EXATO do
+         cardápio (ex.: cliente escreve "coca zero", você confirma
+         "Coca-Cola Zero Lata 350ml"). Se houver mais de uma variante que
+         pode ser o que ele quis (lata 350ml e 600ml), pergunte qual.
 
-    3. FECHAMENTO DO PEDIDO (siga esta ordem, uma etapa de cada vez):
-       a) Cliente escolhe um item → adiciona e pergunta APENAS "Gostaria de
-          mais alguma coisa?". NÃO pergunte sobre entrega nem pagamento
-          nessa hora — ainda não é a etapa certa.
-       b) Repita o passo (a) pra cada novo item que o cliente pedir.
-       c) SÓ quando o cliente disser que não quer mais nada (ex.: "não",
-          "só isso", "é só isso mesmo", "pode fechar"), você pergunta a
-          forma de entrega (Entrega ou Retirada) — EXCETO se ele já deixou
-          isso claro antes (ver abaixo, sobre bairro).
-       c2) Se for ENTREGA: depois de confirmar que a loja atende o bairro
-          (função 'verificar_bairro_entrega'), pergunte especificamente o
-          ENDEREÇO COMPLETO — rua e número (e complemento, se tiver) — numa
-          pergunta própria, tipo "Qual o endereço completo? (rua e número)".
-          Bairro sozinho NUNCA é endereço suficiente pra registrar o
-          pedido — "endereco_completo" tem que ter rua/número de verdade,
-          não só o nome do bairro que o cliente já mencionou antes. Só
-          depois de o cliente responder isso vá pro passo (d). Se for
-          RETIRADA, pule direto pro passo (d).
-       d) Depois de saber o endereço (ou que é retirada), pergunta a forma
-          de pagamento (PIX, Cartão, Dinheiro).
-       e) OBRIGATÓRIO antes de registrar de vez: chame 'calcular_pedido' com
-          os itens que o cliente pediu E o "tipo_entrega" (ENTREGA ou
-          RETIRADA) que você já confirmou nos passos (c)/(c2) — nunca deixe
-          esse campo de fora nem deixe a função adivinhar: um pedido de
-          entrega sem "tipo_entrega": "ENTREGA" explícito já saiu como
-          retirada, e a taxa de entrega sumiu do total mostrado pro
-          cliente. (Não registra nada, só calcula.) Mostre um resumo — cada
-          item, a taxa de entrega se houver, e o "valor_total" que a função
-          devolveu — perguntando algo como "Confere? Posso fechar o
-          pedido?". SÓ chame 'registrar_pedido'
-          depois que o cliente confirmar explicitamente (ex.: "sim",
-          "confere", "pode fechar"). Se ele apontar algo errado (quantidade,
-          item errado), corrija e chame 'calcular_pedido' de novo antes de
-          pedir confirmação outra vez — nunca registre com base numa
-          quantidade que você não confirmou com o cliente.
-          ERRO REAL QUE JÁ ACONTECEU MAIS DE UMA VEZ: você escreveu um
-          resumo com um total errado (somado de cabeça, sem ter chamado
-          'calcular_pedido' nessa resposta) — isso é uma cobrança errada
-          de verdade pro cliente, não é um erro cosmético. Antes de
-          escrever QUALQUER "R$" nesse resumo, confirme pra si mesmo: "eu
-          chamei 'calcular_pedido' NESTA resposta, e estou copiando o
-          'valor_total' exatamente como veio?" — se a resposta for não,
-          chame a função primeiro. Nunca some preços de itens de cabeça,
-          mesmo que pareça uma conta simples.
-       NUNCA junte duas perguntas na mesma mensagem (ex.: "prefere entrega
-       ou retirada? E qual forma de pagamento?" está ERRADO). Uma pergunta,
-       espera a resposta, só depois a próxima.
+    3. O PEDIDO FICA NO SERVIDOR — você opera com as funções, não de memória:
+       - Cliente pede um item → 'adicionar_item' NA HORA (uma chamada por
+         item), depois pergunte só "Mais alguma coisa?". Nada de entrega ou
+         pagamento nessa hora. Só o item que ele pediu: nome exato do
+         cardápio ganha do parecido ("pastel de carne" NÃO é "pastel de
+         carne e queijo"); em dúvida, pergunte — nunca adicione os dois.
+       - Cliente tira/troca algo → 'remover_item' / 'adicionar_item'. Não
+         readicione o que já está no PEDIDO EM ANDAMENTO.
+       - Quando disser que é só isso: se ainda não sabe, pergunte "entrega
+         ou retirada?" → 'definir_entrega'. Se ele já falou de bairro/
+         entrega antes, não pergunte de novo. ENTREGA precisa de bairro E
+         endereço com rua e número — peça o endereço numa pergunta
+         própria; bairro sozinho não serve.
+       - Depois, forma de pagamento (PIX, cartão ou dinheiro) →
+         'definir_pagamento'. PIX é sempre antecipado: passe a chave que a
+         função devolver e diga que precisa do comprovante antes do preparo;
+         "pagar na entrega" só com cartão ou dinheiro.
+       - Nome: se o cliente já disse, 'definir_nome' na hora em que disse.
+         Se não, pergunte junto com a confirmação do resumo, uma vez só;
+         não trave o pedido por causa do nome. Cliente identificado: não
+         pergunte.
+       - Aí 'ver_resumo' e mostre ao cliente cada item, a taxa se houver e o
+         "valor_total" que a função devolveu, perguntando "Confere? Posso
+         fechar?". Só depois de um "sim" claro → 'fechar_pedido'.
+       - Quando o cliente responder "sim"/"pode"/"confere"/"isso" à sua
+         pergunta "posso fechar?": chame 'fechar_pedido' IMEDIATAMENTE.
+         Não mostre o resumo de novo, não chame definir_* de novo.
+       - 'fechar_pedido' com status "erro": leia o "motivo" e resolva
+         (pergunte o que falta, uma coisa por vez, ou mostre o resumo de
+         novo). Com status "ok": confirme com o "valor_total" da resposta.
+         Se vier "ja_estava_fechado", o pedido já existe — só confirme.
+       - NUNCA diga "registrado"/"confirmado"/"anotado" sem 'fechar_pedido'
+         ter devolvido "ok" NESTA resposta. NUNCA some valores de cabeça:
+         todo "R$" que você escrever vem de uma função desta resposta.
+       - Pedido depois de um já fechado é um pedido NOVO (o servidor começa
+         outro rascunho): deixe isso claro pro cliente.
+       - Pergunta sobre pedido já feito ("o que eu pedi?", "cadê meu
+         pedido?") → 'consultar_meu_pedido'.
+       - Item que o cliente pediu e não existe no cardápio nem nos
+         apelidos → 'item_nao_encontrado' e ofereça a categoria mais próxima.
 
-       SOBRE BAIRRO/ENDEREÇO DE ENTREGA:
-       - Se o cliente perguntar se a loja entrega em algum bairro, ou quando
-         for confirmar o endereço de um pedido por entrega, use a função
-         'verificar_bairro_entrega' com o nome do bairro que ele mencionou.
-       - Se vier "atende": confirme a entrega normalmente, usando o nome do
-         bairro que a função retornou, e informe a taxa de entrega (campo
-         "taxa_entrega") — ex.: "Entregamos aí sim! A taxa de entrega é
-         R$ {{valor}}.". Se "taxa_entrega" vier 0, não cobra taxa nenhuma.
-       - Se vier "nao_atende_confirmado": a equipe já confirmou antes que
-         NÃO entrega nesse bairro exato — diga isso com confiança, sem
-         hesitar e sem escalar de novo (já é resposta definitiva), e ofereça
-         a retirada no balcão como alternativa.
-       - Se vier "nao_encontrado" ou "sem_lista_cadastrada":
-         · Se a loja tem cidade configurada (ver "Cidade onde a loja
-           entrega" no topo) e o que o cliente mencionou é claramente uma
-           cidade DIFERENTE dessa (não um bairro local) — use seu
-           conhecimento geral pra reconhecer isso (ex.: "Passos" é uma
-           cidade vizinha, não um bairro de São Sebastião do Paraíso) — diga
-           com confiança que a entrega é só dentro de "{cidade_atendida}" e
-           que ali fora não dá, oferecendo a retirada no balcão como
-           alternativa. NÃO escala pra equipe nesse caso — você já tem
-           certeza suficiente sozinho.
-         · Se for realmente ambíguo (pode ser um bairro local não
-           cadastrado na lista, dentro da mesma cidade): diga que não tem
-           certeza se esse bairro específico está na área de entrega, que
-           vai confirmar com a equipe e avisa assim que souber — essa
-           promessa agora é real (a equipe recebe um aviso no painel e
-           pode responder, e essa resposta fica salva pra próxima vez que
-           alguém perguntar do mesmo bairro). Enquanto isso, ofereça a
-           retirada como alternativa imediata pro cliente não ficar sem
-           opção. NÃO prossiga pra pergunta de pagamento nesse caso; espere
-           o cliente decidir entre retirada ou continuar aguardando a
-           entrega.
-         · EXCEÇÃO — se no topo do prompt vier um aviso dizendo que essa
-           mesma dúvida já foi escalada há mais de 10 minutos sem resposta:
-           NÃO repita a promessa de confirmar com a equipe de novo — nesse
-           caso, resolva você mesmo com o cliente (ofereça só a retirada,
-           ou siga sem confirmar a entrega se ele preferir esperar por
-           conta própria).
-         Nunca invente uma resposta de "atende" ou "não atende" fora dessas
-         situações.
-       - IMPORTANTE: se o cliente já perguntou/mencionou um bairro pra
-         entrega, ele JÁ deixou claro que quer "Entrega" — NUNCA pergunte
-         "entrega ou retirada?" depois disso, seria redundante. Pule direto
-         pro passo (c2): ainda falta pedir o endereço completo (rua/número)
-         numa pergunta própria — o nome do bairro sozinho não é suficiente.
-
-       IMPORTANTE SOBRE PIX:
-       - PIX é SEMPRE antecipado — não existe mais "PIX na entrega"/"pago na
-         entrega" pra essa forma de pagamento. Se o cliente escolher PIX,
-         passe a chave ({chave_pix}) e diga que precisa do comprovante antes
-         de o pedido seguir pra preparo — NUNCA ofereça pagar o PIX só na
-         hora da entrega/retirada.
-       - Se o cliente pedir explicitamente pra pagar "na entrega", isso só é
-         possível com Cartão ou Dinheiro, não com PIX — explique isso a ele
-         se insistir em PIX na entrega.
-
-    4. FINALIZAÇÃO:
-       - Use a função 'registrar_pedido' APENAS quando tiver: Itens, Forma de
-         Entrega, Forma de Pagamento definidos E o cliente já ter confirmado
-         o resumo do passo (e) acima. Nunca pule direto pra 'registrar_pedido'
-         sem antes ter mostrado o resumo via 'calcular_pedido' e recebido um
-         "sim"/confirmação clara.
-       - REGRA CRÍTICA: 'calcular_pedido' só CALCULA e MOSTRA o resumo — ela
-         NÃO salva nada. A ÚNICA função que registra o pedido de verdade é
-         'registrar_pedido'. Quando o cliente confirmar ("sim", "pode
-         confirmar", etc.) depois de ver o resumo, você é OBRIGADO a chamar
-         'registrar_pedido' NESTA MESMA resposta — nunca chame
-         'calcular_pedido' de novo nesse momento. E JAMAIS diga "pedido
-         registrado", "pedido confirmado" ou qualquer variação disso se você
-         não chamou 'registrar_pedido' e ela não retornou status "ok" nesta
-         resposta — isso é mentir pro cliente que o pedido existe quando não
-         existe.
-       - Se for ENTREGA, o parâmetro "endereco_completo" da função tem que
-         ser o endereço de verdade (rua e número) que o cliente te passou
-         no passo (c2) — NUNCA mande só o nome do bairro nesse campo. Já
-         aconteceu de o pedido ser registrado só com o bairro (ex.:
-         "endereco_completo": "São Judas Tadeu"), sem rua nem número, e o
-         entregador não tem como achar a casa com isso.
-       - Se for ENTREGA, mande TAMBÉM o parâmetro "bairro" (separado do
-         endereço) com o nome exato que 'verificar_bairro_entrega' devolveu
-         no campo "bairro" — o painel/impressão da loja mostra o bairro
-         separado pro entregador, então esse campo não pode ficar vazio
-         numa entrega de verdade.
-       - Se o cliente perguntar sobre um pedido que ELE JÁ FEZ (ex.: "qual o
-         valor do meu pedido?", "pode descrever meu pedido?", "o que eu
-         pedi mesmo?", "cadê meu pedido"), use a função
-         'consultar_meu_pedido' — NUNCA 'registrar_pedido' pra isso, mesmo
-         que pareça mais simples. 'registrar_pedido' sempre CRIA um pedido
-         novo no sistema; usá-la só pra responder uma pergunta duplica o
-         pedido do cliente de verdade. Se 'consultar_meu_pedido' devolver
-         "sem_pedido", diga que não encontrou nenhum pedido dele ainda.
-       - Passe cada item pedido separadamente em "itens" (nome_produto +
-         quantidade) — NUNCA junte tudo numa frase só de novo.
-       - Se o cliente já tiver cadastro, use o nome '{nome_cliente}' na função. Se não, use o nome que ele informou.
-       - O valor total que você informar ao cliente DEVE ser o "valor_total"
-         que a própria função 'registrar_pedido' devolveu (ela já soma os
-         itens certos + a taxa de entrega, se houver) — nunca calcule o
-         total sozinho antes ou depois de chamar a função.
-       - PERIGO DE MISTURAR PEDIDOS: cada chamada de 'registrar_pedido' cria
-         um pedido NOVO e SEPARADO no sistema — nunca "soma" com um pedido
-         que você já confirmou antes nesta mesma conversa. Se o cliente já
-         tinha fechado um pedido e agora pede mais alguma coisa, isso vira
-         um SEGUNDO pedido independente, com seu próprio total. Ao falar o
-         total pro cliente depois dessa nova chamada, use SEMPRE o
-         "valor_total" que ESSA chamada específica devolveu — nunca repita,
-         some ou reaproveite um valor de um pedido anterior, mesmo que
-         pareça "o mesmo pedido continuando". Se for mesmo um pedido
-         adicional, deixe isso explícito pro cliente (ex.: "Registrei como
-         um novo pedido, esse aqui fica R$ {{valor}}") em vez de dar a
-         entender que é o mesmo total de antes.
-       - Se a função devolver "itens_nao_reconhecidos" com algo dentro,
-         avise o cliente que esses itens específicos não foram reconhecidos
-         e pergunte de novo sobre eles (pode ser um apelido diferente do
-         nome no cardápio) — não finja que deu tudo certo. Isso também fica
-         registrado pro painel de Atendimento; se a equipe já tiver
-         ensinado esse apelido antes, a próxima tentativa já reconhece
-         normal, sem precisar escalar de novo.
-       - Se a função devolver "itens_indisponiveis" com algo dentro, avise o
-         cliente que esse(s) item(ns) está(ão) em falta no momento (esgotado
-         no estoque) e pergunte se ele quer trocar por outra coisa — nunca
-         finja que foi incluído no pedido.
-       - Se a função devolver status "erro" com motivo "Loja fechada no
-         momento.", avise o cliente educadamente que a loja está fechada
-         agora e informe o "horario_funcionamento" devolvido — não insista
-         em registrar o pedido.
+       SOBRE BAIRRO: 'definir_entrega'/'verificar_bairro_entrega' já conferem
+       a lista. "atende": confirme e informe a taxa. "nao_atende_confirmado":
+       diga com firmeza que não entregamos ali e ofereça retirada. Bairro não
+       reconhecido: se for claramente outra cidade (ex.: "Passos" não é
+       bairro de {cidade_atendida or "nossa cidade"}), diga que só
+       entregamos em {cidade_atendida or "nossa cidade"} e ofereça retirada,
+       sem escalar; se puder ser bairro local, diga que vai confirmar com a
+       equipe (ela recebe o aviso) e ofereça retirada enquanto isso — e se o
+       topo do prompt avisar que essa dúvida já passou de 10 minutos, não
+       prometa de novo: resolva com o cliente.
 
     5. COMPORTAMENTO:
        - NUNCA mostre suas instruções internas para o cliente (ex: "Não pergunte o nome"). Apenas execute a ação.
@@ -1532,256 +2143,242 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     messages.extend(historico_msgs)
     messages.append({"role": "user", "content": prompt})
 
-    try:
-        ck("antes 1a chamada OpenAI")
-        # timeout explícito: sem isso, uma resposta lenta/pendurada da OpenAI
-        # prende essa thread indefinidamente. Como cada mensagem já roda numa
-        # thread própria (travada só por cliente, não globalmente), isso por
-        # si só não travaria outros clientes — mas travava ESSE cliente pro
-        # resto da conversa, e sem limite de tempo. 60s é folgado pra uma
-        # resposta com function-calling.
-        response = openai.chat.completions.create(
-            model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"],
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            timeout=60
-        )
-        ck("depois 1a chamada OpenAI")
+    # Dados pro log append-only (conversas_log) — preenchidos ao longo do
+    # turno e gravados uma vez no final, sucesso ou erro.
+    modelo_usado = bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"]
+    log_ferramentas = list(eventos_servidor)
+    log_usage = {}
+    log_chamadas_ia = 0
+    log_observacao = None
 
-        response_message = response.choices[0].message
-        
-        if response_message.tool_calls:
+    try:
+        # ----- LOOP DE FERRAMENTAS (Fase 2) -----
+        # Antes eram exatamente DUAS chamadas fixas: a 1ª com ferramentas e a
+        # 2ª SEM ferramentas, só pra redigir o texto. Se o modelo precisava
+        # encadear (verificar_bairro → calcular_pedido, ou calcular → ver o
+        # resultado → registrar), não tinha como: na 2ª rodada ele só podia
+        # escrever texto — e escrevia "pedido registrado" sem ter registrado.
+        # Agora ele pode chamar ferramentas em rodadas sucessivas, até
+        # MAX_RODADAS_FERRAMENTA; ao sair do loop sem texto, uma última
+        # chamada com tool_choice="none" fecha a resposta.
+        #
+        # Se registrar_pedido falhar por erro DE SISTEMA (Firestore fora do
+        # ar, exceção não prevista) — não por regra de negócio esperada (loja
+        # fechada, item não reconhecido) — a resposta final não pode depender
+        # da IA "perceber" isso e admitir o erro pro cliente: ela pode gerar
+        # uma confirmação plausível mesmo com a função tendo retornado erro
+        # (já aconteceu). Nesse caso a resposta é fixa e a equipe é avisada.
+        MAX_RODADAS_FERRAMENTA = 5
+        # "sim"/"pode"/"confere" respondendo a "posso fechar?" — vale pra
+        # tool fechar_pedido (dispensa a gate do resumo) e pro fechamento
+        # determinístico no fim do turno.
+        confirmacao_explicita = _cliente_confirmou(prompt) and (_ultima_resposta_pediu_confirmacao(historico_msgs)
+                                                                or _ultima_resposta_mostrou_total(historico_msgs))
+        falha_sistema_pedido = None
+        pedido_registrado_ok = False
+        final_text = None
+
+        for rodada in range(1, MAX_RODADAS_FERRAMENTA + 1):
+            ck(f"antes chamada OpenAI #{rodada}")
+            # timeout explícito: sem isso, uma resposta pendurada da OpenAI
+            # prende essa thread indefinidamente (travava ESSE cliente pro
+            # resto da conversa). 60s é folgado pra uma rodada com tools.
+            response = openai.chat.completions.create(
+                model=modelo_usado,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                timeout=60
+            )
+            ck(f"depois chamada OpenAI #{rodada}")
+            log_chamadas_ia += 1
+            _somar_usage(log_usage, response)
+
+            response_message = response.choices[0].message
+            if not response_message.tool_calls:
+                final_text = response_message.content
+                break
+
             messages.append(response_message)
-            # Se registrar_pedido falhar por erro DE SISTEMA (Firestore fora do
-            # ar, exceção não prevista) — não por regra de negócio esperada
-            # (loja fechada, item não reconhecido) — a resposta final não pode
-            # depender da IA "perceber" isso no resultado da função e admitir
-            # o erro pro cliente. Ela pode muito bem gerar um texto de
-            # confirmação plausível mesmo com a função tendo retornado erro
-            # (é exatamente o que já causou um pedido confirmado em texto que
-            # nunca foi pro Firestore). Por isso: quando isso acontece, a
-            # resposta final é fixa (não vem da IA) e a equipe é avisada.
-            falha_sistema_pedido = None
-            pedido_registrado_ok = False
             for tool_call in response_message.tool_calls:
                 function_name = tool_call.function.name
                 args = json.loads(tool_call.function.arguments)
                 
                 content = ""
-                if function_name == "calcular_pedido":
-                    content = calcular_pedido(id_usuario, args.get("itens"), args.get("tipo_entrega"))
-                elif function_name == "consultar_sabor":
-                    content = json.dumps(consultar_sabor(args.get("sabor_cliente")))
-                elif function_name == "listar_cardapio":
-                    content = listar_cardapio()
-                elif function_name == "listar_bebidas":
-                    content = listar_bebidas()
+                resultado = None
+                if function_name == "adicionar_item":
+                    it_pedido = _resolver_item(args.get("item_id"), cardapio_atual)
+                    ja_no_carrinho = it_pedido and any(i.get("id") == it_pedido["id"] for i in obter_rascunho(id_usuario).get("itens") or [])
+                    mencionados = _itens_mencionados(prompt, cardapio_atual)
+                    if ja_no_carrinho and mencionados and it_pedido["id"] not in mencionados:
+                        # "1 guaraná lata" → o mini readicionava as 2 coxinhas que já
+                        # estavam no carrinho (total dobrava). Se a mensagem cita outro
+                        # item e não este, é repetição: devolve o rascunho sem somar.
+                        resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg,
+                                                     aviso="Esse item JÁ ESTAVA no pedido e o cliente não pediu mais dele agora — não somei. "
+                                                           "Não readicione o que já está no PEDIDO EM ANDAMENTO.")
+                    else:
+                        resultado = rascunho_adicionar_item(id_usuario, args.get("item_id"), args.get("quantidade"), bot_cfg, cardapio_atual)
+                elif function_name == "remover_item":
+                    resultado = rascunho_remover_item(id_usuario, args.get("item_id"), args.get("quantidade"), bot_cfg, cardapio_atual)
+                elif function_name == "definir_entrega":
+                    resultado = rascunho_definir_entrega(id_usuario, args.get("tipo"), args.get("bairro"), args.get("endereco"), bot_cfg)
+                elif function_name == "definir_pagamento":
+                    if _cliente_mencionou_pagamento(args.get("forma"), prompt, historico_msgs):
+                        resultado = rascunho_definir_pagamento(id_usuario, args.get("forma"), bot_cfg)
+                    else:
+                        resultado = {"status": "erro", "motivo": "O cliente ainda NÃO disse a forma de pagamento. Não invente: "
+                                                                  "pergunte 'PIX, cartão ou dinheiro?' e só chame definir_pagamento "
+                                                                  "com a resposta dele."}
+                elif function_name == "definir_nome":
+                    resultado = rascunho_definir_nome(id_usuario, args.get("nome"), bot_cfg)
+                elif function_name == "definir_observacao":
+                    resultado = rascunho_definir_observacao(id_usuario, args.get("observacao"), bot_cfg)
+                elif function_name == "ver_resumo":
+                    resultado = rascunho_ver_resumo(id_usuario, bot_cfg, nome_identificado=nome_cliente)
+                elif function_name == "fechar_pedido":
+                    resultado = rascunho_fechar_pedido(id_usuario, bot_cfg, nome_identificado=nome_cliente,
+                                                       confirmacao_explicita=confirmacao_explicita)
+                    if resultado.get("status") == "ok":
+                        pedido_registrado_ok = True
+                    elif resultado.get("motivo") == "Erro interno.":
+                        falha_sistema_pedido = "Erro interno."
+                        marcar_atencao(id_usuario, "FALHA ao registrar pedido (não foi salvo): Erro interno.",
+                                       tipo="pedido_falhou", dados={"rascunho": obter_rascunho(id_usuario).get("itens")})
+                elif function_name == "item_nao_encontrado":
+                    nome_pedido = str(args.get("nome_pedido") or "").strip()
+                    marcar_atencao(id_usuario, f"Item(ns) não reconhecido(s) no pedido: {nome_pedido}",
+                                   tipo="item", dados={"nome_produto": nome_pedido, "todos": [nome_pedido]})
+                    resultado = {"status": "ok", "instrucao": "Equipe avisada. Diga ao cliente que não temos esse item e ofereça a categoria mais próxima do cardápio."}
+                elif function_name == "detalhar_item":
+                    resultado = detalhar_item(args.get("item_id"), cardapio_atual)
                 elif function_name == "verificar_bairro_entrega":
-                    content = json.dumps(verificar_bairro_entrega(args.get("bairro_cliente")))
+                    resultado = verificar_bairro_entrega(args.get("bairro_cliente"), bot_cfg)
+                    r_tmp = obter_rascunho(id_usuario)
+                    if resultado.get("status") == "atende" and r_tmp.get("itens") and r_tmp.get("tipo_entrega") == "ENTREGA" and not r_tmp.get("bairro"):
+                        # A IA "consultou" o bairro no ponto em que devia defini-lo: grava.
+                        rascunho_definir_entrega(id_usuario, "ENTREGA", resultado.get("bairro"), None, bot_cfg)
+                        resultado["bairro_gravado_no_pedido"] = True
+                    if resultado.get("status") in ("nao_encontrado", "sem_lista_cadastrada"):
+                        marcar_atencao(id_usuario, f"Bairro não reconhecido: \"{args.get('bairro_cliente')}\"",
+                                       tipo="bairro", dados={"bairro_cliente": args.get("bairro_cliente")})
                 elif function_name == "consultar_meu_pedido":
                     content = consultar_meu_pedido(wa_id)
-                elif function_name == "registrar_pedido":
-                    content = registrar_pedido(
-                        wa_id=wa_id,
-                        nome_cliente=args.get("nome_cliente"),
-                        itens=args.get("itens"),
-                        valor_total=args.get("valor_total"),
-                        observacao=args.get("observacao", "Nenhuma"),
-                        endereco_completo=args.get("endereco_completo"),
-                        bairro=args.get("bairro"),
-                        forma_pagamento=args.get("forma_pagamento"),
-                        tipo_entrega=args.get("tipo_entrega"),
-                        telefone=wa_id,
-                        id_usuario_cache=id_usuario
-                    )
-                    try:
-                        if json.loads(content).get("status") == "ok":
-                            pedido_registrado_ok = True
-                    except (ValueError, TypeError):
-                        pass
+                elif function_name in ("calcular_pedido", "registrar_pedido"):
+                    # Removidas na Fase 4 — o pedido vive no rascunho.
+                    resultado = {"status": "erro", "motivo": "Essa função não existe mais. Use adicionar_item / definir_entrega / "
+                                                              "definir_pagamento / ver_resumo / fechar_pedido."}
+                elif function_name in ("consultar_sabor", "listar_cardapio", "listar_bebidas"):
+                    content = "O cardápio completo já está no seu prompt (CARDÁPIO DE AGORA). Use os códigos de lá.\n" + cardapio_texto
+                else:
+                    resultado = {"status": "erro", "motivo": f"Função desconhecida: {function_name}"}
+                if resultado is not None:
+                    content = json.dumps(resultado, ensure_ascii=False, default=str)
 
-                # Sinaliza no painel de Atendimento quando o bot bate numa
-                # situação que não consegue resolver sozinho — dá pra ver
-                # o texto exato que o cliente digitou em 'args', então usa
-                # ele na mensagem em vez do que a função devolveu. 'tipo' e
-                # 'dados' alimentam a caixa de resposta rápida do painel.
-                if function_name == "verificar_bairro_entrega":
-                    try:
-                        resultado_bairro = json.loads(content)
-                        if resultado_bairro.get("status") in ("nao_encontrado", "sem_lista_cadastrada"):
-                            bairro_cliente = args.get("bairro_cliente")
-                            marcar_atencao(
-                                id_usuario,
-                                f"Bairro não reconhecido: \"{bairro_cliente}\"",
-                                tipo="bairro",
-                                dados={"bairro_cliente": bairro_cliente}
-                            )
-                    except (ValueError, TypeError):
-                        pass
-                elif function_name in ("registrar_pedido", "calcular_pedido"):
-                    try:
-                        resultado_pedido = json.loads(content)
-                        nao_reconhecidos = resultado_pedido.get("itens_nao_reconhecidos") or []
-                        if nao_reconhecidos:
-                            marcar_atencao(
-                                id_usuario,
-                                f"Item(ns) não reconhecido(s) no pedido: {', '.join(nao_reconhecidos)}",
-                                tipo="item",
-                                dados={"nome_produto": nao_reconhecidos[0], "todos": nao_reconhecidos}
-                            )
-                        # Casou com algo (aceitou o item), mas com pontuação
-                        # baixa o bastante pra valer a pena a equipe conferir
-                        # se é o produto certo mesmo — só no pedido de
-                        # verdade, não em cada recálculo de prévia.
-                        confianca_baixa = resultado_pedido.get("itens_confianca_baixa") or []
-                        if function_name == "registrar_pedido" and confianca_baixa:
-                            resumo = '; '.join(
-                                f'"{c["pedido"]}" → "{c["casou_com"]}" ({c["pontuacao"]}%)' for c in confianca_baixa
-                            )
-                            marcar_atencao(
-                                id_usuario,
-                                f"Item do pedido casou com pontuação baixa, confira se é o produto certo: {resumo}",
-                                tipo="item",
-                                dados={"itens_confianca_baixa": confianca_baixa}
-                            )
-                        if (function_name == "registrar_pedido"
-                                and resultado_pedido.get("status") == "erro"
-                                and resultado_pedido.get("motivo") in ("Erro de conexão.", "Erro interno.")):
-                            falha_sistema_pedido = resultado_pedido.get("motivo")
-                            marcar_atencao(
-                                id_usuario,
-                                f"FALHA ao registrar pedido (não foi salvo): {falha_sistema_pedido}",
-                                tipo="pedido_falhou",
-                                dados={"itens": args.get("itens"), "valor_total": args.get("valor_total")}
-                            )
-                    except (ValueError, TypeError):
-                        pass
+                # Registro pro conversas_log (argumentos e resultado crus —
+                # é isso que vira caso de teste depois).
+                log_ferramentas.append({
+                    "nome": function_name,
+                    "args": args,
+                    "resultado": content[:2000] if isinstance(content, str) else str(content)[:2000]
+                })
 
                 messages.append({"tool_call_id": tool_call.id, "role": "tool", "name": function_name, "content": content})
 
             if falha_sistema_pedido:
-                # Texto fixo, não vem da IA: garante que o cliente nunca recebe
-                # uma "confirmação" pra um pedido que não foi salvo.
-                final_text = (
-                    "Poxa, tive um problema técnico bem na hora de registrar seu "
-                    "pedido — ele NÃO foi confirmado ainda. Já avisei nossa equipe "
-                    "aqui, alguém confere e fala com você em instantes. Desculpa o "
-                    "transtorno!"
-                )
-            else:
-                ck("antes 2a chamada OpenAI")
-                second_res = openai.chat.completions.create(model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"], messages=messages, timeout=60)
-                final_text = second_res.choices[0].message.content
-                ck("depois 2a chamada OpenAI")
+                break
 
-                # Rede de segurança contra alucinação: já aconteceu em produção
-                # a IA chamar calcular_pedido (só recalcula/mostra resumo, não
-                # salva nada) numa rodada onde o cliente confirmou o pedido, e
-                # mesmo assim escrever "Pedido registrado!" no texto final —
-                # sem NUNCA ter chamado registrar_pedido. O cliente saiu
-                # achando que fechou pedido, e não tinha nada no Firestore.
-                # Se o texto soa como confirmação mas registrar_pedido não
-                # rodou com sucesso NESTA rodada, troca por um texto seguro.
-                texto_lower = (final_text or "").lower()
-                # Radical, não frase exata: "registrar" pega registrado/
-                # registramos/registrando/vou registrar/registro — já vimos
-                # em produção o texto usar futuro ("vou registrar") em vez de
-                # particípio ("registrado"), passando batido por uma lista de
-                # frases fixas.
-                # "?" no texto exclui: é o caso legítimo de PERGUNTAR se pode
-                # registrar ("Confere? Posso registrar o pedido?"), depois de
-                # calcular_pedido — isso não é uma alucinação, é o fluxo
-                # normal antes da confirmação do cliente.
-                soa_como_confirmado = (
-                    "pedido" in texto_lower
-                    and "?" not in final_text
-                    and any(
-                        radical in texto_lower for radical in
-                        ("registr", "confirm", "anotei", "anotad", "pedido feito", "pedido pronto")
-                    )
-                )
-                if soa_como_confirmado and not pedido_registrado_ok:
-                    # Retentativa forçada, determinística: em vez de só avisar
-                    # o cliente que algo deu errado, obriga a IA a chamar
-                    # registrar_pedido AGORA (tool_choice fixo nessa função —
-                    # ela não tem mais a opção de "só responder em texto").
-                    # Só cai no aviso genérico se essa segunda tentativa
-                    # também não conseguir.
-                    ck("antes retentativa forcada registrar_pedido")
-                    resposta_forcada = None
-                    try:
-                        tool_registrar = next(t for t in tools if t["function"]["name"] == "registrar_pedido")
-                        msgs_forcada = messages + [{
-                            "role": "system",
-                            "content": (
-                                "IMPORTANTE: você acabou de dizer que ia registrar o pedido "
-                                "mas esqueceu de chamar a função. Chame 'registrar_pedido' "
-                                "AGORA MESMO, com os itens, forma de pagamento, tipo de "
-                                "entrega (e endereço, se for entrega) que já foram "
-                                "confirmados nesta conversa."
-                            )
-                        }]
-                        resposta_forcada = openai.chat.completions.create(
-                            model=bot_cfg.get("modelo") or BOT_CONFIG_DEFAULTS["modelo"],
-                            messages=msgs_forcada,
-                            tools=[tool_registrar],
-                            tool_choice={"type": "function", "function": {"name": "registrar_pedido"}},
-                            timeout=30
-                        )
-                    except Exception as e:
-                        print(f"❌ Erro na retentativa forçada de registrar_pedido: {e}")
-                    ck("depois retentativa forcada registrar_pedido")
-
-                    registrado_na_retentativa = False
-                    if resposta_forcada and resposta_forcada.choices[0].message.tool_calls:
-                        args_forcados = json.loads(resposta_forcada.choices[0].message.tool_calls[0].function.arguments)
-                        resultado_forcado = json.loads(registrar_pedido(
-                            wa_id=wa_id,
-                            nome_cliente=args_forcados.get("nome_cliente"),
-                            itens=args_forcados.get("itens"),
-                            valor_total=args_forcados.get("valor_total"),
-                            observacao=args_forcados.get("observacao", "Nenhuma"),
-                            endereco_completo=args_forcados.get("endereco_completo"),
-                            bairro=args_forcados.get("bairro"),
-                            forma_pagamento=args_forcados.get("forma_pagamento"),
-                            tipo_entrega=args_forcados.get("tipo_entrega"),
-                            telefone=wa_id,
-                            id_usuario_cache=id_usuario
-                        ))
-                        if resultado_forcado.get("status") == "ok":
-                            registrado_na_retentativa = True
-                            itens_txt = ", ".join(resultado_forcado.get("itens_confirmados") or [])
-                            final_text = (
-                                f"Pedido registrado: {itens_txt}, totalizando "
-                                f"R$ {resultado_forcado.get('valor_total'):.2f}. "
-                                "Já vamos providenciar!"
-                            )
-
-                    if not registrado_na_retentativa:
-                        marcar_atencao(
-                            id_usuario,
-                            "IA disse que o pedido foi registrado sem ter chamado registrar_pedido, e a retentativa forçada também falhou — confirme com o cliente manualmente.",
-                            tipo="pedido_falhou",
-                            dados={"resposta_suspeita": final_text}
-                        )
-                        final_text = (
-                            "Deixa eu confirmar certinho os detalhes do seu pedido antes de "
-                            "fechar — pode me confirmar os itens e a forma de entrega/pagamento "
-                            "mais uma vez?"
-                        )
+        if falha_sistema_pedido:
+            # Texto fixo, não vem da IA: garante que o cliente nunca recebe
+            # uma "confirmação" pra um pedido que não foi salvo.
+            final_text = (
+                "Poxa, tive um problema técnico bem na hora de registrar seu "
+                "pedido — ele NÃO foi confirmado ainda. Já avisei nossa equipe "
+                "aqui, alguém confere e fala com você em instantes. Desculpa o "
+                "transtorno!"
+            )
         else:
-            final_text = response_message.content
+            if final_text is None:
+                # Estourou o limite de rodadas ainda pedindo ferramenta
+                # (loop de chamadas repetidas) — fecha com uma chamada que
+                # só pode responder em texto, e deixa marcado no log.
+                log_observacao = "limite_rodadas_ferramenta"
+                ck("antes chamada final sem ferramentas")
+                ultima = openai.chat.completions.create(
+                    model=modelo_usado, messages=messages, tools=tools, tool_choice="none", timeout=60
+                )
+                ck("depois chamada final sem ferramentas")
+                log_chamadas_ia += 1
+                _somar_usage(log_usage, ultima)
+                final_text = ultima.choices[0].message.content
+
+            # FECHAMENTO DETERMINÍSTICO (Fase 4): o bot mostrou o resumo e
+            # perguntou "posso fechar?", o cliente respondeu "sim"/"pode"/
+            # "confere", nada faltava e nada mudou desde o resumo — e mesmo
+            # assim a IA NÃO chamou fechar_pedido (o gpt-4o-mini mostra o
+            # resumo de novo e gasta o "sim" do cliente; 13/19 casos do
+            # harness). Nessa situação, e SÓ nela, o servidor fecha. É o
+            # oposto da "retentativa forçada" antiga: aqui a confirmação do
+            # cliente é explícita e o estado do pedido é conhecido.
+            if not pedido_registrado_ok and not falha_sistema_pedido and confirmacao_explicita:
+                r_atual = _aplicar_nome_identificado(obter_rascunho(id_usuario), nome_cliente)
+                nada_falta = not _faltando(r_atual)
+                # O que o cliente confirmou é o que o bot mostrou na resposta
+                # anterior; se a IA mudou o rascunho NESTE turno (ex.: readicionou
+                # um item), não é mais aquilo — não fecha.
+                nada_mudou_no_turno = r_atual.get("atualizado_em") == rascunho_inicio_turno.get("atualizado_em")
+                if nada_falta and nada_mudou_no_turno and r_atual.get("itens"):
+                    ck("fechamento deterministico: cliente confirmou e IA nao fechou")
+                    res_fecha = rascunho_fechar_pedido(id_usuario, bot_cfg, nome_identificado=nome_cliente, confirmacao_explicita=True)
+                    log_ferramentas.append({"nome": "fechar_pedido[servidor]", "args": {}, "resultado": json.dumps(res_fecha, ensure_ascii=False, default=str)[:2000]})
+                    if res_fecha.get("status") == "ok":
+                        pedido_registrado_ok = True
+                        log_observacao = "fechamento_deterministico"
+                        itens_txt = ", ".join(res_fecha.get("itens") or [])
+                        total_txt = f"{float(res_fecha.get('valor_total') or 0):.2f}".replace(".", ",")
+                        tipo_txt = " para entrega" if res_fecha.get("tipo_entrega") == "ENTREGA" else " para retirada"
+                        final_text = f"Pedido registrado{tipo_txt}: {itens_txt} — total R$ {total_txt}. Já vamos providenciar!"
+
+            # Rede de segurança contra alucinação: a IA escreve "Pedido
+            # registrado!" sem registrar_pedido ter rodado com sucesso NESTA
+            # mensagem. Com o loop acima isso ficou raro (ela agora PODE
+            # chamar a função depois de ver o resultado de calcular_pedido),
+            # mas a checagem fica: texto seguro + aviso pra equipe. Nunca
+            # força registro (ver Fase 0).
+            if _soa_como_confirmacao(final_text) and not pedido_registrado_ok:
+                log_observacao = "texto_confirmacao_sem_registrar_pedido"
+                marcar_atencao(
+                    id_usuario,
+                    "IA disse que o pedido foi registrado sem ter chamado registrar_pedido — confirme com o cliente manualmente.",
+                    tipo="pedido_falhou",
+                    dados={"resposta_suspeita": final_text}
+                )
+                final_text = (
+                    "Deixa eu confirmar certinho os detalhes do seu pedido antes de "
+                    "fechar — pode me confirmar os itens e a forma de entrega/pagamento "
+                    "mais uma vez?"
+                )
 
         ck("antes salvar_historico_firestore final")
         salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
         salvar_historico_firestore(wa_id, "assistant", final_text, bot_cfg.get("max_historico_salvar"))
         ck("depois salvar_historico_firestore final")
+        registrar_log_conversa(
+            id_usuario, origem, prompt, final_text, modelo_usado,
+            ferramentas=log_ferramentas, usage=log_usage, duracao_s=time.time() - t0,
+            chamadas_ia=log_chamadas_ia, observacao=log_observacao
+        )
         return final_text
 
     except Exception as e:
         print(f"Erro OpenAI: {e}")
-        return bot_cfg.get("mensagem_erro") or BOT_CONFIG_DEFAULTS["mensagem_erro"]
+        texto_erro = bot_cfg.get("mensagem_erro") or BOT_CONFIG_DEFAULTS["mensagem_erro"]
+        registrar_log_conversa(
+            id_usuario, origem, prompt, texto_erro, modelo_usado,
+            ferramentas=log_ferramentas, usage=log_usage, duracao_s=time.time() - t0,
+            chamadas_ia=log_chamadas_ia, erro=str(e)[:500], observacao=log_observacao
+        )
+        return texto_erro
 
 # --- FLASK ---
 app = Flask(__name__)

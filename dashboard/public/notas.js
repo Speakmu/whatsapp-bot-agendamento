@@ -36,7 +36,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function mostrarAviso(html) { const a = $('aviso-config'); a.innerHTML = '⚠️ ' + html; a.style.display = 'block'; }
 
     function ouvirNotas() {
-        db.collection('notas_fiscais').onSnapshot(snap => {
+        // limit no servidor: sem isso o listener le a coleção inteira de notas
+        // fiscais (historico completo) a cada mudanca. 300 mais recentes cobre
+        // de sobra o pareamento com os 40 pedidos concluidos mostrados abaixo.
+        db.collection('notas_fiscais').orderBy('criado_em', 'desc').limit(300).onSnapshot(snap => {
             notasPorPedido = {};
             const notas = [];
             snap.forEach(d => {
@@ -52,13 +55,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let pedidosCache = [];
     function ouvirPedidos() {
+        // limit no servidor: sem isso o listener le a coleção inteira de
+        // pedidos concluidos (historico completo) a cada mudanca.
         db.collection('pedidos')
             .where('status', '==', 'CONCLUIDO')
+            .orderBy('hora_pedido', 'desc').limit(40)
             .onSnapshot(snap => {
                 pedidosCache = [];
                 snap.forEach(d => pedidosCache.push({ id: d.id, ...d.data() }));
-                pedidosCache.sort((a, b) => (b.hora_pedido?.toMillis?.() || 0) - (a.hora_pedido?.toMillis?.() || 0));
-                pedidosCache = pedidosCache.slice(0, 40);
                 renderPedidos();
             }, e => console.warn('pedidos:', e.message));
     }

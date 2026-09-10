@@ -53,8 +53,8 @@ function mapTPag(forma: string): string {
 
 function itensDoPedido(pedido: any, cfg: any) {
   const lista = pedido.itens || [];
-  if (Array.isArray(lista) && lista.length) {
-    return lista.map((i: any) => ({
+  const items = (Array.isArray(lista) && lista.length)
+    ? lista.map((i: any) => ({
       xProd: i.nome_exibicao || i.nome || 'Item',
       ncm: i.ncm || cfg.ncm,
       cfop: i.cfop || cfg.cfop,
@@ -63,13 +63,65 @@ function itensDoPedido(pedido: any, cfg: any) {
       uCom: 'UN',
       qCom: Number(i.quantidade) || 1,
       vUnCom: Number(i.preco) || 0,
-    }));
+    }))
+    : [{
+      xProd: pedido.item_pedido || 'Consumo', ncm: cfg.ncm, cfop: cfg.cfop,
+      csosn: cfg.cst, origem: cfg.origem || '0', uCom: 'UN', qCom: 1,
+      vUnCom: Number(pedido.valor_total) || 0,
+    }];
+  reconciliarComValorPago(items, pedido.valor_total);
+  return items;
+}
+
+// Cupom de desconto, resgate de pontos e taxa de entrega alteram o
+// valor_total do pedido sem mudar o preço unitário guardado em cada item
+// — a soma dos itens ficava diferente do valor realmente pago, e a SEFAZ
+// rejeita a nota ("Ausência de troco quando o valor dos pagamentos
+// informados for maior que o total da nota"). Mesma lógica de
+// dashboard/public/fiscal-client.js — precisa existir aqui também porque
+// o retry automático monta os itens de novo, sem passar pela emissão manual.
+function reconciliarComValorPago(items: any[], valorTotal: number) {
+  const alvo = Number(valorTotal) || 0;
+  const soma = items.reduce((s, i) => s + i.qCom * i.vUnCom, 0);
+  const diff = Math.round((soma - alvo) * 100) / 100;
+  if (Math.abs(diff) < 0.01) return;
+
+  if (diff < 0) {
+    // valor pago é maior que a soma dos itens (ex: taxa de entrega) -> soma no valor do último item
+    const ultimo = items[items.length - 1];
+    ultimo.vUnCom = Math.round((ultimo.vUnCom + (-diff) / ultimo.qCom) * 100) / 100;
+    return;
   }
-  return [{
-    xProd: pedido.item_pedido || 'Consumo', ncm: cfg.ncm, cfop: cfg.cfop,
-    csosn: cfg.cst, origem: cfg.origem || '0', uCom: 'UN', qCom: 1,
-    vUnCom: Number(pedido.valor_total) || 0,
-  }];
+
+  // Itens somam mais que o valor pago (cupom/pontos de desconto): distribui
+  // o desconto proporcionalmente entre os itens, sem deixar o desconto de
+  // nenhum item passar do valor dele (a SEFAZ rejeita isso também). Se
+  // sobrar valor por causa de itens já "saturados" (desconto = valor
+  // inteiro), reparte de novo só entre os que ainda têm folga.
+  let restante = diff;
+  items.forEach((it, idx) => {
+    const vItem = Math.round(it.qCom * it.vUnCom * 100) / 100;
+    const proporcional = idx === items.length - 1
+      ? restante
+      : Math.round((diff * (vItem / soma)) * 100) / 100;
+    const parte = Math.min(proporcional, vItem, restante);
+    if (parte > 0) {
+      it.vDesc = Math.round(((it.vDesc || 0) + parte) * 100) / 100;
+      restante = Math.round((restante - parte) * 100) / 100;
+    }
+  });
+  while (restante > 0.004) {
+    const comFolga = items.find(it => {
+      const vItem = Math.round(it.qCom * it.vUnCom * 100) / 100;
+      return vItem - (it.vDesc || 0) > 0.004;
+    });
+    if (!comFolga) break; // desconto >= soma de todos os itens (caso extremo, não dá pra reconciliar)
+    const vItem = Math.round(comFolga.qCom * comFolga.vUnCom * 100) / 100;
+    const folga = Math.round((vItem - (comFolga.vDesc || 0)) * 100) / 100;
+    const parte = Math.min(folga, restante);
+    comFolga.vDesc = Math.round(((comFolga.vDesc || 0) + parte) * 100) / 100;
+    restante = Math.round((restante - parte) * 100) / 100;
+  }
 }
 
 function urlsPorAmbiente(cfg: any) {

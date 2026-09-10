@@ -116,13 +116,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function listenOrders() {
-        db.collection('pedidos').where('status', '==', 'CONCLUIDO').onSnapshot(snap => {
-            state.pedidos = [];
-            snap.forEach(doc => state.pedidos.push({ id: doc.id, ...doc.data() }));
-            state.pedidos.sort((a, b) => (b.hora_pedido?.toMillis?.() || 0) - (a.hora_pedido?.toMillis?.() || 0));
-            state.pedidos = state.pedidos.slice(0, 60);
-            render();
-        }, err => console.warn('pedidos:', err.message));
+        // limit no servidor: sem isso o listener re-cobra leitura da coleção
+        // inteira de pedidos concluidos (historico completo) a cada mudanca.
+        db.collection('pedidos').where('status', '==', 'CONCLUIDO')
+            .orderBy('hora_pedido', 'desc').limit(60)
+            .onSnapshot(snap => {
+                state.pedidos = [];
+                snap.forEach(doc => state.pedidos.push({ id: doc.id, ...doc.data() }));
+                render();
+            }, err => console.warn('pedidos:', err.message));
     }
 
     function listenProducts() {
@@ -356,11 +358,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const nota = notaPorPedido[p.id];
             const st = nota ? String(nota.status || '').toUpperCase() : null;
             let acao;
-            // AUTORIZADA/CONTINGENCIA/PROCESSANDO = NF-e valida ou em curso. CANCELADA/
-            // INUTILIZADA tambem contam: a venda ja teve uma NF-e oficialmente emitida
-            // (e depois cancelada na SEFAZ) — cancelar a venda por aqui nao desfaz isso,
-            // entao continua bloqueado mesmo com a nota cancelada.
-            const nfEmitida = st === 'AUTORIZADA' || st === 'CONTINGENCIA' || st === 'PROCESSANDO' || st === 'CANCELADA' || st === 'INUTILIZADA';
+            // AUTORIZADA/CONTINGENCIA/PROCESSANDO = NF-e valida ou em curso, bloqueia
+            // cancelar a venda por aqui (cancele a nota primeiro). CANCELADA/INUTILIZADA
+            // significam que a nota ja nao vale mais fiscalmente, entao a venda pode
+            // ser cancelada normalmente.
+            const nfEmitida = st === 'AUTORIZADA' || st === 'CONTINGENCIA' || st === 'PROCESSANDO';
             if (st === 'AUTORIZADA' || st === 'CONTINGENCIA') {
                 acao = '<span class="badge b-ok">Emitida</span>';
                 if (nota.danfeBase64) acao += `<br><button class="btn" data-imprimir="${nota.id}" title="Imprimir cupom" style="margin-top:6px">🖨️ Imprimir</button>`;
@@ -957,8 +959,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!pedido) return;
         const nota = notaFiscalPorPedido()[id];
         const st = nota ? String(nota.status || '').toUpperCase() : null;
-        if (st === 'AUTORIZADA' || st === 'CONTINGENCIA' || st === 'PROCESSANDO' || st === 'CANCELADA' || st === 'INUTILIZADA') {
-            alert('Esta venda já teve NF-e emitida (mesmo que a nota tenha sido cancelada depois) — não é possível cancelar a venda por aqui.');
+        if (st === 'AUTORIZADA' || st === 'CONTINGENCIA' || st === 'PROCESSANDO') {
+            alert('Esta venda tem uma NF-e ativa — cancele a nota fiscal antes de cancelar a venda.');
             return;
         }
         if (!confirm(`Cancelar a venda #${String(id).slice(0, 6)} (${money(pedido.valor_total)})? Isso não pode ser desfeito.`)) return;
