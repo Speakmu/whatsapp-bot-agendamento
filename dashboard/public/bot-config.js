@@ -27,8 +27,19 @@ document.addEventListener('DOMContentLoaded', () => {
         ferias_mensagem: 'Estamos de férias no momento e voltamos no dia {data_volta}. Até lá!'
     };
 
+    // Config técnica de suporte (não é decisão comercial do cliente) — só
+    // aparece pra quem loga com esse e-mail. Some da tela (não só desabilita)
+    // pra clientes não terem nem a opção de mexer sem saber o que é.
+    const EMAIL_SUPORTE = 'contato.seusuportetec@gmail.com';
+    function aplicarVisibilidadeSuporte(email) {
+        const ehSuporte = String(email || '').trim().toLowerCase() === EMAIL_SUPORTE;
+        const campoModelo = $('campo-bot-modelo');
+        if (campoModelo) campoModelo.style.display = ehSuporte ? '' : 'none';
+    }
+
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
+        aplicarVisibilidadeSuporte(user.email);
         carregarBot();
         $('salvar-bot').addEventListener('click', salvarBot);
         $('salvar-bairros').addEventListener('click', salvarBairros);
