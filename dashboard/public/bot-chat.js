@@ -46,11 +46,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return semAcento.toLowerCase().trim().replace(/\s+/g, ' ');
     }
 
+    // "YYYY-MM-DD" de hoje, no fuso local (não UTC) — valor inicial do filtro.
+    function hojeStr() {
+        const d = new Date();
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
+        $('conv-filtro-data').value = hojeStr();
         carregarConversas();
         carregarCardapioCache();
         $('btn-refresh-conversas').addEventListener('click', carregarConversas);
+        $('conv-filtro-data').addEventListener('change', carregarConversas);
         $('toggle-manual').addEventListener('change', onToggleManual);
         $('btn-send').addEventListener('click', enviarMensagem);
         $('reply-text').addEventListener('keydown', e => {
@@ -74,7 +82,15 @@ document.addEventListener('DOMContentLoaded', () => {
     async function carregarConversas() {
         const lista = $('conv-list');
         try {
-            const snap = await COL.orderBy('ultima_interacao', 'desc').limit(50).get();
+            const dataStr = $('conv-filtro-data').value || hojeStr();
+            const [ano, mes, dia] = dataStr.split('-').map(Number);
+            const inicio = new Date(ano, mes - 1, dia, 0, 0, 0, 0);
+            const fim = new Date(ano, mes - 1, dia + 1, 0, 0, 0, 0);
+            const snap = await COL
+                .where('ultima_interacao', '>=', inicio)
+                .where('ultima_interacao', '<', fim)
+                .orderBy('ultima_interacao', 'desc')
+                .limit(50).get();
             conversas = [];
             snap.forEach(doc => conversas.push({ id: doc.id, ...doc.data() }));
             // Conversas que precisam de atenção sempre no topo, senão a mais recente primeiro.
