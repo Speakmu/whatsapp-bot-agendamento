@@ -378,7 +378,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderPix() {
+        // Removido da tela: esse PIX era gerado localmente a partir da chave
+        // configurada (nunca foi uma cobrança de verdade registrada no banco,
+        // ao contrário do boleto) — deixava parecer que era uma opção válida
+        // de pagamento quando não era.
         const wrap = $('pix-box-wrap');
+        if (wrap) wrap.style.display = 'none';
+        return;
+        // eslint-disable-next-line no-unreachable
         const cobranca = cobrancaAtual();
         if (!cobranca || !cobrancaCfg.pix_chave) {
             wrap.style.display = 'none';
