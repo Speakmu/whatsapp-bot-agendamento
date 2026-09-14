@@ -23,6 +23,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let conversas = [];
     let conversaAtualId = null;
     let pollConversas = null;
+    let souSuporte = false;
+    const EMAIL_SUPORTE = 'contato.seusuportetec@gmail.com';
     let pollMensagens = null;
     let cardapioCache = [];
     // Trava simples contra duplo-clique: o clique não dá feedback imediato
@@ -54,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     auth.onAuthStateChanged(user => {
         if (!user) { window.location.href = '/login.html'; return; }
+        souSuporte = (user.email || '').trim().toLowerCase() === EMAIL_SUPORTE;
         $('conv-filtro-data').value = hojeStr();
         carregarConversas();
         carregarCardapioCache();
@@ -117,8 +120,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const badgeAtencao = c.precisa_atencao
                 ? `<span class="badge-atencao" title="${escapeHtml(c.motivo_atencao || '')}">⚠️ Precisa de atenção</span>`
                 : '';
+            const btnExcluir = souSuporte
+                ? `<button class="conv-excluir" data-excluir="${escapeHtml(c.id)}" title="Excluir conversa">🗑️</button>`
+                : '';
             return `<div class="conv-item${ativo}${classeAtencao}" data-id="${escapeHtml(c.id)}">
-                <div class="conv-id">${escapeHtml(c.id)}</div>
+                <div class="conv-id-row">
+                    <div class="conv-id">${escapeHtml(c.id)}</div>
+                    ${btnExcluir}
+                </div>
                 ${badgeAtencao}
                 <div class="conv-preview">${preview}</div>
                 <div class="conv-meta">
@@ -130,6 +139,35 @@ document.addEventListener('DOMContentLoaded', () => {
         lista.querySelectorAll('.conv-item').forEach(el => {
             el.addEventListener('click', () => abrirConversa(el.dataset.id));
         });
+        lista.querySelectorAll('[data-excluir]').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation(); // não abre a conversa ao clicar na lixeira
+                excluirConversa(btn.dataset.excluir);
+            });
+        });
+    }
+
+    async function excluirConversa(id) {
+        if (!souSuporte) return;
+        if (!confirm(`Excluir a conversa com ${id}? Isso apaga o histórico de mensagens permanentemente.`)) return;
+        try {
+            await COL.doc(id).delete();
+            conversas = conversas.filter(c => c.id !== id);
+            if (conversaAtualId === id) {
+                conversaAtualId = null;
+                $('chat-id').textContent = 'Selecione uma conversa';
+                $('chat-status').textContent = '';
+                $('messages').innerHTML = '<div class="chat-empty">Escolha uma conversa na lista ao lado.</div>';
+                $('reply-text').disabled = true;
+                $('btn-send').disabled = true;
+                $('toggle-manual').disabled = true;
+                $('toggle-manual').checked = false;
+                $('atencao-box').style.display = 'none';
+            }
+            renderConversas();
+        } catch (err) {
+            alert('Erro ao excluir conversa: ' + err.message);
+        }
     }
 
     async function abrirConversa(id) {

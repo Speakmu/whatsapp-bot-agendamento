@@ -36,7 +36,10 @@
         .conv-item { border:1px solid var(--line); border-radius:10px; padding:10px; margin-bottom:8px; cursor:pointer; background:#fff; }
         .conv-item:hover { border-color:#c9d3e0; }
         .conv-item.active { border-color:var(--accent); background:#fff6f2; }
+        .conv-item .conv-id-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
         .conv-item .conv-id { font-weight:800; font-size:.92rem; }
+        .conv-item .conv-excluir { background:none; border:none; cursor:pointer; font-size:.9rem; padding:2px 4px; border-radius:6px; line-height:1; opacity:.55; }
+        .conv-item .conv-excluir:hover { opacity:1; background:#fdecea; }
         .conv-item .conv-preview { color:var(--muted); font-size:.8rem; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .conv-item .conv-meta { display:flex; justify-content:space-between; align-items:center; margin-top:6px; }
         .conv-item .conv-time { color:var(--muted); font-size:.72rem; }
