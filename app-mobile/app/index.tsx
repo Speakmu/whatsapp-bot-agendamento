@@ -329,6 +329,28 @@ const SecaoSacola = ({
     b.toLowerCase().includes(buscaBairro.trim().toLowerCase())
   );
 
+  // Agrupa itens iguais (mesmo produto adicionado várias vezes) numa única
+  // linha com quantidade, em vez de repetir o card — muito comum o cliente
+  // pedir "3x Pastel Chocolate" e antes isso virava 3 cards idênticos.
+  const itensAgrupados = React.useMemo(() => {
+    const grupos = new Map<string, { chave: string; nome: string; preco: number; itens: any[] }>();
+    carrinho.forEach((item: any) => {
+      const chave = String(item.id || item.nome_exibicao || item.nome);
+      const existente = grupos.get(chave);
+      if (existente) {
+        existente.itens.push(item);
+      } else {
+        grupos.set(chave, {
+          chave,
+          nome: item.nome_exibicao || item.nome,
+          preco: Number(item.preco) || 0,
+          itens: [item]
+        });
+      }
+    });
+    return Array.from(grupos.values());
+  }, [carrinho]);
+
   return (
     <>
     <KeyboardAvoidingView
@@ -345,21 +367,44 @@ const SecaoSacola = ({
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={{ padding: 15, paddingBottom: 220 }}
       >
-        {/* LISTA DE ITENS */}
-        {carrinho.map(item => (
-          <View key={item.id_carrinho} style={styles.cardItemCarrinho}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.nomeItemCarrinho}>{item.nome_exibicao || item.nome}</Text>
-              <Text style={styles.precoItemCarrinho}>R$ {Number(item.preco).toFixed(2)}</Text>
+        {/* LISTA DE ITENS (agrupados por produto) */}
+        {itensAgrupados.map(grupo => {
+          const qtd = grupo.itens.length;
+          return (
+            <View key={grupo.chave} style={styles.cardItemCarrinho}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.nomeItemCarrinho}>
+                  {qtd > 1 ? `${qtd}x ` : ''}{grupo.nome}
+                </Text>
+                <Text style={styles.precoItemCarrinho}>R$ {(grupo.preco * qtd).toFixed(2)}</Text>
+              </View>
+              <View style={styles.stepperCarrinho}>
+                <TouchableOpacity
+                  onPress={() => {
+                    const ultimoId = grupo.itens[grupo.itens.length - 1].id_carrinho;
+                    setCarrinho(carrinho.filter(i => i.id_carrinho !== ultimoId));
+                  }}
+                  style={styles.btnStepper}
+                >
+                  <Text style={styles.btnStepperTxt}>−</Text>
+                </TouchableOpacity>
+                <Text style={styles.qtdStepper}>{qtd}</Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    const clone = {
+                      ...grupo.itens[0],
+                      id_carrinho: Math.random().toString(36).slice(2, 9) + Date.now()
+                    };
+                    setCarrinho([...carrinho, clone]);
+                  }}
+                  style={styles.btnStepper}
+                >
+                  <Text style={styles.btnStepperTxt}>+</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            <TouchableOpacity
-              onPress={() => setCarrinho(carrinho.filter(i => i.id_carrinho !== item.id_carrinho))}
-              style={styles.btnRemover}
-            >
-              <Text style={{ color: BRAND_GREEN, fontWeight: 'bold' }}>Remover</Text>
-            </TouchableOpacity>
-          </View>
-        ))}
+          );
+        })}
 
         {carrinho.length > 0 && (
           <View style={styles.secaoCheckout}>
@@ -3018,6 +3063,14 @@ const styles = StyleSheet.create({
   nomeItemCarrinho: { fontSize: 16, fontWeight: 'bold', color: '#444' },
   precoItemCarrinho: { fontSize: 14, color: BRAND_GREEN, fontWeight: 'bold' },
   btnRemover: { padding: 5 },
+  stepperCarrinho: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  btnStepper: {
+    width: 28, height: 28, borderRadius: 14,
+    borderWidth: 1, borderColor: BRAND_GREEN,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  btnStepperTxt: { color: BRAND_GREEN, fontSize: 16, fontWeight: 'bold', lineHeight: 18 },
+  qtdStepper: { minWidth: 22, textAlign: 'center', fontSize: 15, fontWeight: 'bold', color: '#444' },
 
   resumoPedido: {
     backgroundColor: '#FFF',
