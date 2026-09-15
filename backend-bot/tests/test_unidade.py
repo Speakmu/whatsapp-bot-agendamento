@@ -51,6 +51,31 @@ def test_texto_vazio():
     assert not bot._soa_como_confirmacao(None)
 
 
+# ---------------- _soa_como_negativa_entrega ----------------
+def test_negativa_entrega_direta_detecta():
+    # Caso real de produção: bairro "nao_encontrado" e a IA negou entrega
+    # em vez de escalar pra equipe.
+    assert bot._soa_como_negativa_entrega(
+        "Nós não realizamos entregas no bairro Esmeralda em São Sebastião do Paraíso no momento."
+    )
+    assert bot._soa_como_negativa_entrega("Infelizmente não entregamos nessa região.")
+
+
+def test_escalacao_bairro_nao_detecta_negativa():
+    assert not bot._soa_como_negativa_entrega(
+        "Vou confirmar com a equipe se entregamos nesse bairro e te aviso."
+    )
+
+
+def test_pergunta_sobre_bairro_nao_detecta_negativa():
+    assert not bot._soa_como_negativa_entrega("Não entregamos nesse bairro, mas quer tentar outro endereço?")
+
+
+def test_negativa_entrega_texto_vazio():
+    assert not bot._soa_como_negativa_entrega("")
+    assert not bot._soa_como_negativa_entrega(None)
+
+
 # ---------------- _normalizar_termo ----------------
 def test_normalizar_termo_remove_acento_e_espacos():
     assert bot._normalizar_termo("  São  Genaro ") == "sao genaro"

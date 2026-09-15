@@ -1796,6 +1796,29 @@ def _soa_como_confirmacao(texto):
     return False
 
 
+def _soa_como_negativa_entrega(texto):
+    """Heurística irmã de _soa_como_confirmacao: o texto final da IA nega
+    entrega num bairro ("não entregamos aí")? Só deve disparar quando
+    verificar_bairro_entrega voltou "nao_encontrado"/"sem_lista_cadastrada"
+    NESTA rodada — nesse caso não existe base pra afirmar que não atende
+    (só que não achou o bairro na lista); a resposta certa é escalar pra
+    equipe, nunca declarar recusa. Frase a frase, mesma lógica de ignorar
+    "?" e "equipe" (fluxo legítimo de escalação já menciona os dois)."""
+    if not texto:
+        return False
+    radicais = ("nao entregamos", "não entregamos", "nao atendemos", "não atendemos",
+                "nao realizamos entrega", "não realizamos entrega", "nao fazemos entrega",
+                "não fazemos entrega", "nao entrega nesse bairro", "não entrega nesse bairro",
+                "nao entrega nessa regiao", "não entrega nessa região")
+    for frase in re.split(r'(?<=[.!?\n])\s+', texto):
+        f = frase.lower()
+        if "?" in f or "equipe" in f:
+            continue
+        if any(r in f for r in radicais):
+            return True
+    return False
+
+
 # --- LÓGICA AGENTE OPENAI ---
 def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     import re
@@ -2176,6 +2199,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                                                 or _ultima_resposta_mostrou_total(historico_msgs))
         falha_sistema_pedido = None
         pedido_registrado_ok = False
+        bairro_nao_encontrado = False
         final_text = None
 
         for rodada in range(1, MAX_RODADAS_FERRAMENTA + 1):
@@ -2260,6 +2284,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         rascunho_definir_entrega(id_usuario, "ENTREGA", resultado.get("bairro"), None, bot_cfg)
                         resultado["bairro_gravado_no_pedido"] = True
                     if resultado.get("status") in ("nao_encontrado", "sem_lista_cadastrada"):
+                        bairro_nao_encontrado = True
                         marcar_atencao(id_usuario, f"Bairro não reconhecido: \"{args.get('bairro_cliente')}\"",
                                        tipo="bairro", dados={"bairro_cliente": args.get("bairro_cliente")})
                 elif function_name == "consultar_meu_pedido":
@@ -2357,6 +2382,21 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     "Deixa eu confirmar certinho os detalhes do seu pedido antes de "
                     "fechar — pode me confirmar os itens e a forma de entrega/pagamento "
                     "mais uma vez?"
+                )
+
+            # Mesma rede de segurança, pro caso do bairro: verificar_bairro_entrega
+            # voltou "não achei na lista" (não "não atende" — a lista não tem
+            # esse bairro cadastrado nem pra sim nem pra não), e mesmo assim a
+            # IA declarou recusa de entrega pro cliente. Já aconteceu em
+            # produção mesmo com a instrução no prompt pra escalar em vez de
+            # negar. marcar_atencao (equipe avisada) já rodou lá na chamada da
+            # função; aqui só troca o texto que vai pro cliente.
+            if bairro_nao_encontrado and _soa_como_negativa_entrega(final_text):
+                log_observacao = "texto_negou_entrega_sem_confirmar_bairro"
+                final_text = (
+                    "Deixa eu confirmar esse bairro com a equipe antes de garantir a "
+                    "entrega — já registrei aqui e alguém confirma com você em instantes. "
+                    "Se preferir, também dá pra combinar a retirada na loja."
                 )
 
         ck("antes salvar_historico_firestore final")
