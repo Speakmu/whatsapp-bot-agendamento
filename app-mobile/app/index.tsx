@@ -44,15 +44,15 @@ import { clientConfig } from '../clientConfig';
 // Na web cai pra localStorage; fora da web, comportamento igual a antes.
 async function storageSet(key: string, value: string): Promise<void> {
   if (Platform.OS === 'web') { try { window.localStorage.setItem(key, value); } catch { } return; }
-  await storageSet(key, value);
+  await SecureStore.setItemAsync(key, value);
 }
 async function storageGet(key: string): Promise<string | null> {
   if (Platform.OS === 'web') { try { return window.localStorage.getItem(key); } catch { return null; } }
-  return storageGet(key);
+  return SecureStore.getItemAsync(key);
 }
 async function storageDelete(key: string): Promise<void> {
   if (Platform.OS === 'web') { try { window.localStorage.removeItem(key); } catch { } return; }
-  await storageDelete(key);
+  await SecureStore.deleteItemAsync(key);
 }
 
 // Alert.alert do react-native não mostra nada visível na web (só loga no
