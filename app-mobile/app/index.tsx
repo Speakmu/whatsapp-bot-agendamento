@@ -1844,7 +1844,7 @@ function AppCliente() {
           });
           showAlert(
             "🎉 Parabéns!",
-            `Pagamento aprovado!\n\nVocê acaba de ganhar +${totalPontosGanhos} pontos fidelidade. Continue assim para trocar por pizzas grátis! 🍕`,
+            `Pagamento aprovado!\n\nVocê acaba de ganhar +${totalPontosGanhos} pontos fidelidade. Continue assim para trocar por descontos nas compras!`,
             [{ text: "Sensacional!", onPress: () => console.log("Feedback fechado") }]
           );
           console.log("✅ Pontos creditados com sucesso no ID:", usuarioId);
