@@ -1574,7 +1574,10 @@ function AppCliente() {
     return () => assinatura.remove();
   }, []);
   useEffect(() => {
-    if (!usuarioId || abaAtiva !== 'perfil') return;
+    // Sem depender da aba: o saldo de pontos é usado também na Sacola (resgate)
+    // e no cartão de fidelidade — travar a busca até o cliente abrir a aba
+    // Perfil deixava o valor em 0 em qualquer outro lugar até essa visita.
+    if (!usuarioId) return;
 
     // Escuta o documento do usuário em tempo real
     const userRef = doc(dbModular, "usuarios_app", usuarioId);
@@ -1586,7 +1589,7 @@ function AppCliente() {
     });
 
     return () => unsubscribe();
-  }, [usuarioId, abaAtiva]);
+  }, [usuarioId]);
   const iniciarPagamentoMercadoPago = async () => {
     if (!endereco || endereco.trim() === '') {
       showAlert("Atenção", "Por favor, preencha o endereço de entrega antes de pagar.");
