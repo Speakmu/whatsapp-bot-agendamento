@@ -76,6 +76,27 @@ def test_negativa_entrega_texto_vazio():
     assert not bot._soa_como_negativa_entrega(None)
 
 
+# ---------------- _soa_como_cancelamento ----------------
+def test_cancelamento_direto_detecta():
+    # Caso real de produção: cliente pediu "Cancela", a IA respondeu isso
+    # sem chamar cancelar_pedido, e o pedido continuou ativo/foi pra cozinha.
+    assert bot._soa_como_cancelamento("O pedido foi cancelado. Se mudar de ideia, é só chamar.")
+    assert bot._soa_como_cancelamento("Cancelei seu pedido, tudo certo.")
+
+
+def test_escalacao_cancelamento_nao_detecta():
+    assert not bot._soa_como_cancelamento("Vou confirmar o cancelamento com a equipe e te aviso.")
+
+
+def test_pergunta_sobre_cancelamento_nao_detecta():
+    assert not bot._soa_como_cancelamento("Quer mesmo cancelar o pedido?")
+
+
+def test_cancelamento_texto_vazio():
+    assert not bot._soa_como_cancelamento("")
+    assert not bot._soa_como_cancelamento(None)
+
+
 # ---------------- _normalizar_termo ----------------
 def test_normalizar_termo_remove_acento_e_espacos():
     assert bot._normalizar_termo("  São  Genaro ") == "sao genaro"

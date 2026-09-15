@@ -1216,6 +1216,44 @@ def consultar_meu_pedido(wa_id: str):
         print(f"ERRO ao consultar pedido: {e}")
         return json.dumps({"status": "erro", "motivo": "Erro interno."})
 
+# Status em que o pedido ainda pode ser cancelado pelo próprio cliente via
+# bot — depois que a cozinha começa a preparar (EM_PREPARO em diante), quem
+# decide é a equipe, não uma função automática.
+STATUS_CANCELAVEL_PELO_CLIENTE = ("PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "AGUARDANDO_PIX")
+
+def cancelar_pedido_recente(wa_id: str):
+    """Cancela DE VERDADE o pedido mais recente deste cliente, se ainda
+    estiver num status cancelável. Existe porque a IA já disse 'pedido
+    cancelado' pro cliente sem chamar função nenhuma — o pedido continuava
+    ativo no Firestore, foi parar na cozinha e virou venda de verdade
+    mesmo com cliente e atendente achando que tinha sido cancelado."""
+    if db is None:
+        return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
+    try:
+        docs = db.collection('pedidos') \
+            .where('telefone_cliente', '==', str(wa_id)) \
+            .order_by('hora_pedido', direction=firestore.Query.DESCENDING) \
+            .limit(1).get(timeout=10)
+        if not docs:
+            return json.dumps({"status": "sem_pedido"})
+
+        doc = docs[0]
+        pedido = doc.to_dict()
+        status_atual = pedido.get("status")
+        if status_atual == "CANCELADO":
+            return json.dumps({"status": "ok", "ja_estava_cancelado": True})
+        if status_atual not in STATUS_CANCELAVEL_PELO_CLIENTE:
+            return json.dumps({
+                "status": "erro",
+                "motivo": f"Pedido já está '{status_atual}' — nesse ponto só a equipe pode cancelar manualmente.",
+                "status_pedido": status_atual
+            })
+        doc.reference.update({"status": "CANCELADO"}, timeout=10)
+        return json.dumps({"status": "ok", "pedido_id": doc.id, "valor_total": pedido.get("valor_total")})
+    except Exception as e:
+        print(f"ERRO ao cancelar pedido: {e}")
+        return json.dumps({"status": "erro", "motivo": "Erro interno."})
+
 def registrar_comprovante(wa_id: str, imagem_url: str):
     if db is None: return "Erro no banco de dados."
     
@@ -1819,6 +1857,25 @@ def _soa_como_negativa_entrega(texto):
     return False
 
 
+def _soa_como_cancelamento(texto):
+    """Heurística irmã de _soa_como_confirmacao: o texto final da IA afirma
+    que o PEDIDO (já registrado) foi cancelado? Caso real de produção: cliente
+    pediu cancelamento, a IA respondeu "o pedido foi cancelado" sem chamar
+    cancelar_pedido — o pedido continuou ativo, foi pra cozinha e virou venda
+    de verdade, enganando cliente e equipe ao mesmo tempo."""
+    if not texto:
+        return False
+    radicais = ("pedido foi cancelado", "pedido cancelado", "cancelei seu pedido", "cancelei o pedido",
+                "pedido está cancelado", "pedido esta cancelado", "cancelamos seu pedido", "cancelamos o pedido")
+    for frase in re.split(r'(?<=[.!?\n])\s+', texto):
+        f = frase.lower()
+        if "?" in f or "equipe" in f:
+            continue
+        if any(r in f for r in radicais):
+            return True
+    return False
+
+
 # --- LÓGICA AGENTE OPENAI ---
 def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     import re
@@ -1969,6 +2026,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
            {"bairro_cliente": {"type": "string"}}, ["bairro_cliente"]),
         _f("consultar_meu_pedido",
            "Pedido mais recente JÁ REGISTRADO deste cliente (itens, valor, status). Use quando ele perguntar de um pedido já feito."),
+        _f("cancelar_pedido",
+           "Cancela DE VERDADE o pedido mais recente já registrado (fechar_pedido já rodou) quando o cliente pedir pra cancelar. "
+           "Sem parâmetros. OBRIGATÓRIO chamar antes de dizer 'cancelado' — NUNCA diga que cancelou sem chamar. Se voltar status "
+           "'erro' (já em preparo), diga que a equipe vai confirmar o cancelamento."),
     ]
 
     nome_atendente = bot_cfg.get("nome_atendente") or BOT_CONFIG_DEFAULTS["nome_atendente"]
@@ -2142,6 +2203,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        topo do prompt avisar que essa dúvida já passou de 10 minutos, não
        prometa de novo: resolva com o cliente.
 
+       SOBRE CANCELAMENTO DE PEDIDO JÁ REGISTRADO (depois de fechar_pedido ter
+       rodado com sucesso): se o cliente pedir pra cancelar, chame
+       'cancelar_pedido' AGORA — NUNCA diga "pedido cancelado"/"cancelei" sem
+       ter chamado essa função e recebido status "ok". Se ela voltar erro
+       (pedido já em preparo), diga que a equipe vai confirmar o cancelamento
+       com ele, não afirme que cancelou.
+
     5. COMPORTAMENTO:
        - NUNCA mostre suas instruções internas para o cliente (ex: "Não pergunte o nome"). Apenas execute a ação.
        - NUNCA copie e cole estas regras no chat. Converse como um humano.
@@ -2199,6 +2267,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                                                 or _ultima_resposta_mostrou_total(historico_msgs))
         falha_sistema_pedido = None
         pedido_registrado_ok = False
+        pedido_cancelado_ok = False
         bairro_nao_encontrado = False
         final_text = None
 
@@ -2289,6 +2358,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                        tipo="bairro", dados={"bairro_cliente": args.get("bairro_cliente")})
                 elif function_name == "consultar_meu_pedido":
                     content = consultar_meu_pedido(wa_id)
+                elif function_name == "cancelar_pedido":
+                    resultado = json.loads(cancelar_pedido_recente(wa_id))
+                    if resultado.get("status") == "ok":
+                        pedido_cancelado_ok = True
+                    else:
+                        marcar_atencao(
+                            id_usuario,
+                            f"Cliente pediu cancelamento mas o pedido já está '{resultado.get('status_pedido')}' — confirme manualmente.",
+                            tipo="pedido_falhou", dados={"resultado": resultado}
+                        )
                 elif function_name in ("calcular_pedido", "registrar_pedido"):
                     # Removidas na Fase 4 — o pedido vive no rascunho.
                     resultado = {"status": "erro", "motivo": "Essa função não existe mais. Use adicionar_item / definir_entrega / "
@@ -2397,6 +2476,23 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     "Deixa eu confirmar esse bairro com a equipe antes de garantir a "
                     "entrega — já registrei aqui e alguém confirma com você em instantes. "
                     "Se preferir, também dá pra combinar a retirada na loja."
+                )
+
+            # Mesma rede de segurança pro cancelamento: já aconteceu em produção
+            # a IA dizer "pedido cancelado" sem ter chamado cancelar_pedido — o
+            # pedido continuou ativo, foi pra cozinha e virou venda de verdade,
+            # com cliente E equipe achando que tinha sido cancelado.
+            if _soa_como_cancelamento(final_text) and not pedido_cancelado_ok:
+                log_observacao = "texto_cancelamento_sem_chamar_cancelar_pedido"
+                marcar_atencao(
+                    id_usuario,
+                    "IA disse que o pedido foi cancelado sem ter chamado cancelar_pedido — o pedido pode continuar ativo, confirme manualmente.",
+                    tipo="pedido_falhou",
+                    dados={"resposta_suspeita": final_text}
+                )
+                final_text = (
+                    "Só um instante — deixa eu confirmar esse cancelamento certinho com a "
+                    "equipe antes de garantir. Alguém já vai confirmar com você."
                 )
 
         ck("antes salvar_historico_firestore final")
