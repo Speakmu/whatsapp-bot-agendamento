@@ -182,7 +182,6 @@ interface SacolaProps {
   usuarioId: string | undefined;
   setAbaAtiva: (aba: string) => void;
   finalizarPedido: (dados: any) => void;
-  iniciarPagamentoMercadoPago: () => void;
   processarPagamentoAPI: (dados: any) => void;
   setModalCartaoVisivel: (v: boolean) => void;
   processarPagamentoPix: () => void;
@@ -1590,46 +1589,6 @@ function AppCliente() {
 
     return () => unsubscribe();
   }, [usuarioId]);
-  const iniciarPagamentoMercadoPago = async () => {
-    if (!endereco || endereco.trim() === '') {
-      showAlert("Atenção", "Por favor, preencha o endereço de entrega antes de pagar.");
-      setAbaAtiva('sacola'); // Garante que ele veja o erro no campo
-      return;
-    }
-
-    setCarregandoLogin(true);
-
-    try {
-      const response = await fetch(`https://us-central1-${firebaseConfig.projectId}.cloudfunctions.net/criarPreferencia`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          itens: carrinho.map(item => ({
-            id: String(item.id_carrinho || item.id),
-            // Use 'nome' em vez de 'title', pois sua function mapeia item.nome
-            nome: item.nome_exibicao || item.nome,
-            preco: parseFloat(Number(item.preco).toFixed(2))
-          })),
-          usuarioEmail: clientConfig.emailPagamentoPadrao
-        })
-      });
-
-      const resData = await response.json();
-      const urlPagamento = resData.data?.sandbox_init_point || resData.data?.init_point;
-
-      if (urlPagamento) {
-        Linking.openURL(urlPagamento);
-      } else {
-        showAlert("Erro", "Não foi possível gerar o link de pagamento.");
-      }
-    } catch (error) {
-      console.error(error);
-      showAlert("Erro", "Falha ao conectar com o servidor.");
-    } finally {
-      setCarregandoLogin(false);
-    }
-  };
-
   const processarPagamentoPix = async () => {
     // 0. Endereço/bairro obrigatórios apenas em entrega
     if (tipoEntrega === 'entrega' && (!endereco || endereco.trim() === '')) {
@@ -2467,7 +2426,6 @@ function AppCliente() {
                 usuarioId={usuarioId}
                 setAbaAtiva={setAbaAtiva}
                 finalizarPedido={finalizarPedido}
-                iniciarPagamentoMercadoPago={iniciarPagamentoMercadoPago}
                 processarPagamentoAPI={processarPagamentoAPI}
                 setModalCartaoVisivel={setModalCartaoVisivel}
                 processarPagamentoPix={processarPagamentoPix}
