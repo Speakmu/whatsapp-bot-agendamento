@@ -24,7 +24,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ferias_ativo: false,
         ferias_inicio: '',
         ferias_fim: '',
-        ferias_mensagem: 'Estamos de férias no momento e voltamos no dia {data_volta}. Até lá!'
+        ferias_mensagem: 'Estamos de férias no momento e voltamos no dia {data_volta}. Até lá!',
+        aviso_encomenda_festa_ativo: true,
+        aviso_encomenda_festa_texto: 'Para encomendas de salgadinhos para festa ou cento de salgados, fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp).'
     };
 
     // Config técnica de suporte (não é decisão comercial do cliente) — só
@@ -139,6 +141,8 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-ferias-inicio').value = d.ferias_inicio || '';
             $('bot-ferias-fim').value = d.ferias_fim || '';
             $('bot-ferias-mensagem').value = d.ferias_mensagem || '';
+            $('bot-festa-ativo').checked = d.aviso_encomenda_festa_ativo !== false;
+            $('bot-festa-texto').value = d.aviso_encomenda_festa_texto || '';
             $('bot-nome-atendente').value = d.nome_atendente || '';
             $('bot-nome-empresa').value = d.nome_empresa || '';
             $('bot-chave-pix').value = d.chave_pix || '';
@@ -181,6 +185,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ferias_inicio: $('bot-ferias-inicio').value || '',
             ferias_fim: $('bot-ferias-fim').value || '',
             ferias_mensagem: $('bot-ferias-mensagem').value.trim() || BOT_DEFAULTS.ferias_mensagem,
+            aviso_encomenda_festa_ativo: $('bot-festa-ativo').checked,
+            aviso_encomenda_festa_texto: $('bot-festa-texto').value.trim() || BOT_DEFAULTS.aviso_encomenda_festa_texto,
             nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,
             nome_empresa: $('bot-nome-empresa').value.trim() || BOT_DEFAULTS.nome_empresa,
             chave_pix: $('bot-chave-pix').value.trim(),

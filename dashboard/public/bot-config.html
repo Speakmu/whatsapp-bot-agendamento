@@ -88,6 +88,13 @@
                 <small>Use <code>{data_volta}</code> que o bot troca pela data certa (dia seguinte ao "At&eacute;").</small>
             </div>
 
+            <label class="check-line"><input id="bot-festa-ativo" type="checkbox"> Avisar sobre encomenda de festa/cento (o bot n&atilde;o tenta vender como item comum do card&aacute;pio)</label>
+            <div class="campo">
+                <label>Mensagem quando pedirem salgadinhos pra festa / cento de salgados</label>
+                <textarea id="bot-festa-texto" placeholder="Para encomendas de salgadinhos para festa ou cento de salgados, fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp)."></textarea>
+                <small>Troque aqui o telefone/texto sem precisar mexer em c&oacute;digo. O bot usa essa mensagem sempre que o cliente pedir "cento de salgados" ou "salgadinhos pra festa".</small>
+            </div>
+
             <div class="acoes"><button class="btn btn-salvar" id="salvar-bot">Salvar configura&ccedil;&otilde;es do bot</button></div>
         </div>
 
