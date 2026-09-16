@@ -405,6 +405,24 @@ const SecaoSacola = ({
           );
         })}
 
+        {carrinho.length === 0 && (
+          <View style={{ alignItems: 'center', paddingTop: 60, paddingHorizontal: 30 }}>
+            <Text style={{ fontSize: 48, marginBottom: 12 }}>🛍️</Text>
+            <Text style={{ fontSize: 17, fontWeight: 'bold', color: '#2d3436', marginBottom: 6 }}>
+              Sua sacola está vazia
+            </Text>
+            <Text style={{ fontSize: 14, color: '#888', textAlign: 'center', marginBottom: 24 }}>
+              Que tal dar uma olhada no cardápio e escolher algo gostoso?
+            </Text>
+            <TouchableOpacity
+              onPress={() => setAbaAtiva('home')}
+              style={{ backgroundColor: corMarca, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 10 }}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Ver cardápio</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {carrinho.length > 0 && (
           <View style={styles.secaoCheckout}>
             <Text style={styles.tituloCheckout}>Confirme seus Dados</Text>
@@ -900,9 +918,6 @@ const SecaoHome = React.memo(({
                 <Text style={[styles.logoTexto, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeApp}</Text>
               )}
               <View style={{ alignItems: 'center' }}>
-                <TouchableOpacity style={styles.btnNotificacao}>
-                  <Text style={{ fontSize: 20 }}>🔔</Text>
-                </TouchableOpacity>
                 <Text style={styles.saudacao}>Olá, {nome.split(' ')[0] || 'Cliente'}! 👋</Text>
               </View>
             </View>
@@ -1338,7 +1353,9 @@ function AppCliente() {
   //const [mostrarCadastro, setMostrarCadastro] = useState(false); // Para controlar o modal de dados
 
   //const [editando, setEditando] = useState(false);
-  const [modoAcesso, setModoAcesso] = useState('selecao'); // 'selecao', 'login', 'cadastro'
+  // 'inicial' pede só o CPF e decide sozinho se é login ou cadastro (evita uma
+  // tela extra perguntando "já é cliente?" antes de pedir qualquer dado).
+  const [modoAcesso, setModoAcesso] = useState('inicial'); // 'inicial', 'cadastro'
   const [modalVisivel, setModalVisivel] = useState(false);
   const [statusPagamento, setStatusPagamento] = useState<'sucesso' | 'erro'>('sucesso');
   const flatListRef = useRef<FlatList>(null);
@@ -2129,17 +2146,13 @@ function AppCliente() {
       } else {
         // --- CASO: USUÁRIO NÃO ENCONTRADO ---
 
-        // Se o usuário clicou em "Já sou cliente" (Login), mas o CPF não existe:
-        if (modoAcesso === 'login') {
+        // CPF não encontrado na primeira tentativa: revela os campos de nome/
+        // WhatsApp na hora, sem alerta de confirmação — não é uma ação
+        // destrutiva, não precisa de mais um toque só pra continuar.
+        if (modoAcesso === 'inicial') {
           setCarregandoLogin(false);
-          return showAlert(
-            "Conta não encontrada",
-            "Este CPF não possui cadastro. Deseja criar uma conta agora?",
-            [
-              { text: "Cancelar", style: "cancel" },
-              { text: "Cadastrar", onPress: () => setModoAcesso('cadastro') }
-            ]
-          );
+          setModoAcesso('cadastro');
+          return;
         }
 
         // Se ele está na tela de "Cadastrar", validamos Nome e Telefone
@@ -2225,29 +2238,8 @@ function AppCliente() {
                   </>
                 )}
 
-                {/* --- ESTADO 1: SELEÇÃO INICIAL --- */}
-                {modoAcesso === 'selecao' && (
-                  <View>
-                    <Text style={{ textAlign: 'center', marginBottom: 20, color: '#666' }}>Como deseja prosseguir?</Text>
-
-                    <TouchableOpacity
-                      style={[styles.btnCadastroLargo, { backgroundColor: corMarca }]}
-                      onPress={() => setModoAcesso('login')}
-                    >
-                      <Text style={styles.btnTxtBranco}>Já sou cliente (Login) 🔑</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.btnCadastroLargo, { backgroundColor: BRAND_WHITE, borderWidth: 1, borderColor: corMarca, marginTop: 10 }]}
-                      onPress={() => setModoAcesso('cadastro')}
-                    >
-                      <Text style={[styles.btnTxtBranco, { color: corMarca }]}>Novo por aqui? (Cadastrar) ✨</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* --- ESTADO 2: TELA DE LOGIN (Apenas CPF) --- */}
-                {modoAcesso === 'login' && (
+                {/* --- ESTADO 1: SÓ O CPF (decide sozinho se é login ou cadastro) --- */}
+                {modoAcesso === 'inicial' && (
                   <View>
                     <Text style={styles.label}>DIGITE SEU CPF</Text>
                     <TextInput
@@ -2259,19 +2251,19 @@ function AppCliente() {
                       maxLength={11}
                     />
                     <TouchableOpacity style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 20 }]} onPress={verificarOuCadastrar}>
-                      <Text style={styles.btnTxtBranco}>Entrar 🚀</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity onPress={() => setModoAcesso('selecao')} style={{ marginTop: 15 }}>
-                      <Text style={{ textAlign: 'center', color: '#999' }}>Voltar</Text>
+                      <Text style={styles.btnTxtBranco}>Continuar 🚀</Text>
                     </TouchableOpacity>
                   </View>
                 )}
 
-                {/* --- ESTADO 3: TELA DE CADASTRO (CPF, Nome, Tel) --- */}
+                {/* --- ESTADO 2: CPF NOVO — completa nome/WhatsApp pra cadastrar --- */}
                 {modoAcesso === 'cadastro' && (
                   <View>
-                    <Text style={styles.label}>CPF (Para seu cadastro)</Text>
+                    <Text style={{ textAlign: 'center', marginBottom: 15, color: '#666' }}>
+                      Primeira vez por aqui! Só mais alguns dados pra criar sua conta:
+                    </Text>
+
+                    <Text style={styles.label}>CPF</Text>
                     <TextInput style={styles.inputVisivel} placeholder="000.000.000-00" keyboardType="numeric" value={cpf} onChangeText={setCpf} maxLength={11} />
 
                     <Text style={[styles.label, { marginTop: 15 }]}>NOME COMPLETO</Text>
@@ -2291,7 +2283,7 @@ function AppCliente() {
                       <Text style={styles.btnTxtBranco}>Criar minha conta ⭐</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity onPress={() => setModoAcesso('selecao')} style={{ marginTop: 15 }}>
+                    <TouchableOpacity onPress={() => setModoAcesso('inicial')} style={{ marginTop: 15 }}>
                       <Text style={{ textAlign: 'center', color: '#999' }}>Voltar</Text>
                     </TouchableOpacity>
                   </View>
@@ -2510,6 +2502,7 @@ function AppCliente() {
         visible={modalVisivel}
         transparent={true}
         animationType="slide"
+        onRequestClose={() => setModalVisivel(false)}
       >
         <View style={styles.overlayModal}>
           <View style={[styles.cardModal, { paddingBottom: 20 + (insets.bottom > 0 ? insets.bottom : 12), alignItems: 'center' }]}>
@@ -2523,7 +2516,7 @@ function AppCliente() {
 
             <Text style={styles.textoModal}>
               {statusPagamento === 'sucesso'
-                ? 'Seu pagamento foi aprovado e a cozinha já está preparando sua pizza!'
+                ? 'Seu pagamento foi aprovado e já estamos preparando seu pedido!'
                 : 'Não conseguimos processar seu pagamento. Tente novamente ou escolha outra forma.'}
             </Text>
 
@@ -2563,8 +2556,13 @@ function AppCliente() {
                   style={styles.inputVisivel}
                   placeholder="0000 0000 0000 0000"
                   keyboardType="numeric"
+                  maxLength={19}
                   value={dadosCartao.numero}
-                  onChangeText={(t) => setDadosCartao({ ...dadosCartao, numero: t })}
+                  onChangeText={(t) => {
+                    const d = t.replace(/\D/g, '').slice(0, 16);
+                    const fmt = d.replace(/(\d{4})(?=\d)/g, '$1 ');
+                    setDadosCartao({ ...dadosCartao, numero: fmt });
+                  }}
                 />
 
                 <Text style={styles.label}>NOME NO CARTÃO</Text>
@@ -2599,8 +2597,13 @@ function AppCliente() {
                       style={styles.inputVisivel}
                       placeholder="MM/AA"
                       keyboardType="numeric"
+                      maxLength={5}
                       value={dadosCartao.validade}
-                      onChangeText={(t) => setDadosCartao({ ...dadosCartao, validade: t })}
+                      onChangeText={(t) => {
+                        const d = t.replace(/\D/g, '').slice(0, 4);
+                        const fmt = d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
+                        setDadosCartao({ ...dadosCartao, validade: fmt });
+                      }}
                     />
                   </View>
                   <View style={{ width: '48%' }}>
@@ -2730,7 +2733,6 @@ const styles = StyleSheet.create({
   },
   marcaLogoHeader: { height: 44, width: 170 },
   lojaNome: { fontSize: 22, fontWeight: 'bold', color: '#fff' },
-  btnNotificacao: { backgroundColor: 'rgba(255,255,255,0.18)', padding: 9, borderRadius: 12 },
 
   searchContainer: { paddingHorizontal: 16, marginTop: 10 },
   searchBarInterna: {
