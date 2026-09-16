@@ -1110,9 +1110,15 @@ document.addEventListener('DOMContentLoaded', () => {
         let linhasItens = '';
         if (listaDeItens && Array.isArray(listaDeItens)) {
             linhasItens = listaDeItens.map(item => {
-                const nome = item.nome || item.nome_exibicao || item;
-                const texto = (typeof nome === 'object') ? 'Item sem nome' : nome;
-                return `<div class="linha">${texto}</div>`;
+                const nomeBruto = item.nome_exibicao || item.nome || item;
+                if (typeof nomeBruto === 'object') return `<div class="linha">Item sem nome</div>`;
+                // Nome pode já vir com prefixo "Nx " embutido (formato do bot/app) —
+                // extrai a quantidade dali quando não existe campo numérico próprio,
+                // senão qualquer item com 1 unidade nunca mostrava quantidade nenhuma.
+                const prefixo = /^(\d+)x\s+(.+)$/i.exec(nomeBruto);
+                const qtd = item.quantidade || (prefixo ? parseInt(prefixo[1]) : 1);
+                const nomeBase = prefixo ? prefixo[2] : nomeBruto;
+                return `<div class="linha">${qtd}x ${nomeBase}</div>`;
             }).join('');
         } else {
             linhasItens = `<div class="linha">${pedido.item_pedido || pedido.itens_pedido || 'Sem detalhes'}</div>`;
@@ -1132,12 +1138,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 /* Tamanho de página pra bobina de 80mm — sem isso o navegador
                    imprime em papel A4 padrão, desperdiçando muito mais papel
                    do que o conteúdo (poucas linhas) realmente precisa. */
-                @page { size: 80mm auto; margin: 4mm; }
+                @page { size: 80mm auto; margin: 1mm 2mm; }
                 * { box-sizing: border-box; }
-                body { font-family: 'Courier New', monospace; font-size: 12px; padding: 0; color: #000; width: 72mm; }
+                html, body { margin: 0; }
+                body { font-family: 'Courier New', monospace; font-size: 12px; padding: 0; color: #000; width: 76mm; }
                 h1 { font-size: 13px; text-align: center; margin: 0 0 4px; }
-                .linha { padding: 2px 0; border-bottom: 1px dashed #999; word-break: break-word; }
-                hr { border: none; border-top: 1px solid #000; margin: 5px 0; }
+                .linha { padding: 1px 0; border-bottom: 1px dashed #999; word-break: break-word; }
+                hr { border: none; border-top: 1px solid #000; margin: 3px 0; }
                 .total { font-weight: bold; font-size: 13px; }
                 .center { text-align: center; }
             </style>
