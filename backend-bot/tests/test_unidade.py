@@ -97,6 +97,46 @@ def test_cancelamento_texto_vazio():
     assert not bot._soa_como_cancelamento(None)
 
 
+# ---------------- _soa_como_correcao_pos_fechamento ----------------
+def test_correcao_pos_fechamento_detecta():
+    # Caso real de produção: pedido fechado (R$65), cliente pediu pra trocar
+    # um item, a ferramenta bloqueou mas a IA disse "corrigido" mesmo assim.
+    assert bot._soa_como_correcao_pos_fechamento("Corrigi o pedido para incluir a Coxinha Catupiry. Total: R$ 66,00.")
+    assert bot._soa_como_correcao_pos_fechamento("Vou abrir outro pedido com esse item, tudo bem.")
+
+
+def test_escalacao_pos_fechamento_nao_detecta():
+    assert not bot._soa_como_correcao_pos_fechamento(
+        "Seu pedido anterior já está registrado. Já chamei a equipe pra confirmar essa mudança com você."
+    )
+
+
+def test_correcao_pos_fechamento_texto_vazio():
+    assert not bot._soa_como_correcao_pos_fechamento("")
+    assert not bot._soa_como_correcao_pos_fechamento(None)
+
+
+# ---------------- _pedido_recem_fechado ----------------
+def test_pedido_recem_fechado_detecta():
+    from datetime import datetime, timezone
+    r = bot._rascunho_vazio()
+    r["ultimo_pedido"] = {"pedido_id": "abc123", "valor_total": 65.0, "fechado_em": datetime.now(timezone.utc)}
+    assert bot._pedido_recem_fechado(r) is not None
+
+
+def test_pedido_recem_fechado_sem_pedido():
+    r = bot._rascunho_vazio()
+    assert bot._pedido_recem_fechado(r) is None
+
+
+def test_pedido_recem_fechado_ha_muito_tempo():
+    from datetime import datetime, timezone, timedelta
+    r = bot._rascunho_vazio()
+    r["ultimo_pedido"] = {"pedido_id": "abc123", "valor_total": 65.0,
+                           "fechado_em": datetime.now(timezone.utc) - timedelta(hours=2)}
+    assert bot._pedido_recem_fechado(r) is None
+
+
 # ---------------- _normalizar_termo ----------------
 def test_normalizar_termo_remove_acento_e_espacos():
     assert bot._normalizar_termo("  São  Genaro ") == "sao genaro"

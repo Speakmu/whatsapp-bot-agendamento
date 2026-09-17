@@ -519,6 +519,15 @@ def _resumo_rascunho(r, bot_cfg, status="ok", **extra):
     return out
 
 
+def _pedido_recem_fechado(r, minutos=30):
+    """Devolve o último pedido fechado se foi há pouco tempo, senão None."""
+    ultimo = r.get("ultimo_pedido") or {}
+    fechado_em = ultimo.get("fechado_em")
+    if ultimo.get("pedido_id") and fechado_em and (datetime.now(timezone.utc) - fechado_em) < timedelta(minutes=minutos):
+        return ultimo
+    return None
+
+
 def rascunho_adicionar_item(wa_id, item_id, quantidade, bot_cfg, cardapio=None):
     cardapio = cardapio if cardapio is not None else carregar_cardapio()
     r = obter_rascunho(wa_id)
@@ -1904,6 +1913,30 @@ def _soa_como_cancelamento(texto):
     return False
 
 
+def _soa_como_correcao_pos_fechamento(texto):
+    """Heurística irmã de _soa_como_cancelamento: depois que a ferramenta do
+    rascunho já bloqueou a mutação (pedido_pos_fechamento_bloqueado) porque o
+    pedido anterior tinha acabado de fechar, a IA ainda afirma ter corrigido
+    o pedido OU que vai abrir/fazer um pedido novo/separado? Caso real de
+    produção: cliente confirmou e fechou (R$65), minutos depois pediu pra
+    trocar um item — o resultado da ferramenta veio "erro" com instrução
+    clara pra não afirmar nada disso, mas a IA descreveu um "pedido
+    corrigido" que nunca existiu em lugar nenhum."""
+    if not texto:
+        return False
+    radicais = ("corrigi o pedido", "corrigi seu pedido", "pedido corrigido", "pedido foi corrigido",
+                "atualizei o pedido", "atualizei seu pedido", "pedido atualizado", "vou abrir outro pedido",
+                "vou fazer um novo pedido", "outro pedido separado", "um novo pedido separado",
+                "abrindo um novo pedido")
+    for frase in re.split(r'(?<=[.!?\n])\s+', texto):
+        f = frase.lower()
+        if "?" in f or "equipe" in f:
+            continue
+        if any(r in f for r in radicais):
+            return True
+    return False
+
+
 # --- LÓGICA AGENTE OPENAI ---
 def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     import re
@@ -2245,6 +2278,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        (pedido já em preparo), diga que a equipe vai confirmar o cancelamento
        com ele, não afirme que cancelou.
 
+       SOBRE MEXER EM PEDIDO JÁ FECHADO: se o resultado de uma ferramenta do
+       carrinho trouxer "aviso_pedido_anterior_fechado", não existe função
+       pra editar um pedido depois de fechado — o que você está montando
+       agora é um carrinho novo e separado. NUNCA diga "corrigi o
+       pedido"/"pedido corrigido"/"atualizei o pedido" (isso não aconteceu:
+       o pedido antigo continua exatamente como fechou). Se não estiver
+       claro que o cliente quer um pedido novo de verdade (ele só citou
+       "mais" itens, não corrigiu nada do que já tinha pedido), NÃO diga
+       que vai abrir/fazer "outro pedido" — na dúvida, avise que vai chamar
+       a equipe pra confirmar direto com ele qual pedido ele quer mudar.
+
        SOBRE ENCOMENDA DE FESTA/CENTO: se o cliente perguntar sobre
        "salgadinhos pra festa", "cento de salgados" ou pedido em grande
        quantidade pra evento, NÃO responda com o preço unitário do cardápio
@@ -2534,6 +2578,29 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 final_text = (
                     "Só um instante — deixa eu confirmar esse cancelamento certinho com a "
                     "equipe antes de garantir. Alguém já vai confirmar com você."
+                )
+
+            # Mesma rede de segurança pra mexer em pedido já fechado: não dá
+            # pra saber com certeza, só pelas ferramentas chamadas, se o
+            # cliente queria corrigir o pedido antigo ou fazer um novo — mas
+            # se o TEXTO afirma ter "corrigido" um pedido ou vai "abrir
+            # outro", isso é sempre mentira (fechar_pedido não roda de novo
+            # nesse fluxo, e o rascunho novo não é o pedido que o cliente
+            # tinha em mente). Caso real de produção: pedido fechado em
+            # R$65, cliente pediu pra trocar um item, IA respondeu "Corrigi
+            # o pedido... Total: R$66" sem nada disso ter acontecido de
+            # verdade.
+            if _pedido_recem_fechado(obter_rascunho(id_usuario)) and _soa_como_correcao_pos_fechamento(final_text):
+                log_observacao = "texto_correcao_pedido_ja_fechado"
+                marcar_atencao(
+                    id_usuario,
+                    "IA disse ter corrigido/reaberto um pedido já fechado sem função pra isso — confira com o cliente qual pedido ele quer mudar.",
+                    tipo="pedido_pos_fechamento",
+                    dados={"resposta_suspeita": final_text}
+                )
+                final_text = (
+                    "Seu pedido anterior já está registrado — não dá pra alterar automaticamente por aqui. "
+                    "Já chamei a equipe pra confirmar essa mudança direto com você."
                 )
 
         ck("antes salvar_historico_firestore final")
