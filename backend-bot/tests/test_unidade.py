@@ -212,6 +212,29 @@ def test_ferias_formata_data_de_volta():
     assert em_ferias and msg == "Voltamos 31/12/2999."
 
 
+# ---------------- _ultima_resposta_pediu_confirmacao ----------------
+def test_pediu_confirmacao_de_fechar_pedido_detecta():
+    hist = [{"role": "assistant", "content": "Seu total é R$ 30,00. Posso fechar o pedido?"}]
+    assert bot._ultima_resposta_pediu_confirmacao(hist)
+
+
+def test_confirmacao_de_bairro_nao_conta_como_pedir_fechar():
+    # Caso real de produção: bot pergunta "Confirma o bairro?" com o carrinho
+    # já completo — um "sim" respondendo a ISSO não pode fechar o pedido.
+    hist = [{"role": "assistant", "content": "Entregamos no Jardim Europa. Confirma o bairro?"}]
+    assert not bot._ultima_resposta_pediu_confirmacao(hist)
+
+
+def test_confirmacao_de_endereco_nao_conta_como_pedir_fechar():
+    hist = [{"role": "assistant", "content": "Confere o endereço: Rua Malta, 135?"}]
+    assert not bot._ultima_resposta_pediu_confirmacao(hist)
+
+
+def test_sem_interrogacao_nao_conta():
+    hist = [{"role": "assistant", "content": "Posso fechar o pedido."}]
+    assert not bot._ultima_resposta_pediu_confirmacao(hist)
+
+
 # ---------------- primeiro_nome ----------------
 def test_primeiro_nome():
     assert bot.primeiro_nome("Murilo Amorim") == "Murilo"

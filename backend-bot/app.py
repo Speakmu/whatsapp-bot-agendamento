@@ -1765,15 +1765,24 @@ def _ultima_resposta_mostrou_total(historico):
 
 
 def _ultima_resposta_pediu_confirmacao(historico):
-    """A última fala do bot perguntou se pode fechar? (é o contexto em que
-    um 'sim' do cliente significa 'fecha o pedido')."""
+    """A última fala do bot perguntou se pode FECHAR O PEDIDO (não qualquer
+    outra confirmação no meio do fluxo)? É o contexto em que um 'sim' do
+    cliente significa 'fecha o pedido' e libera o fechamento determinístico.
+
+    Caso real de produção: os radicais soltos ("confer", "confirm",
+    "registr"...) casavam com QUALQUER pergunta de confirmação — "Confirma
+    o bairro?", "Confere o endereço?" — e se o carrinho JÁ estivesse
+    completo nesse ponto (nada_falta), um "sim" respondendo a essa pergunta
+    fechava o pedido de verdade sem o cliente ter pedido isso. Agora exige
+    frases que mencionem claramente FECHAR/CONCLUIR o PEDIDO."""
+    radicais = ("posso fechar", "posso concluir", "posso registrar", "posso confirmar o pedido",
+                "fechar o pedido", "fechar esse pedido", "fechar seu pedido", "confirma o pedido",
+                "confirmar o pedido", "confere o pedido", "concluir o pedido", "registrar o pedido",
+                "fechamento")
     for m in reversed(historico or []):
         if m.get("role") == "assistant":
             t = _normalizar_termo(m.get("content") or "")
-            # Radicais, não palavras: "posso seguir com o FECHAMENTO?" não
-            # continha "fechar" e o "sim" seguinte deixava de fechar.
-            return any(rad in t for rad in ("fech", "confer", "confirm", "finaliz", "conclu", "registr")) \
-                and "?" in (m.get("content") or "")
+            return "?" in (m.get("content") or "") and any(rad in t for rad in radicais)
     return False
 
 
