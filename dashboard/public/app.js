@@ -1193,7 +1193,14 @@ document.addEventListener('DOMContentLoaded', () => {
             "CONCLUIDO": "Concluir"
         };
 
-        const steps = flow[currentStatus] || [];
+        let steps = flow[currentStatus] || [];
+        // Entrega não pode ir de "Pronto p/ Entrega" direto pra "Concluir" —
+        // isso pula o despacho (SAIU_PARA_ENTREGA) e o cliente nunca recebe
+        // o aviso de saída. Retirada continua indo direto: não existe
+        // "despacho" pra quem busca no balcão.
+        if (ehEntrega && currentStatus === "PRONTO_PARA_ENTREGA") {
+            steps = steps.filter(st => st !== "CONCLUIDO");
+        }
         steps.forEach(st => {
             const label = LABELS[st] || st.replace(/_/g, ' ');
             const btnClass = st === "CANCELADO" ? "btn-status btn-cancel" : "btn-status";
@@ -1206,7 +1213,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // despacha direto daqui, pulando pra SAIU_PARA_ENTREGA de uma vez.
         buttons = `<div class="order-actions-row">${buttons}</div>`;
 
-        if (ehEntrega && (currentStatus === "PENDENTE_PREPARO" || currentStatus === "EM_PREPARO" || currentStatus === "PENDENTE_VALIDACAO")) {
+        // PRONTO_PARA_ENTREGA precisa continuar na lista: sem isso, o pedido
+        // que já passou por "Pronto p/ Entrega" perdia o widget de despacho
+        // e sobrava só o botão "Concluir" — a equipe concluía sem nunca
+        // despachar de verdade, e o cliente nunca recebia o aviso de saída
+        // (que só dispara em SAIU_PARA_ENTREGA, não em CONCLUIDO).
+        if (ehEntrega && (currentStatus === "PENDENTE_PREPARO" || currentStatus === "EM_PREPARO" || currentStatus === "PENDENTE_VALIDACAO" || currentStatus === "PRONTO_PARA_ENTREGA")) {
             const opcoes = entregadoresAtivos.map(e => `<option value="${e.id}">${e.nome}</option>`).join('');
             buttons += `
                 <div class="despacho-rapido">
