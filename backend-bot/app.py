@@ -1818,6 +1818,59 @@ def _itens_mencionados(mensagem, cardapio):
     return {it["id"] for it in (cardapio or []) if _tokens_item(it) & toks}
 
 
+# Itens com mais de uma variação parecida onde a IA já resolveu errado
+# silenciosamente: cliente pediu "coxinha de frango com catupiry", o item
+# adicionado foi a Coxinha Frango normal (R$1 mais barata, sem catupiry) —
+# sem perguntar nada. Cada palavra aqui é a "base" que agrupa as variações;
+# extensível se aparecer outro caso parecido no cardápio.
+_PALAVRAS_BASE_VARIACAO_ITEM = ["coxinha"]
+
+
+def _variantes_do_grupo(item, cardapio):
+    """Outros itens do cardápio que compartilham a mesma palavra-base deste
+    (ex.: as duas coxinhas). None se este item não faz parte de um grupo
+    conhecido ou só existe uma variação dele agora (ex.: a outra ficou
+    indisponível)."""
+    if not item:
+        return None
+    nome_item = _normalizar_termo(f"{item.get('nome') or ''} {item.get('nome_exibicao') or ''}")
+    base = next((b for b in _PALAVRAS_BASE_VARIACAO_ITEM if b in nome_item), None)
+    if not base:
+        return None
+    variantes = [it for it in (cardapio or [])
+                 if base in _normalizar_termo(f"{it.get('nome') or ''} {it.get('nome_exibicao') or ''}")]
+    return variantes if len(variantes) >= 2 else None
+
+
+def _palavras_proprias(item, variantes):
+    """Palavras do nome deste item que NENHUMA outra variação do grupo tem
+    — o que realmente diferencia esta variação das demais (ex.: 'catupiry')."""
+    outras = [o for o in variantes if o["id"] != item["id"]]
+    nome = _normalizar_termo(f"{item.get('nome') or ''} {item.get('nome_exibicao') or ''}")
+    toks = set(t for t in re.split(r"[^a-z0-9]+", nome) if len(t) >= 4)
+    toks_outras = set()
+    for o in outras:
+        nome_o = _normalizar_termo(f"{o.get('nome') or ''} {o.get('nome_exibicao') or ''}")
+        toks_outras |= set(re.split(r"[^a-z0-9]+", nome_o))
+    return toks - toks_outras
+
+
+def _resolver_variante_ambigua(item_resolvido, cardapio, mensagem):
+    """Caso real de produção acima: devolve (item_correto, None) se a
+    mensagem do cliente deixou claro qual variação ele quer — corrigindo se
+    a IA tinha escolhido a errada — ou (None, [opções]) se está ambíguo e
+    precisa perguntar antes de adicionar. (None, None) se não é um item com
+    variações conhecidas."""
+    variantes = _variantes_do_grupo(item_resolvido, cardapio)
+    if not variantes:
+        return None, None
+    msg_toks = set(re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")))
+    bateu = [v for v in variantes if _palavras_proprias(v, variantes) & msg_toks]
+    if len(bateu) == 1:
+        return bateu[0], None
+    return None, variantes
+
+
 _RE_PARECE_ENDERECO = re.compile(r"^(?=.*\d)(?=.*[a-z]{3,}).{5,80}$")
 
 
@@ -2220,6 +2273,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          "molhos"): diga que não tem, sem inventar lista.
        - Em 'adicionar_item'/'remover_item', identifique o item pelo CÓDIGO
          entre colchetes ("item_id"), nunca pelo nome.
+       - Item com mais de uma variação parecida no cardápio (ex.: Coxinha
+         Frango normal e Coxinha com Catupiry): se o cliente não deixou
+         claro qual delas quer, PERGUNTE antes de chamar 'adicionar_item' —
+         não escolha a mais barata/comum de cabeça. Se mesmo assim você
+         chamar a função com a variação errada, o servidor recusa e pede
+         pra perguntar; não insista na mesma escolhida, pergunte de fato.
 
     1. IDENTIFICAÇÃO: {instrucao_nome}
        {instrucao_divulgar_app}
@@ -2416,6 +2475,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     it_pedido = _resolver_item(args.get("item_id"), cardapio_atual)
                     ja_no_carrinho = it_pedido and any(i.get("id") == it_pedido["id"] for i in obter_rascunho(id_usuario).get("itens") or [])
                     mencionados = _itens_mencionados(prompt, cardapio_atual)
+                    item_certo, opcoes_variante = _resolver_variante_ambigua(it_pedido, cardapio_atual, prompt)
                     if ja_no_carrinho and mencionados and it_pedido["id"] not in mencionados:
                         # "1 guaraná lata" → o mini readicionava as 2 coxinhas que já
                         # estavam no carrinho (total dobrava). Se a mensagem cita outro
@@ -2423,8 +2483,20 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg,
                                                      aviso="Esse item JÁ ESTAVA no pedido e o cliente não pediu mais dele agora — não somei. "
                                                            "Não readicione o que já está no PEDIDO EM ANDAMENTO.")
+                    elif opcoes_variante:
+                        # Caso real de produção: cliente pediu "coxinha de frango com
+                        # catupiry", a IA adicionou a Coxinha Frango normal (mais barata,
+                        # sem catupiry) sem perguntar nada — pedido fechou com o item
+                        # errado e valor errado. Existe mais de uma variação e a
+                        # mensagem não deixou claro qual: não adiciona nada, pergunta.
+                        opcoes_txt = " ou ".join(f"{v.get('nome_exibicao') or v.get('nome')} (R$ {float(v.get('preco') or 0):.2f})"
+                                                  for v in opcoes_variante)
+                        resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg, status="erro",
+                                                     motivo=f"Existe mais de uma variação: {opcoes_txt}. NÃO adicione nenhuma ainda — "
+                                                            "pergunte ao cliente qual delas ele quer.")
                     else:
-                        resultado = rascunho_adicionar_item(id_usuario, args.get("item_id"), args.get("quantidade"), bot_cfg, cardapio_atual)
+                        item_id_usar = item_certo["codigo"] if item_certo else args.get("item_id")
+                        resultado = rascunho_adicionar_item(id_usuario, item_id_usar, args.get("quantidade"), bot_cfg, cardapio_atual)
                 elif function_name == "remover_item":
                     resultado = rascunho_remover_item(id_usuario, args.get("item_id"), args.get("quantidade"), bot_cfg, cardapio_atual)
                 elif function_name == "definir_entrega":

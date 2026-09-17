@@ -137,6 +137,45 @@ def test_pedido_recem_fechado_ha_muito_tempo():
     assert bot._pedido_recem_fechado(r) is None
 
 
+# ---------------- _resolver_variante_ambigua ----------------
+_CARDAPIO_COXINHA = [
+    {"id": "id-frango", "codigo": "cFra", "nome": "coxinha frango", "nome_exibicao": "Coxinha Frango", "preco": 7.5},
+    {"id": "id-catup", "codigo": "cCat", "nome": "coxinha de frango com catupiry", "nome_exibicao": "Coxinha Catupiry", "preco": 8.5},
+]
+
+
+def test_variante_ambigua_pergunta_quando_mensagem_nao_especifica():
+    # Caso real de produção: cliente pediu "coxinha de frango com catupiry",
+    # a IA resolveu pra Coxinha Frango normal sem perguntar nada.
+    item_certo, opcoes = bot._resolver_variante_ambigua(_CARDAPIO_COXINHA[0], _CARDAPIO_COXINHA, "quero uma coxinha")
+    assert item_certo is None
+    assert len(opcoes) == 2
+
+
+def test_variante_ambigua_corrige_quando_mensagem_especifica_a_outra():
+    # IA resolveu errado (frango normal) mas o cliente disse "catupiry" —
+    # corrige pra variação certa em vez de só perguntar de novo.
+    item_certo, opcoes = bot._resolver_variante_ambigua(
+        _CARDAPIO_COXINHA[0], _CARDAPIO_COXINHA, "quero uma coxinha de frango com catupiry"
+    )
+    assert item_certo is not None and item_certo["id"] == "id-catup"
+    assert opcoes is None
+
+
+def test_variante_ambigua_confirma_quando_ja_bateu_com_a_resolvida():
+    item_certo, opcoes = bot._resolver_variante_ambigua(
+        _CARDAPIO_COXINHA[1], _CARDAPIO_COXINHA, "quero uma coxinha com catupiry"
+    )
+    assert item_certo is not None and item_certo["id"] == "id-catup"
+    assert opcoes is None
+
+
+def test_variante_ambigua_nao_dispara_pra_item_sem_grupo():
+    pastel = {"id": "id-pastel", "codigo": "pCar", "nome": "pastel de carne", "nome_exibicao": "Pastel de Carne", "preco": 8.0}
+    item_certo, opcoes = bot._resolver_variante_ambigua(pastel, _CARDAPIO_COXINHA + [pastel], "quero um pastel")
+    assert item_certo is None and opcoes is None
+
+
 # ---------------- _normalizar_termo ----------------
 def test_normalizar_termo_remove_acento_e_espacos():
     assert bot._normalizar_termo("  São  Genaro ") == "sao genaro"
