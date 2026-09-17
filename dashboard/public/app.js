@@ -4,8 +4,10 @@
 document.addEventListener('DOMContentLoaded', () => {
     // Apenas a configuração do Firebase é definida fora do DOMContentLoaded
     const firebaseConfig = window.__FIREBASE_CONFIG__;
-    // Configuração do áudio de notificação
-    const somNotificacao = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    // Configuração do áudio de notificação — trocado pro "Critical alarm" do
+    // mixkit (mais forte/urgente que o tom de confirmação usado antes, que
+    // os usuários reclamaram ser fraco demais pra perceber pedido novo).
+    const somNotificacao = new Audio('https://assets.mixkit.co/active_storage/sfx/1004/1004-preview.mp3');
     somNotificacao.volume = 1.0; // máximo que a tag <audio> permite — o volume real depende também do aparelho
 
     // Pedido chegava com a aba em segundo plano e o som tocava só uma vez,
