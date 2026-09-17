@@ -697,6 +697,34 @@ def _aplicar_nome_identificado(r, nome_identificado):
     return r
 
 
+def _texto_seguro_progresso(wa_id, bot_cfg, nome_cliente=None):
+    """Usada quando um guard troca a resposta da IA por algo seguro. Caso
+    real de produção: o guard de _soa_como_confirmacao disparou (falso
+    positivo — a IA só descreveu itens já salvos de verdade via
+    adicionar_item, não inventou um pedido fechado) e a resposta genérica
+    pedia pro cliente confirmar TUDO de novo, inclusive o endereço que ele
+    tinha acabado de mandar — pareceu o bot travado repetindo a mesma
+    pergunta. Em vez de um texto fixo, monta a pergunta a partir do estado
+    REAL do rascunho: só pede o que realmente falta."""
+    resumo = rascunho_ver_resumo(wa_id, bot_cfg, nome_identificado=nome_cliente)
+    itens = resumo.get("itens") or []
+    if not itens:
+        return "Pode me confirmar os itens que você quer no pedido?"
+    if resumo.get("pode_fechar"):
+        itens_txt = ", ".join(f"{i['quantidade']}x {i['nome']}" for i in itens)
+        total_txt = f"{float(resumo.get('valor_total') or 0):.2f}".replace(".", ",")
+        return f"Deixa eu confirmar: {itens_txt} — total R$ {total_txt}. Posso fechar esse pedido?"
+    perguntas = {
+        "tipo_entrega": "é pra entrega ou retirada?",
+        "bairro": "qual é o bairro da entrega?",
+        "endereco_com_numero": "pode me passar o endereço completo com número?",
+        "forma_pagamento": "qual vai ser a forma de pagamento: PIX, cartão ou dinheiro?",
+    }
+    falta = resumo.get("falta_para_fechar") or []
+    pedir = next((f for f in falta if f != "itens"), None)
+    return f"Só falta uma coisa pra eu fechar seu pedido: {perguntas.get(pedir, 'pode confirmar o que ainda falta?')}"
+
+
 def rascunho_ver_resumo(wa_id, bot_cfg, nome_identificado=None):
     """Marca que o resumo foi mostrado — fechar_pedido exige isso DEPOIS
     da última alteração no carrinho/entrega/pagamento."""
@@ -2542,11 +2570,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     tipo="pedido_falhou",
                     dados={"resposta_suspeita": final_text}
                 )
-                final_text = (
-                    "Deixa eu confirmar certinho os detalhes do seu pedido antes de "
-                    "fechar — pode me confirmar os itens e a forma de entrega/pagamento "
-                    "mais uma vez?"
-                )
+                final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
 
             # Mesma rede de segurança, pro caso do bairro: verificar_bairro_entrega
             # voltou "não achei na lista" (não "não atende" — a lista não tem

@@ -149,7 +149,9 @@ def test_confirmacao_dupla_nao_duplica(ambiente, monkeypatch):
 def test_fechar_sem_ver_resumo_e_recusado(ambiente, monkeypatch):
     """A regra 'mostre o resumo antes de fechar' agora é código: fechar sem
     ver_resumo devolve erro e nenhum pedido é criado; a IA que disser
-    'registrado' mesmo assim cai na pergunta segura."""
+    'registrado' mesmo assim cai numa pergunta segura montada a partir do
+    estado real do rascunho (não um texto fixo que ignora o que já foi
+    informado)."""
     cx = _codigo("coxinha de frango")
     roteiro = {
         "1 coxinha retirada pix murilo": [("adicionar_item", {"item_id": cx, "quantidade": 1}), ("definir_entrega", {"tipo": "RETIRADA"}),
@@ -162,7 +164,7 @@ def test_fechar_sem_ver_resumo_e_recusado(ambiente, monkeypatch):
     assert _pedidos(ambiente, tel) == []
     log = _log_da_mensagem(ambiente, "fecha")
     assert '"status": "precisa_confirmar"' in log["ferramentas"][0]["resultado"]
-    assert "confirmar certinho" in respostas[-1]
+    assert "Coxinha" in respostas[-1] and "Posso fechar" in respostas[-1]
 
 
 def test_entrega_sem_numero_nao_fecha(ambiente, monkeypatch):
