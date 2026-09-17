@@ -6,6 +6,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const firebaseConfig = window.__FIREBASE_CONFIG__;
     // Configuração do áudio de notificação
     const somNotificacao = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    somNotificacao.volume = 1.0; // máximo que a tag <audio> permite — o volume real depende também do aparelho
+
+    // Pedido chegava com a aba em segundo plano e o som tocava só uma vez,
+    // fácil de não notar. Agora repete sozinho a cada poucos segundos até
+    // alguém voltar pra essa aba (foco + visível) — só então para.
+    let alertaSomInterval = null;
+    function pararAlertaSom() {
+        if (alertaSomInterval) {
+            clearInterval(alertaSomInterval);
+            alertaSomInterval = null;
+        }
+    }
+    function tocarAlertaSom() {
+        somNotificacao.currentTime = 0;
+        somNotificacao.play().catch(() => console.log("Aguardando interação do usuário para tocar som."));
+    }
+    function iniciarAlertaSom() {
+        tocarAlertaSom();
+        pararAlertaSom();
+        alertaSomInterval = setInterval(() => {
+            if (document.visibilityState === 'visible' && document.hasFocus()) {
+                pararAlertaSom();
+                return;
+            }
+            tocarAlertaSom();
+        }, 4000);
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && document.hasFocus()) pararAlertaSom();
+    });
+    window.addEventListener('focus', pararAlertaSom);
     // Preview da imagem ao selecionar
     document.getElementById('product-image').addEventListener('change', function (e) {
         const reader = new FileReader();
@@ -961,7 +992,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!primeiroSnapshotPedidos) {
                     const temPedidoNovo = snapshot.docChanges().some(change => change.type === "added");
                     if (temPedidoNovo) {
-                        somNotificacao.play().catch(e => console.log("Aguardando interação do usuário para tocar som."));
+                        iniciarAlertaSom();
                     }
                 }
                 primeiroSnapshotPedidos = false;
