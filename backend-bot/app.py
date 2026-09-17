@@ -495,6 +495,26 @@ def _resumo_rascunho(r, bot_cfg, status="ok", **extra):
     }
     if not r.get("nome_cliente"):
         out["dica_nome"] = "Ainda não sei o nome: pergunte JUNTO com a confirmação do resumo (não numa rodada só pra isso). Se o cliente não quiser dizer, feche mesmo assim."
+    # Caso real de produção: cliente fechou um pedido (R$65), na mensagem
+    # seguinte pediu pra TROCAR um item ("é com catupiry", "vai ficar 66")
+    # querendo corrigir o pedido já fechado — mas como fechar_pedido reseta
+    # o rascunho (obter_rascunho trata pedido_id como "vazio pro próximo"),
+    # a IA acabou mexendo num carrinho novo e vazio e AINDA ASSIM respondeu
+    # com um resumo "corrigido" de R$66 como se fosse o pedido do cliente.
+    # O pedido de verdade continuou R$65, intocado — o cliente achou que
+    # tinha corrigido e não tinha. Sem essa função existir (editar pedido
+    # já fechado), a única saída seria a equipe ajustar na mão; a IA
+    # precisa saber disso pra não inventar uma "correção" que não existe.
+    ultimo = r.get("ultimo_pedido") or {}
+    fechado_em = ultimo.get("fechado_em")
+    if ultimo.get("pedido_id") and fechado_em and (datetime.now(timezone.utc) - fechado_em) < timedelta(minutes=30):
+        out["aviso_pedido_anterior_fechado"] = (
+            f"O pedido anterior (R$ {ultimo.get('valor_total')}) JÁ FOI REGISTRADO — não existe função pra editar um "
+            "pedido depois de fechado. Este resumo aqui é de um carrinho NOVO e separado, não é o pedido antigo "
+            "corrigido. Se o cliente estava tentando CORRIGIR/TROCAR ALGO do pedido anterior (não pedindo algo "
+            "novo), NUNCA diga que 'corrigiu' o pedido nem informe um total como se fosse dele — diga que vai "
+            "avisar a equipe pra ajustar esse pedido manualmente."
+        )
     out.update(extra)
     return out
 
