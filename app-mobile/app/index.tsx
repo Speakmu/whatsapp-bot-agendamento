@@ -808,7 +808,7 @@ const CartaoProduto = React.memo(({ item, styles, corMarca, pontos, onAbrir, onA
         </View>
         {pontos > 0 && (
           <View style={[styles.seloPontos, { marginTop: 4, alignSelf: 'flex-start' }]}>
-            <Text style={styles.seloPontosTxt}>⭐ +{pontos} pts</Text>
+            <Text style={styles.seloPontosTxt}>⭐ Ganhe pontos</Text>
           </View>
         )}
       </TouchableOpacity>
@@ -828,7 +828,7 @@ const CartaoProduto = React.memo(({ item, styles, corMarca, pontos, onAbrir, onA
           <Text style={styles.precoProduto}>R$ {Number(item.preco).toFixed(2)}</Text>
           {pontos > 0 && (
             <View style={styles.seloPontos}>
-              <Text style={styles.seloPontosTxt}>⭐ +{pontos} pts</Text>
+              <Text style={styles.seloPontosTxt}>⭐ Ganhe pontos</Text>
             </View>
           )}
         </View>
@@ -855,6 +855,12 @@ const SecaoHome = React.memo(({
   lojaFechada = false, horarioTexto = ''
 }: HomeProps) => {
   const [produtoDetalhe, setProdutoDetalhe] = useState<any>(null);
+  const [qtdDetalhe, setQtdDetalhe] = useState(1);
+
+  const abrirDetalhe = useCallback((item: any) => {
+    setQtdDetalhe(1);
+    setProdutoDetalhe(item);
+  }, []);
 
   const calcularPontosItem = useCallback((item: any) => {
     if (fidelidadeAtiva === false) return 0;
@@ -872,12 +878,12 @@ const SecaoHome = React.memo(({
       styles={styles}
       corMarca={corMarca}
       pontos={calcularPontosItem(item)}
-      onAbrir={setProdutoDetalhe}
+      onAbrir={abrirDetalhe}
       onAdicionar={adicionarAoCarrinho}
       colunas={colunasVitrine}
       tamanhoImagem={tamanhoImagemVitrine}
     />
-  ), [styles, corMarca, calcularPontosItem, adicionarAoCarrinho, colunasVitrine, tamanhoImagemVitrine]);
+  ), [styles, corMarca, calcularPontosItem, abrirDetalhe, adicionarAoCarrinho, colunasVitrine, tamanhoImagemVitrine]);
 
   const mostrarVitrine = busca.trim() === '' && categoriaAtiva === 'Todos';
 
@@ -1077,7 +1083,7 @@ const SecaoHome = React.memo(({
                     if (ptsItem <= 0) return null;
                     return (
                       <View style={styles.seloPontos}>
-                        <Text style={styles.seloPontosTxt}>⭐ +{ptsItem} pts</Text>
+                        <Text style={styles.seloPontosTxt}>⭐ Ganhe pontos</Text>
                       </View>
                     );
                   })()}
@@ -1087,14 +1093,34 @@ const SecaoHome = React.memo(({
                   {produtoDetalhe.descricao || produtoDetalhe.ingredientes || 'Sem descrição cadastrada.'}
                 </Text>
 
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 20 }}>
+                  <View style={[styles.stepperCarrinho, { gap: 14 }]}>
+                    <TouchableOpacity
+                      onPress={() => setQtdDetalhe(q => Math.max(1, q - 1))}
+                      style={styles.btnStepper}
+                    >
+                      <Text style={styles.btnStepperTxt}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={[styles.qtdStepper, { fontSize: 18 }]}>{qtdDetalhe}</Text>
+                    <TouchableOpacity
+                      onPress={() => setQtdDetalhe(q => q + 1)}
+                      style={styles.btnStepper}
+                    >
+                      <Text style={styles.btnStepperTxt}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
                 <TouchableOpacity
-                  style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 25 }]}
+                  style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 15 }]}
                   onPress={() => {
-                    adicionarAoCarrinho(produtoDetalhe);
+                    for (let i = 0; i < qtdDetalhe; i++) adicionarAoCarrinho(produtoDetalhe);
                     setProdutoDetalhe(null);
                   }}
                 >
-                  <Text style={styles.btnTxtBranco}>Adicionar à sacola</Text>
+                  <Text style={styles.btnTxtBranco}>
+                    Adicionar à sacola{qtdDetalhe > 1 ? ` · R$ ${(Number(produtoDetalhe.preco) * qtdDetalhe).toFixed(2)}` : ''}
+                  </Text>
                 </TouchableOpacity>
               </View>
             </ScrollView>
