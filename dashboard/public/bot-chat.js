@@ -276,6 +276,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Confirmar "atendemos esse bairro" só gravava em bairros_aprendizado —
+    // ficava invisível na lista "Bairros de entrega" de Config do Bot (só o
+    // bot sabia) e não ajudava o PRÓXIMO cliente que digitasse o nome de um
+    // jeito um pouco diferente (a checagem aprendida é por nome exato; a
+    // lista oficial já tolera variação via busca aproximada). Agora entra
+    // nas duas.
+    async function adicionarBairroNaListaOficial(bairro) {
+        const DOC_BOT = db.collection('configuracoes').doc('bot');
+        const snap = await DOC_BOT.get();
+        const lista = (snap.exists && Array.isArray(snap.data().bairros_entrega)) ? snap.data().bairros_entrega.slice() : [];
+        const jaTem = lista.some(b => normalizarTermo(b) === normalizarTermo(bairro));
+        if (jaTem) return;
+        lista.push(String(bairro).trim());
+        await DOC_BOT.set({ bairros_entrega: lista }, { merge: true });
+    }
+
     async function responderBairro(bairroCliente, atende) {
         if (!conversaAtualId || acaoAtencaoEmAndamento) return;
         acaoAtencaoEmAndamento = true;
@@ -287,6 +303,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 respondido_por: (auth.currentUser && auth.currentUser.email) || null,
                 respondido_em: firebase.firestore.FieldValue.serverTimestamp()
             });
+            if (atende) {
+                await adicionarBairroNaListaOficial(bairroCliente);
+            }
             await enviarMensagemDireta(
                 conversaAtualId,
                 atende
