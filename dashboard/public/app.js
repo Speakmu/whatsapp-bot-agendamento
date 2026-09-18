@@ -4,11 +4,13 @@
 document.addEventListener('DOMContentLoaded', () => {
     // Apenas a configuração do Firebase é definida fora do DOMContentLoaded
     const firebaseConfig = window.__FIREBASE_CONFIG__;
-    // Configuração do áudio de notificação — trocado pro "Critical alarm" do
-    // mixkit (mais forte/urgente que o tom de confirmação usado antes, que
-    // os usuários reclamaram ser fraco demais pra perceber pedido novo).
-    const somNotificacao = new Audio('https://assets.mixkit.co/active_storage/sfx/1004/1004-preview.mp3');
-    somNotificacao.volume = 1.0; // máximo que a tag <audio> permite — o volume real depende também do aparelho
+    // Configuração do áudio de notificação — som/volume/intervalo vêm de
+    // Configurações > Alerta sonoro de pedido novo (configuracoes/alerta_som),
+    // carregados assim que o Firestore estiver pronto, mais abaixo. Os
+    // valores aqui são só o padrão até essa config chegar.
+    let cfgAlertaSom = { ativo: true, som_id: '1004', volume: 1.0, intervalo_segundos: 4 };
+    const somNotificacao = new Audio(`https://assets.mixkit.co/active_storage/sfx/${cfgAlertaSom.som_id}/${cfgAlertaSom.som_id}-preview.mp3`);
+    somNotificacao.volume = cfgAlertaSom.volume;
 
     // Pedido chegava com a aba em segundo plano e o som tocava só uma vez,
     // fácil de não notar. Agora repete sozinho a cada poucos segundos até
@@ -25,6 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
         somNotificacao.play().catch(() => console.log("Aguardando interação do usuário para tocar som."));
     }
     function iniciarAlertaSom() {
+        if (!cfgAlertaSom.ativo) return;
         tocarAlertaSom();
         pararAlertaSom();
         alertaSomInterval = setInterval(() => {
@@ -33,7 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             tocarAlertaSom();
-        }, 4000);
+        }, cfgAlertaSom.intervalo_segundos * 1000);
     }
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && document.hasFocus()) pararAlertaSom();
@@ -82,6 +85,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     let menuItems = [];
     const db = firebase.firestore();
+
+    // Config do alerta sonoro (Configurações > Alerta sonoro de pedido novo).
+    // Assíncrono, mas roda bem antes de qualquer pedido novo chegar em uso
+    // normal — se não vier a tempo, os valores padrão em cfgAlertaSom seguem.
+    db.collection('configuracoes').doc('alerta_som').get().then(snap => {
+        if (!snap.exists) return;
+        const d = snap.data() || {};
+        cfgAlertaSom.ativo = d.ativo !== false;
+        cfgAlertaSom.som_id = d.som_id || cfgAlertaSom.som_id;
+        cfgAlertaSom.volume = d.volume != null ? d.volume : cfgAlertaSom.volume;
+        cfgAlertaSom.intervalo_segundos = d.intervalo_segundos || cfgAlertaSom.intervalo_segundos;
+        somNotificacao.src = `https://assets.mixkit.co/active_storage/sfx/${cfgAlertaSom.som_id}/${cfgAlertaSom.som_id}-preview.mp3`;
+        somNotificacao.volume = cfgAlertaSom.volume;
+    }).catch(err => console.warn('Config de alerta sonoro: usando padrão (erro ao ler):', err.message));
     const auth = firebase.auth();
 
     // SESSION (não LOCAL): fechar o navegador tem que exigir login de novo.

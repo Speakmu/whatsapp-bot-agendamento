@@ -7,7 +7,7 @@
 // firebase-app.js/firebase-firestore.js/firebase-config.js e ANTES do </body>.
 // NÃO incluir em painel.html — lá o alerta já roda dentro de app.js, e os
 // dois juntos tocariam o som em dobro.
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     if (!window.firebase || !window.__FIREBASE_CONFIG__) return;
     if (!firebase.apps.length) firebase.initializeApp(window.__FIREBASE_CONFIG__);
     const db = firebase.firestore();
@@ -15,8 +15,27 @@ document.addEventListener('DOMContentLoaded', () => {
     const COLECAO_PEDIDOS = "pedidos";
     const STATUS_ATIVOS_PEDIDOS = ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"];
 
-    const somNotificacao = new Audio('https://assets.mixkit.co/active_storage/sfx/1004/1004-preview.mp3');
-    somNotificacao.volume = 1.0;
+    // Configurável em Configurações > Alerta sonoro de pedido novo — som,
+    // volume e intervalo de repetição, sem precisar mexer em código.
+    let cfg = { ativo: true, som_id: '1004', volume: 1.0, intervalo_segundos: 4 };
+    try {
+        const snap = await db.collection('configuracoes').doc('alerta_som').get();
+        if (snap.exists) {
+            const d = snap.data() || {};
+            cfg = {
+                ativo: d.ativo !== false,
+                som_id: d.som_id || '1004',
+                volume: d.volume != null ? d.volume : 1.0,
+                intervalo_segundos: d.intervalo_segundos || 4
+            };
+        }
+    } catch (e) {
+        console.warn('Config de alerta sonoro: usando padrão (erro ao ler):', e.message);
+    }
+    if (!cfg.ativo) return;
+
+    const somNotificacao = new Audio(`https://assets.mixkit.co/active_storage/sfx/${cfg.som_id}/${cfg.som_id}-preview.mp3`);
+    somNotificacao.volume = cfg.volume;
 
     let alertaSomInterval = null;
     function pararAlertaSom() {
@@ -38,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             tocarAlertaSom();
-        }, 4000);
+        }, cfg.intervalo_segundos * 1000);
     }
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && document.hasFocus()) pararAlertaSom();

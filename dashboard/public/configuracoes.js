@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // horario_funcionamento mora no mesmo doc do bot (configuracoes/bot) porque
     // é lido por ele (backend-bot) e pelo app — não é exclusivo desta tela.
     const DOC_BOT = db.collection('configuracoes').doc('bot');
+    const DOC_ALERTA_SOM = db.collection('configuracoes').doc('alerta_som');
     const COL_USUARIOS = db.collection('usuarios_admin');
     const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
     // Acesso de suporte (Murilo/fornecedor do sistema) — igual em todo cliente que
@@ -70,6 +71,11 @@ document.addEventListener('DOMContentLoaded', () => {
         $('salvar-usuario').addEventListener('click', salvarUsuario);
         $('novo-usuario').addEventListener('click', limparUsuarioForm);
         $('salvar-horario').addEventListener('click', salvarHorario);
+        $('salvar-alerta').addEventListener('click', salvarAlertaSom);
+        $('testar-alerta').addEventListener('click', testarAlertaSom);
+        $('alerta-volume').addEventListener('input', () => {
+            $('alerta-volume-valor').textContent = $('alerta-volume').value + '%';
+        });
         if (!isAdmin(user.email)) {
             $('usuarios-admin-box').style.display = 'none';
         } else {
@@ -160,9 +166,46 @@ document.addEventListener('DOMContentLoaded', () => {
             await carregarPagamentos();
             await carregarIfood();
             await carregarHorario();
+            await carregarAlertaSom();
         } catch (err) {
             alert('Erro ao carregar configuracoes: ' + err.message);
         }
+    }
+
+    function alertaSomUrl(id) {
+        return `https://assets.mixkit.co/active_storage/sfx/${id}/${id}-preview.mp3`;
+    }
+
+    async function carregarAlertaSom() {
+        const snap = await DOC_ALERTA_SOM.get();
+        const d = snap.exists ? snap.data() : {};
+        $('alerta-ativo').checked = d.ativo !== false;
+        $('alerta-som').value = d.som_id || '1004';
+        $('alerta-intervalo').value = String(d.intervalo_segundos || 4);
+        const vol = d.volume != null ? Math.round(d.volume * 100) : 100;
+        $('alerta-volume').value = vol;
+        $('alerta-volume-valor').textContent = vol + '%';
+    }
+
+    async function salvarAlertaSom() {
+        try {
+            await DOC_ALERTA_SOM.set({
+                ativo: $('alerta-ativo').checked,
+                som_id: $('alerta-som').value,
+                intervalo_segundos: parseInt($('alerta-intervalo').value, 10) || 4,
+                volume: parseInt($('alerta-volume').value, 10) / 100,
+                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            alert('Alerta sonoro salvo. Quem estiver com uma tela do sistema aberta precisa recarregar (F5) pra pegar a mudança.');
+        } catch (err) {
+            alert('Erro ao salvar alerta sonoro: ' + err.message);
+        }
+    }
+
+    function testarAlertaSom() {
+        const audio = new Audio(alertaSomUrl($('alerta-som').value));
+        audio.volume = parseInt($('alerta-volume').value, 10) / 100;
+        audio.play().catch(err => alert('Não consegui tocar o som: ' + err.message));
     }
 
     function aplicarVisibilidadeMaquininha() {

@@ -272,6 +272,45 @@
         </details>
 
         <details class="box">
+            <summary><div><h2>Alerta sonoro de pedido novo</h2><div class="sub">Som que toca quando cai um pedido novo, em qualquer tela do sistema (Pedidos, Caixa, KDS, Entregas, Mesas e In&iacute;cio).</div></div><span class="chevron">&#9656;</span></summary>
+            <div class="box-body">
+            <label class="check-line"><input id="alerta-ativo" type="checkbox" checked> Alerta sonoro ativo</label>
+            <div class="grid2">
+                <div class="campo">
+                    <label>Som</label>
+                    <select id="alerta-som">
+                        <option value="1004">Alarme cr&iacute;tico (padr&atilde;o atual)</option>
+                        <option value="995">Alarme cl&aacute;ssico</option>
+                        <option value="991">Buzina de aviso</option>
+                        <option value="996">Tom de alarme (curto)</option>
+                        <option value="908">Sirene de facilidade (curto)</option>
+                        <option value="993">Alarme cl&aacute;ssico curto</option>
+                    </select>
+                </div>
+                <div class="campo">
+                    <label>Repetir a cada (segundos, at&eacute; algu&eacute;m acessar a tela)</label>
+                    <select id="alerta-intervalo">
+                        <option value="3">3 segundos</option>
+                        <option value="4" selected>4 segundos</option>
+                        <option value="5">5 segundos</option>
+                        <option value="6">6 segundos</option>
+                        <option value="10">10 segundos</option>
+                    </select>
+                </div>
+            </div>
+            <div class="campo">
+                <label>Volume: <span id="alerta-volume-valor">100%</span></label>
+                <input id="alerta-volume" type="range" min="0" max="100" value="100" step="5">
+                <small>O volume real ainda depende do volume do aparelho/caixa de som.</small>
+            </div>
+            <div class="acoes">
+                <button class="btn btn-salvar" id="salvar-alerta">Salvar alerta sonoro</button>
+                <button class="btn btn-azul" id="testar-alerta" type="button">&#9658; Testar som</button>
+            </div>
+            </div>
+        </details>
+
+        <details class="box">
             <summary><div><h2>Hor&aacute;rio de funcionamento</h2><div class="sub">Vale pro app e pro bot do WhatsApp juntos. Fora do hor&aacute;rio configurado, o app mostra um aviso pro cliente e o bot responde automaticamente informando que est&aacute; fechado, sem chamar a IA.</div></div><span class="chevron">&#9656;</span></summary>
             <div class="box-body">
             <label class="check-line"><input id="horario-ativo" type="checkbox"> Restringir pedidos por hor&aacute;rio</label>
