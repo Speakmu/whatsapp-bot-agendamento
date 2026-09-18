@@ -1890,7 +1890,13 @@ def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
     deixando o rascunho incompleto. Só age com carrinho não vazio e mensagem
     curta exatamente igual a um slot. Devolve a lista de eventos pro log."""
     eventos = []
-    m = _normalizar_termo(mensagem)
+    # Caso real de produção: cliente respondeu "Dinheiro." (com ponto final)
+    # a "qual a forma de pagamento?" — o ponto sozinho fazia o regex de slot
+    # não bater (ele exige a palavra exata, sem sobra), a IA não chamou
+    # definir_pagamento, e o cliente teve que confirmar "pode fechar" mais
+    # três vezes até o servidor finalmente reconhecer o pagamento. Pontuação
+    # de fim de frase (. ! ? , ;) não muda o que o cliente quis dizer.
+    m = _normalizar_termo(mensagem).strip(".!?,; ")
     if not m or len(m) > 80:
         return eventos
     r = obter_rascunho(wa_id)

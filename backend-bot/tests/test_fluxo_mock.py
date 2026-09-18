@@ -432,6 +432,20 @@ def test_slots_obvios_pelo_servidor(ambiente, monkeypatch):
     assert bot.obter_rascunho(tel2)["tipo_entrega"] is None
 
 
+def test_slot_obvio_com_pontuacao_no_final(ambiente, monkeypatch):
+    # Caso real de produção: cliente respondeu "Dinheiro." (com ponto) e o
+    # regex do slot não batia por causa do ponto sobrando — a IA não chamou
+    # definir_pagamento e o cliente teve que confirmar "pode fechar" mais
+    # três vezes até o pedido fechar de verdade.
+    monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(
+        completions=types.SimpleNamespace(create=lambda **kw: _Resp(_Msg(content="Certo, mais alguma coisa?"))))))
+    cfg = bot.obter_config_bot()
+    tel = "5535999000017"
+    bot.rascunho_adicionar_item(tel, _codigo("coxinha de frango"), 1, cfg)
+    _conversar(tel, ["oi", "Dinheiro."])
+    assert bot.obter_rascunho(tel)["forma_pagamento"] == "DINHEIRO"
+
+
 def test_heuristica_nao_come_turno_legitimo():
     assert not bot._soa_como_confirmacao("A retirada está confirmada! Agora, qual será a forma de pagamento?")
     assert not bot._soa_como_confirmacao("Pagamento confirmado como PIX. A chave é x@y. Envie o comprovante do seu pedido.")
