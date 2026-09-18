@@ -2820,10 +2820,18 @@ def notificar_pronto():
         }
         
         # Envio da mensagem
-        response_wa = requests.post(url, headers=headers, json=payload)
+        response_wa = requests.post(url, headers=headers, json=payload, timeout=15)
         
         if response_wa.status_code in [200, 201]:
             print(f"✅ WhatsApp enviado para {telefone_limpo}")
+            # Sem isso, a mensagem chegava de verdade pro cliente mas nunca
+            # aparecia no painel de Atendimento do Bot (que lê
+            # historico_conversas) — a equipe achava que não tinha sido
+            # enviada e reenviava a mesma coisa na mão pro cliente.
+            try:
+                salvar_historico_firestore(telefone_limpo, "assistant", mensagem, bot_cfg.get("max_historico_salvar"))
+            except Exception as e:
+                print(f"⚠️ Aviso enviado mas não salvo no histórico: {e}")
             return jsonify({"status": "sucesso", "canal": "whatsapp"}), 200
         else:
             print(f"❌ Erro Meta: {response_wa.text}")
