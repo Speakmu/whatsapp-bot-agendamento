@@ -1142,7 +1142,9 @@ interface PerfilProps {
   setTelefone: (tel: string) => void;
 }
 
-const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, setTelefone, cpf, setCpf, pontosPerfil, valorPorPonto = 0, corMarca = BRAND_GREEN }: any) => {
+const URL_POLITICA_PRIVACIDADE = 'https://lileamar-app-web.web.app/privacidade.html';
+
+const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, onExcluirConta, setNome, setTelefone, cpf, setCpf, pontosPerfil, valorPorPonto = 0, corMarca = BRAND_GREEN }: any) => {
   const [editando, setEditando] = useState(false);
   const [novoNome, setNovoNome] = useState(nome);
   const [novoTelefone, setNovoTelefone] = useState(telefone);
@@ -1348,6 +1350,13 @@ const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, setNome, set
         {/* BOTÃO SAIR NO RODAPÉ DO CONTEÚDO */}
         <TouchableOpacity style={{ marginTop: 30 }} onPress={onSair}>
           <Text style={{ color: BRAND_GREEN, textAlign: 'center', fontWeight: '500' }}>Sair da Conta</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={{ marginTop: 22 }} onPress={onExcluirConta}>
+          <Text style={{ color: '#c0392b', textAlign: 'center', fontSize: 13 }}>Excluir minha conta</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={{ marginTop: 14 }} onPress={() => Linking.openURL(URL_POLITICA_PRIVACIDADE)}>
+          <Text style={{ color: '#888', textAlign: 'center', fontSize: 12, textDecorationLine: 'underline' }}>Política de Privacidade</Text>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -2390,6 +2399,51 @@ function AppCliente() {
                 pontosPerfil={pontosPerfil}
                 valorPorPonto={valorPorPonto}
                 corMarca={corMarca}
+                onExcluirConta={() => {
+                  showAlert(
+                    "Excluir conta",
+                    "Seus dados pessoais (nome, CPF, telefone, endereço) serão apagados e seus pontos de fidelidade serão perdidos. Essa ação não pode ser desfeita. Deseja continuar?",
+                    [
+                      { text: "Cancelar", style: "cancel" },
+                      {
+                        text: "Excluir",
+                        style: "destructive",
+                        onPress: async () => {
+                          try {
+                            // Anonimiza em vez de apagar o documento: pedidos antigos
+                            // continuam referenciando o id (registro fiscal/financeiro).
+                            if (usuarioId) {
+                              await db.collection('usuarios_app').doc(usuarioId).update({
+                                nome: 'Conta excluída',
+                                cpf: firebase.firestore.FieldValue.delete(),
+                                telefone: '',
+                                endereco: '',
+                                pontos: 0,
+                                excluidoEm: firebase.firestore.Timestamp.now(),
+                              });
+                            }
+                            await storageDelete('user_id');
+                            await storageDelete('user_phone');
+                            await storageDelete('dados_usuario');
+                            await storageDelete('dados_cartao');
+                            setUsuarioId(undefined);
+                            setEstaCadastrado(false);
+                            setNome('');
+                            setTelefone('');
+                            setEndereco('');
+                            setCpf('');
+                            setCarrinho([]);
+                            setAbaAtiva('home');
+                            showAlert("Conta excluída", "Seus dados foram apagados.");
+                          } catch (e) {
+                            console.error("Erro ao excluir conta", e);
+                            showAlert("Erro", "Não foi possível excluir agora. Verifique sua conexão e tente de novo.");
+                          }
+                        }
+                      }
+                    ]
+                  );
+                }}
                 onSair={async () => {
                   showAlert(
                     "Sair",
