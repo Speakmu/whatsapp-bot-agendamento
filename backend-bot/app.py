@@ -2169,6 +2169,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     ck("depois obter_historico_firestore (checagem primeiro contato)")
     if not historico_check:
         saudacao = bot_cfg.get("mensagem_inicial") or BOT_CONFIG_DEFAULTS["mensagem_inicial"]
+        # Convite pro app já no primeiro contato — só quando ativo E com link
+        # configurado (mesma trava de "divulgar_app": sem link, nunca convida
+        # pra algo que a IA não teria como mostrar de verdade).
+        link_app_inicial = (bot_cfg.get("link_app") or "").strip()
+        if bot_cfg.get("divulgar_app") and link_app_inicial:
+            saudacao += f"\n\nVocê também pode fazer seu pedido direto pelo nosso app: {link_app_inicial}"
         salvar_historico_firestore(id_usuario, "user", prompt, bot_cfg.get("max_historico_salvar"))
         salvar_historico_firestore(id_usuario, "assistant", saudacao, bot_cfg.get("max_historico_salvar"))
         ck("retornou saudacao inicial")
