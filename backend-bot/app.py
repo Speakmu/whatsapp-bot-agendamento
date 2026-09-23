@@ -73,6 +73,10 @@ BOT_CONFIG_DEFAULTS = {
     # cliente a baixar o app pra ganhar pontos, mesmo em lojas onde o app
     # ainda não está no ar. Configurável em Config do Bot.
     "divulgar_app": False,
+    # Vazio de propósito (mesmo motivo do chave_pix): sem link configurado,
+    # o bot NÃO pode inventar "baixe na Play Store" — nem sempre existe
+    # publicação de verdade nas lojas (o app pode estar só na versão web).
+    "link_app": "",
     # Período de férias/fechamento — data (não horário) configurável no
     # painel. Enquanto ativo, bloqueia o bot igual ao horário de
     # funcionamento fechado, mas por um intervalo de dias em vez de horário
@@ -2120,11 +2124,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                           "confirmação ('Confere? Posso fechar? E me diz seu nome pra anotar'). Se ele não quiser "
                           "informar, feche mesmo assim — o nome não é obrigatório.")
 
-    if bot_cfg.get("divulgar_app"):
+    link_app = (bot_cfg.get("link_app") or "").strip()
+    if bot_cfg.get("divulgar_app") and link_app:
         instrucao_divulgar_app = (
-            "Se o nome for desconhecido, avise sobre baixar o app para ganhar pontos. "
+            f"Se o nome for desconhecido, avise sobre o app pra ganhar pontos e mande o link: {link_app} "
+            "(é o único link real — nunca invente 'baixe na Play Store/App Store' se não for esse link). "
             "Se o nome já for conhecido, apenas lembre-o de conferir os pontos no app."
         )
+    elif bot_cfg.get("divulgar_app"):
+        # Ativado no painel mas sem link configurado ainda — não convida o
+        # cliente pra algo que a IA não tem como mostrar de verdade.
+        instrucao_divulgar_app = ""
     else:
         # App ainda não está no ar pra essa loja — não convida o cliente pra
         # baixar nada que não existe de verdade ainda.

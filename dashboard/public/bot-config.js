@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
         mensagem_erro: 'Desculpe, tive um probleminha aqui. Pode repetir?',
         instrucoes_extras: '',
         divulgar_app: false,
+        link_app: '',
         ferias_ativo: false,
         ferias_inicio: '',
         ferias_fim: '',
@@ -137,6 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const d = { ...BOT_DEFAULTS, ...(snap.exists ? (snap.data() || {}) : {}) };
             $('bot-ativo').checked = d.ativo !== false;
             $('bot-divulgar-app').checked = d.divulgar_app === true;
+            $('bot-link-app').value = d.link_app || '';
             $('bot-ferias-ativo').checked = d.ferias_ativo === true;
             $('bot-ferias-inicio').value = d.ferias_inicio || '';
             $('bot-ferias-fim').value = d.ferias_fim || '';
@@ -181,6 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const payload = {
             ativo: $('bot-ativo').checked,
             divulgar_app: $('bot-divulgar-app').checked,
+            link_app: $('bot-link-app').value.trim(),
             ferias_ativo: $('bot-ferias-ativo').checked,
             ferias_inicio: $('bot-ferias-inicio').value || '',
             ferias_fim: $('bot-ferias-fim').value || '',

@@ -52,6 +52,11 @@
             <div class="sub">Configura&ccedil;&otilde;es comerciais do atendimento autom&aacute;tico. Dados t&eacute;cnicos e chaves sens&iacute;veis ficam protegidos fora da tela.</div>
             <label class="check-line"><input id="bot-ativo" type="checkbox" checked> Atendimento autom&aacute;tico ativo</label>
             <label class="check-line"><input id="bot-divulgar-app" type="checkbox"> Bot divulga o app pro cliente (convidar a baixar / lembrar pontos) &mdash; deixe desmarcado se o app ainda n&atilde;o est&aacute; dispon&iacute;vel</label>
+            <div class="campo">
+                <label>Link do app (enviado pelo bot quando a op&ccedil;&atilde;o acima estiver ativa)</label>
+                <input id="bot-link-app" placeholder="https://lileamar-app-web.web.app">
+                <small>Sem link aqui, o bot NÃO fala do app pro cliente mesmo com a op&ccedil;&atilde;o acima marcada &mdash; ele nunca inventa "baixe na Play Store" se n&atilde;o for esse link.</small>
+            </div>
             <div class="grid2">
                 <div class="campo"><label>Nome da IA</label><input id="bot-nome-atendente" placeholder="Sofia"></div>
                 <div class="campo"><label>Nome da empresa no bot</label><input id="bot-nome-empresa" placeholder="Lileamar Salgados"></div>
