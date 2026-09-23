@@ -19,16 +19,24 @@
 
     const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
 
+    // Itens agrupados do app/bot vêm com o nome prefixado ("3x Coxinha") — tira
+    // o prefixo pra bater com o nome cadastrado na ficha técnica ("Coxinha").
+    const semPrefixoQtd = (s) => s.replace(/^\d+x\s+/i, '');
+
     // Resolve a ficha de um item do pedido (por id do cardápio ou por nome)
     function resolverFicha(item, fichasPorId, fichasPorNome) {
         if (item && typeof item === 'object') {
             const id = item.id || item.cardapio_id || item.produto_id;
             if (id && fichasPorId[id]) return fichasPorId[id];
-            const nome = norm(item.nome_exibicao || item.nome);
-            if (nome && fichasPorNome[nome]) return fichasPorNome[nome];
+            const nomeBruto = norm(item.nome_exibicao || item.nome);
+            if (nomeBruto && fichasPorNome[nomeBruto]) return fichasPorNome[nomeBruto];
+            const nomeSemQtd = semPrefixoQtd(nomeBruto);
+            if (nomeSemQtd && fichasPorNome[nomeSemQtd]) return fichasPorNome[nomeSemQtd];
         } else if (typeof item === 'string') {
-            const nome = norm(item);
-            if (fichasPorNome[nome]) return fichasPorNome[nome];
+            const nomeBruto = norm(item);
+            if (fichasPorNome[nomeBruto]) return fichasPorNome[nomeBruto];
+            const nomeSemQtd = semPrefixoQtd(nomeBruto);
+            if (fichasPorNome[nomeSemQtd]) return fichasPorNome[nomeSemQtd];
         }
         return null;
     }
