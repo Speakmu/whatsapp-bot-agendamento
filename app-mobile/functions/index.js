@@ -612,10 +612,16 @@ export const mercadoPagoWebhook = onRequest(
             pontos_creditados: true
         });
 
+        // Ganho e resgate são aplicados juntos, só aqui na confirmação — o app
+        // não debita os pontos resgatados na hora de gerar o PIX (pedido ainda
+        // podia nunca ser pago/ser cancelado, e o cliente perdia os pontos sem
+        // reembolso nenhum).
         const pontosACreditar = Number(pedido.pontos_a_creditar) || 0;
-        if (pontosACreditar > 0 && pedido.usuario_id) {
+        const pontosResgatados = Number(pedido.pontos_resgatados) || 0;
+        const saldoPontos = pontosACreditar - pontosResgatados;
+        if (saldoPontos !== 0 && pedido.usuario_id) {
             await db.collection('usuarios_app').doc(pedido.usuario_id)
-                .update({ pontos: FieldValue.increment(pontosACreditar) });
+                .update({ pontos: FieldValue.increment(saldoPontos) });
         }
 
         return res.status(200).send('ok');

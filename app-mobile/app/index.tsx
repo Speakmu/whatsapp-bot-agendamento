@@ -1713,8 +1713,16 @@ function AppCliente() {
 
         const itensFormatados = Object.values(acumulador).map((item: any) => ({
           nome: item.qtd > 1 ? `${item.qtd}x ${item.nome}` : item.nome,
-          preco: item.preco
+          preco: item.preco,
+          quantidade: item.qtd
         }));
+
+        // Pontos resgatados: só ficam registrados no pedido aqui — o débito de
+        // verdade só acontece quando o webhook confirmar o pagamento (igual ao
+        // crédito dos pontos ganhos). Debitar agora, com o PIX ainda pendente,
+        // fazia o cliente perder os pontos pra sempre se o PIX expirasse ou o
+        // pedido fosse cancelado, já que nada devolvia esse saldo.
+        const pontosResgatadosNoPedido = usarPontos ? pontosUsados() : 0;
 
         // 3. Salvar no Firestore
         await addDoc(collection(db, "pedidos"), {
@@ -1737,16 +1745,10 @@ function AppCliente() {
           pix_copia_cola: codigoPix, // permite reabrir o código na aba Pedidos se o cliente sair da tela
           status: 'AGUARDANDO_PIX', // 🔥 CORREÇÃO: Começa como aguardando o pagamento
           pontos_a_creditar: pontosDoPedido(carrinho), // creditado pelo webhook quando o MP confirmar o pagamento
+          pontos_resgatados: pontosResgatadosNoPedido, // debitado pelo webhook junto com o crédito, só quando o PIX for confirmado
           hora_pedido: serverTimestamp(),
           data_formatada: new Date().toLocaleString('pt-BR')
         });
-
-        // Resgate de fidelidade: debita os pontos usados (PIX credita o ganho na confirmação do pagamento)
-        if (usarPontos && pontosUsados() > 0 && usuarioId) {
-          try {
-            await updateDoc(doc(dbModular, 'usuarios_app', usuarioId), { pontos: increment(-pontosUsados()) });
-          } catch (e) { console.warn('Falha ao debitar pontos (PIX):', e); }
-        }
 
         setModalPixVisivel(true);
         setCarrinho([]);
@@ -1876,7 +1878,8 @@ function AppCliente() {
 
       const itensFormatados = Object.values(acumulador).map((item) => ({
         nome: item.qtd > 1 ? `${item.qtd}x ${item.nome}` : item.nome,
-        preco: item.preco
+        preco: item.preco,
+        quantidade: item.qtd
       }));
 
       // --- PASSO C: Se aprovado, ATUALIZAR PONTOS E SALVAR PEDIDO ---
@@ -1891,6 +1894,7 @@ function AppCliente() {
 
         // 1. Calcula os pontos somando o pontos_fidelidade cadastrado de cada item do carrinho
         const totalPontosGanhos = pontosDoPedido(carrinho);
+        const pontosResgatadosNoPedido = usarPontos ? pontosUsados() : 0;
         console.log("Total de pontos calculados (regra):", totalPontosGanhos);
 
         // 2. ATUALIZAÇÃO DOS PONTOS
@@ -1899,7 +1903,7 @@ function AppCliente() {
           const clienteRef = doc(dbModular, "usuarios_app", usuarioId);
 
           await updateDoc(clienteRef, {
-            pontos: increment(totalPontosGanhos - pontosUsados())
+            pontos: increment(totalPontosGanhos - pontosResgatadosNoPedido)
           });
           showAlert(
             "🎉 Parabéns!",
@@ -1913,7 +1917,7 @@ function AppCliente() {
           // Se der erro (ex: documento não existe), cria um novo
           if (err.code === 'not-found' || String(err).includes('not found')) {
             const clienteRef = doc(dbModular, "usuarios_app", usuarioId);
-            await setDoc(clienteRef, { pontos: totalPontosGanhos - pontosUsados() }, { merge: true });
+            await setDoc(clienteRef, { pontos: totalPontosGanhos - pontosResgatadosNoPedido }, { merge: true });
             console.log("✅ Documento criado e pontos creditados!");
           }
         }
@@ -1947,6 +1951,7 @@ function AppCliente() {
             itens: itensFormatados,
             valor_total: calcularTotal(),
             pontos_gerados: totalPontosGanhos,
+            pontos_resgatados: pontosResgatadosNoPedido,
             forma_pagamento: 'CARTAO',
             // CPF do cliente (já usado no pagamento acima) — necessário pra emitir
             // NFC-e: operação não presencial (indPres=4) exige destinatário
@@ -1964,6 +1969,7 @@ function AppCliente() {
           setStatusPagamento('sucesso');
           setModalVisivel(true);
           setCarrinho([]);
+          setUsarPontos(false);
           setAbaAtiva('pedidos');
 
         } catch (dbError) {
