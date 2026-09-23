@@ -145,9 +145,122 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppCliente />
+      <InstalarAppBanner />
     </SafeAreaProvider>
   );
 }
+
+// Só existe na versão web (o app nativo já é instalado de verdade, não
+// precisa disso). Sem esse aviso, quase ninguém descobre sozinho que dá
+// pra "Adicionar à Tela de Início" pra abrir em tela cheia — o link do
+// WhatsApp sempre abre numa aba comum do navegador na primeira vez.
+function InstalarAppBanner() {
+  const [visivel, setVisivel] = useState(false);
+  const [mostrarInstrucao, setMostrarInstrucao] = useState(false);
+  const promptAdiado = useRef<any>(null);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    let cancelado = false;
+    (async () => {
+      const jaFechou = await storageGet('instalar_app_fechado');
+      if (jaFechou || cancelado) return;
+      const jaInstalado =
+        (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) ||
+        (window.navigator as any).standalone === true;
+      if (jaInstalado) return;
+      setVisivel(true);
+    })();
+    const aoOferecerInstalacao = (e: any) => {
+      e.preventDefault();
+      promptAdiado.current = e;
+    };
+    window.addEventListener('beforeinstallprompt', aoOferecerInstalacao);
+    return () => {
+      cancelado = true;
+      window.removeEventListener('beforeinstallprompt', aoOferecerInstalacao);
+    };
+  }, []);
+
+  if (Platform.OS !== 'web' || !visivel) return null;
+
+  const ehIOS = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+
+  const fechar = async () => {
+    setVisivel(false);
+    await storageSet('instalar_app_fechado', '1');
+  };
+
+  const instalar = async () => {
+    if (!ehIOS && promptAdiado.current) {
+      promptAdiado.current.prompt();
+      await promptAdiado.current.userChoice;
+      promptAdiado.current = null;
+      fechar();
+      return;
+    }
+    setMostrarInstrucao(true);
+  };
+
+  return (
+    <View style={estilosInstalarBanner.container} pointerEvents="box-none">
+      <View style={estilosInstalarBanner.cartao}>
+        {!mostrarInstrucao ? (
+          <>
+            <Text style={estilosInstalarBanner.texto}>📲 Adicione à tela inicial pra abrir mais rápido, em tela cheia!</Text>
+            <View style={estilosInstalarBanner.botoes}>
+              <TouchableOpacity onPress={instalar} style={estilosInstalarBanner.botaoPrimario}>
+                <Text style={estilosInstalarBanner.textoBotaoPrimario}>Adicionar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={fechar} style={estilosInstalarBanner.botaoSecundario}>
+                <Text style={estilosInstalarBanner.textoBotaoSecundario}>Agora não</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : (
+          <>
+            <Text style={estilosInstalarBanner.texto}>
+              {ehIOS
+                ? 'Toque no ícone de compartilhar (⬆️) na barra do navegador e depois em "Adicionar à Tela de Início".'
+                : 'Abra o menu do navegador (⋮) e toque em "Adicionar à tela inicial" ou "Instalar app".'}
+            </Text>
+            <TouchableOpacity onPress={fechar} style={estilosInstalarBanner.botaoPrimario}>
+              <Text style={estilosInstalarBanner.textoBotaoPrimario}>Entendi</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const estilosInstalarBanner = StyleSheet.create({
+  container: {
+    position: 'absolute' as any,
+    left: 0, right: 0, bottom: 0,
+    alignItems: 'center',
+    padding: 12,
+  },
+  cartao: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#1f2937',
+    borderRadius: 14,
+    padding: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  texto: { color: '#fff', fontSize: 14, lineHeight: 20, marginBottom: 10 },
+  botoes: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+  botaoPrimario: { backgroundColor: '#ff5200', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
+  textoBotaoPrimario: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  botaoSecundario: { paddingVertical: 8, paddingHorizontal: 12 },
+  textoBotaoSecundario: { color: '#cbd5e1', fontWeight: '600', fontSize: 14 },
+});
+
 interface Produto {
   id: string;
   nome: string;
