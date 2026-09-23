@@ -270,6 +270,26 @@ def test_sem_interrogacao_nao_conta():
     assert not bot._ultima_resposta_pediu_confirmacao(hist)
 
 
+# ---------------- _total_mencionado_bate_com_rascunho ----------------
+def test_total_divergente_detecta():
+    # Caso real de produção: IA descreveu 3 itens e "Total geral: R$26,00"
+    # mas só 1 item (R$1,00 + taxa R$9,00 = R$10,00) tinha sido realmente
+    # adicionado via adicionar_item.
+    texto = "Pastel + Fanta + Molho.\n\nTotal dos itens: R$ 17,00\nTaxa de entrega: R$ 9,00\nTotal geral: R$ 26,00"
+    assert not bot._total_mencionado_bate_com_rascunho(texto, 10.0)
+
+
+def test_total_igual_nao_detecta():
+    texto = "Seu pedido: 1x Molho de pimenta.\n\nTotal geral: R$ 10,00"
+    assert bot._total_mencionado_bate_com_rascunho(texto, 10.0)
+
+
+def test_total_sem_mencao_nao_detecta():
+    assert bot._total_mencionado_bate_com_rascunho("Qual é o seu nome?", 10.0)
+    assert bot._total_mencionado_bate_com_rascunho("", 10.0)
+    assert bot._total_mencionado_bate_com_rascunho(None, 10.0)
+
+
 # ---------------- _converter_markdown_para_whatsapp ----------------
 def test_converte_negrito_markdown_para_whatsapp():
     assert bot._converter_markdown_para_whatsapp("**Total:** R$ 10,00") == "*Total:* R$ 10,00"

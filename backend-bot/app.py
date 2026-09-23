@@ -2088,6 +2088,31 @@ def _soa_como_correcao_pos_fechamento(texto):
     return False
 
 
+def _total_mencionado_bate_com_rascunho(texto, valor_real):
+    """O "Total"/"Total geral" que o texto final menciona bate com o
+    valor_total DE VERDADE do rascunho agora? Caso real de produção: cliente
+    pediu 3 itens (pastel, refrigerante, molho), só o molho foi realmente
+    adicionado via adicionar_item (os outros dois nunca rodaram — a IA só
+    perguntou "posso adicionar?" e nunca chamou a função quando o cliente
+    confirmou), mas a IA escreveu um resumo com os 3 itens e "Total geral:
+    R$26" — carrinho de verdade tinha R$1. O cliente confirmou o fechamento
+    achando que os 3 itens estavam lá, e o pedido fechou faltando 2 deles.
+    Essa checagem pega qualquer resumo cujo total dito não bate com o
+    total real, não só "pedido fechado" — cobre alucinação de CONTEÚDO do
+    carrinho, não só de status. True se não há nada pra checar (texto sem
+    "total") ou se bate; False só quando há um total dito E ele diverge."""
+    if not texto or "total" not in texto.lower():
+        return True
+    matches = re.findall(r'total[^\n\d]{0,25}r\$\s*([\d]{1,3}(?:\.\d{3})*(?:,\d{2})?)', texto, re.IGNORECASE)
+    if not matches:
+        return True
+    try:
+        valor_dito = float(matches[-1].replace(".", "").replace(",", "."))
+    except ValueError:
+        return True
+    return abs(valor_dito - valor_real) < 0.02
+
+
 # --- LÓGICA AGENTE OPENAI ---
 def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     import re
@@ -2820,6 +2845,28 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     "Seu pedido anterior já está registrado — não dá pra alterar automaticamente por aqui. "
                     "Já chamei a equipe pra confirmar essa mudança direto com você."
                 )
+
+            # Rede de segurança pra alucinação de CONTEÚDO do carrinho (não
+            # só de status): caso real de produção, cliente pediu 3 itens,
+            # só 1 foi realmente adicionado (adicionar_item nunca rodou pros
+            # outros dois), mas a IA escreveu um resumo com os 3 itens e um
+            # "Total geral" que não existia — o cliente confirmou o
+            # fechamento achando que tinha os 3, e o pedido fechou faltando
+            # 2 itens de verdade pagos. Só roda se o pedido NÃO fechou
+            # nesta mensagem (senão o rascunho já foi resetado e comparar
+            # não faz sentido).
+            if not pedido_registrado_ok:
+                valor_real = _totais_rascunho(obter_rascunho(id_usuario), bot_cfg)[2]
+                if not _total_mencionado_bate_com_rascunho(final_text, valor_real):
+                    log_observacao = "texto_total_nao_bate_com_carrinho"
+                    marcar_atencao(
+                        id_usuario,
+                        f"IA descreveu um total que não bate com o carrinho real (R$ {valor_real:.2f}) — "
+                        "confira com o cliente quais itens ele realmente quer.",
+                        tipo="pedido_falhou",
+                        dados={"resposta_suspeita": final_text, "valor_real": valor_real}
+                    )
+                    final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
 
         # Caso real de produção: a IA escreveu "**Total:**" e
         # "[link](link)" — Markdown padrão, que o WhatsApp não entende.
