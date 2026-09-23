@@ -77,6 +77,10 @@ BOT_CONFIG_DEFAULTS = {
     # o bot NÃO pode inventar "baixe na Play Store" — nem sempre existe
     # publicação de verdade nas lojas (o app pode estar só na versão web).
     "link_app": "",
+    # Texto do convite pro app, editável (mesmo padrão de mensagem_pronto
+    # etc.) — {link_app} é trocado pelo link real na hora de enviar.
+    "mensagem_convite_app": ("Estamos com nosso app de pedidos! Lá você consegue ver todos os produtos. "
+                              "Segue o link: {link_app}\n\nMas se quiser, pode fazer o pedido por aqui também!"),
     # Período de férias/fechamento — data (não horário) configurável no
     # painel. Enquanto ativo, bloqueia o bot igual ao horário de
     # funcionamento fechado, mas por um intervalo de dias em vez de horário
@@ -2174,7 +2178,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         # pra algo que a IA não teria como mostrar de verdade).
         link_app_inicial = (bot_cfg.get("link_app") or "").strip()
         if bot_cfg.get("divulgar_app") and link_app_inicial:
-            saudacao += f"\n\nVocê também pode fazer seu pedido direto pelo nosso app: {link_app_inicial}"
+            convite = bot_cfg.get("mensagem_convite_app") or BOT_CONFIG_DEFAULTS["mensagem_convite_app"]
+            saudacao += "\n\n" + convite.format(link_app=link_app_inicial)
         salvar_historico_firestore(id_usuario, "user", prompt, bot_cfg.get("max_historico_salvar"))
         salvar_historico_firestore(id_usuario, "assistant", saudacao, bot_cfg.get("max_historico_salvar"))
         ck("retornou saudacao inicial")

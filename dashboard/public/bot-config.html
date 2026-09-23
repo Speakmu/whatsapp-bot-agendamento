@@ -57,6 +57,11 @@
                 <input id="bot-link-app" placeholder="https://lileamar-app-web.web.app">
                 <small>Sem link aqui, o bot NÃO fala do app pro cliente mesmo com a op&ccedil;&atilde;o acima marcada &mdash; ele nunca inventa "baixe na Play Store" se n&atilde;o for esse link.</small>
             </div>
+            <div class="campo">
+                <label>Mensagem de convite ao app (mostrada logo na primeira mensagem do cliente)</label>
+                <textarea id="bot-convite-app" placeholder="Estamos com nosso app de pedidos! L&aacute; voc&ecirc; consegue ver todos os produtos. Segue o link: {link_app}"></textarea>
+                <small>Use <code>{link_app}</code> onde quiser que o link entre &mdash; o bot troca automaticamente pelo link configurado acima.</small>
+            </div>
             <div class="grid2">
                 <div class="campo"><label>Nome da IA</label><input id="bot-nome-atendente" placeholder="Sofia"></div>
                 <div class="campo"><label>Nome da empresa no bot</label><input id="bot-nome-empresa" placeholder="Lileamar Salgados"></div>
