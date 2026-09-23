@@ -1629,8 +1629,22 @@ def verificar_bairro_entrega(bairro_cliente, bot_cfg=None):
 
     bot_cfg = bot_cfg or obter_config_bot()
 
+    # Caso real de produção: a IA às vezes manda o endereço inteiro em vez
+    # de só o bairro (ex.: "Morumbi São Sebastião do Paraíso" — cliente
+    # mencionou o bairro E a cidade na mesma frase). O nome da cidade
+    # sozinho já bate quase igual com um bairro real de mesmo nome
+    # ("São Sebastião"), e a pontuação aproximada, incluída, inflava pra
+    # 90 — "Morumbi" (que não atendemos) virava "atende" por causa da
+    # cidade grudada no termo. Tira as variantes da cidade antes de comparar.
+    termo_normalizado = _normalizar_termo(termo)
+    for variante_cidade in str(bot_cfg.get("cidade_atendida") or "").split(","):
+        vc = _normalizar_termo(variante_cidade)
+        if vc and vc in termo_normalizado:
+            termo_normalizado = termo_normalizado.replace(vc, " ")
+    termo_normalizado = " ".join(termo_normalizado.split()) or _normalizar_termo(termo)
+
     try:
-        aprendido = db.collection("bairros_aprendizado").document(_normalizar_termo(termo)).get()
+        aprendido = db.collection("bairros_aprendizado").document(termo_normalizado).get()
         if aprendido.exists:
             dados_aprendido = aprendido.to_dict()
             bot_cfg_taxa = bot_cfg.get("taxa_entrega") or 0
@@ -1657,8 +1671,8 @@ def verificar_bairro_entrega(bairro_cliente, bot_cfg=None):
     # lista real: 86 vs 84, o errado "ganhando". Sem acento, "san genaro"
     # sobe pra 90 e o falso positivo cai pra 86, com folga de verdade.
     bairros_normalizados = [_normalizar_termo(b) for b in bairros]
-    melhor_match, pontuacao = process.extractOne(_normalizar_termo(termo), bairros_normalizados)
-    print(f"DEBUG: bairro '{termo}' comparado com '{melhor_match}'. Pontuação: {pontuacao}")
+    melhor_match, pontuacao = process.extractOne(termo_normalizado, bairros_normalizados)
+    print(f"DEBUG: bairro '{termo}' (limpo: '{termo_normalizado}') comparado com '{melhor_match}'. Pontuação: {pontuacao}")
 
     if pontuacao > 75:
         return {
@@ -2390,16 +2404,23 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        - Item que o cliente pediu e não existe no cardápio nem nos
          apelidos → 'item_nao_encontrado' e ofereça a categoria mais próxima.
 
-       SOBRE BAIRRO: 'definir_entrega'/'verificar_bairro_entrega' já conferem
-       a lista. "atende": confirme e informe a taxa. "nao_atende_confirmado":
-       diga com firmeza que não entregamos ali e ofereça retirada. Bairro não
-       reconhecido: se for claramente outra cidade (ex.: "Passos" não é
-       bairro de {cidade_atendida or "nossa cidade"}), diga que só
-       entregamos em {cidade_atendida or "nossa cidade"} e ofereça retirada,
-       sem escalar; se puder ser bairro local, diga que vai confirmar com a
-       equipe (ela recebe o aviso) e ofereça retirada enquanto isso — e se o
-       topo do prompt avisar que essa dúvida já passou de 10 minutos, não
-       prometa de novo: resolva com o cliente.
+       SOBRE BAIRRO: chame 'verificar_bairro_entrega' passando só o NOME DO
+       BAIRRO (nunca a cidade nem o endereço inteiro junto — "Morumbi, São
+       Sebastião do Paraíso" vira bairro_cliente="Morumbi", não a frase
+       toda). 'definir_entrega'/'verificar_bairro_entrega' já conferem a
+       lista. "atende": confirme e informe a taxa. "nao_atende_confirmado":
+       diga com firmeza que não entregamos ali e ofereça retirada. Bairro
+       não reconhecido ("nao_encontrado"): se for claramente outra cidade
+       (ex.: "Passos" não é bairro de {cidade_atendida or "nossa cidade"}),
+       diga que só entregamos em {cidade_atendida or "nossa cidade"} e
+       ofereça retirada, sem escalar; se puder ser bairro local, a resposta
+       é SEMPRE algo como "Vou confirmar com a equipe se entregamos no seu
+       bairro, só um instante" — e ofereça retirada enquanto isso. NUNCA,
+       nesse caso: (1) diga que não entregamos ali (você não sabe isso
+       ainda); (2) peça pro cliente confirmar/ter certeza do nome do bairro
+       que ele já disse; (3) sugira ou troque pra outro nome de bairro que
+       ele não mencionou. Se o topo do prompt avisar que essa dúvida já
+       passou de 10 minutos, não prometa de novo: resolva com o cliente.
 
        SOBRE CANCELAMENTO: se o cliente disser "cancela"/"não quero mais
        esse pedido" a qualquer momento — mesmo ANTES de fechar_pedido ter

@@ -592,6 +592,18 @@ def test_ia_remonta_pedido_igual_depois_de_fechado_nao_duplica(ambiente, monkeyp
     assert len(_pedidos(ambiente, tel)) == 2
 
 
+def test_bairro_com_cidade_grudada_nao_gera_falso_positivo(ambiente):
+    # Caso real de produção: a IA mandou o bairro E a cidade juntos
+    # ("Morumbi São Sebastião do Paraíso" — cliente mencionou os dois na
+    # mesma frase). O nome da cidade sozinho batia quase igual com bairros
+    # reais que também têm "São" no nome, inflando a pontuação aproximada
+    # e fazendo um bairro que não atendemos ("Morumbi") ser aceito como
+    # "atende" só por causa do pedaço da cidade grudado no termo.
+    cfg = bot.obter_config_bot()
+    resultado = bot.verificar_bairro_entrega("Morumbi São Sebastião do Paraíso", cfg)
+    assert resultado["status"] == "nao_encontrado"
+
+
 def test_bairro_preenchido_pelo_servidor(ambiente, monkeypatch):
     """Entrega definida, bot perguntou o bairro, cliente 'San Genaro' e a IA
     só CONSULTA (verificar_bairro_entrega) → o servidor grava o bairro nos dois
