@@ -270,6 +270,29 @@ def test_sem_interrogacao_nao_conta():
     assert not bot._ultima_resposta_pediu_confirmacao(hist)
 
 
+# ---------------- _converter_markdown_para_whatsapp ----------------
+def test_converte_negrito_markdown_para_whatsapp():
+    assert bot._converter_markdown_para_whatsapp("**Total:** R$ 10,00") == "*Total:* R$ 10,00"
+
+
+def test_converte_link_markdown_para_url_pura():
+    # Caso real de produção: "[link](link)" apareceu duplicado na tela do
+    # cliente, porque o WhatsApp não entende essa sintaxe e mostra os
+    # colchetes/parênteses literalmente.
+    texto = "Aqui está: [https://lileamar-app-web.web.app](https://lileamar-app-web.web.app)."
+    assert bot._converter_markdown_para_whatsapp(texto) == "Aqui está: https://lileamar-app-web.web.app."
+
+
+def test_converte_link_markdown_com_rotulo_diferente():
+    texto = "Baixe [nosso app](https://lileamar-app-web.web.app) agora!"
+    assert bot._converter_markdown_para_whatsapp(texto) == "Baixe nosso app: https://lileamar-app-web.web.app agora!"
+
+
+def test_converter_markdown_texto_vazio():
+    assert bot._converter_markdown_para_whatsapp("") == ""
+    assert bot._converter_markdown_para_whatsapp(None) is None
+
+
 # ---------------- primeiro_nome ----------------
 def test_primeiro_nome():
     assert bot.primeiro_nome("Murilo Amorim") == "Murilo"

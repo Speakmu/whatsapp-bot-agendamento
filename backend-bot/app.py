@@ -127,6 +127,26 @@ def primeiro_nome(nome):
     registro do pedido, só a forma de se dirigir ao cliente é encurtada."""
     return str(nome or '').strip().split(' ')[0] or 'Cliente'
 
+def _converter_markdown_para_whatsapp(texto):
+    """WhatsApp não renderiza Markdown padrão — manda como texto literal.
+    Caso real de produção: a IA escreveu "**Total:**" e
+    "[link](https://...)"; o cliente viu os asteriscos duplos e os
+    colchetes/parênteses na tela sem nenhuma formatação de verdade (achou
+    que o link tinha vindo "duplicado"). Converte pro que o WhatsApp
+    realmente entende: negrito com UM asterisco, e link markdown vira só a
+    URL (que o WhatsApp já sublinha e deixa clicável sozinho)."""
+    if not texto:
+        return texto
+
+    def _link(m):
+        rotulo, url = m.group(1).strip(), m.group(2).strip()
+        return url if rotulo == url else f"{rotulo}: {url}"
+
+    texto = re.sub(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', _link, texto)
+    texto = re.sub(r'\*\*(.+?)\*\*', r'*\1*', texto)
+    return texto
+
+
 def _disponivel_online(item):
     # disponivel = interruptor geral (balcão + online). disponivel_online
     # é um segundo interruptor, só pro app/WhatsApp — permite continuar
@@ -2457,6 +2477,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
          ERRADO — são duas perguntas). Pergunte uma coisa, espere o cliente
          responder, só depois pergunte a próxima. Isso vale sempre, incluindo
          entrega e forma de pagamento no fechamento do pedido.
+       - WhatsApp não é Markdown: pra negrito use UM asterisco (*assim*),
+         nunca dois (**assim**). Nunca escreva link em formato
+         [texto](url) — o WhatsApp mostra os colchetes e parênteses
+         literalmente na tela do cliente; escreva só a URL solta.
 
     6. INSTRUCOES EXTRAS DA LOJA:
        {instrucoes_extras}
@@ -2796,6 +2820,15 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     "Seu pedido anterior já está registrado — não dá pra alterar automaticamente por aqui. "
                     "Já chamei a equipe pra confirmar essa mudança direto com você."
                 )
+
+        # Caso real de produção: a IA escreveu "**Total:**" e
+        # "[link](link)" — Markdown padrão, que o WhatsApp não entende.
+        # O cliente via os asteriscos duplos e os colchetes/parênteses
+        # literais na tela, sem nenhuma formatação de verdade (achou que o
+        # link tinha vindo "duplicado"). WhatsApp tem sua própria sintaxe
+        # (negrito com UM asterisco), então converte aqui — regra em
+        # código, não depende da IA lembrar de nunca usar Markdown.
+        final_text = _converter_markdown_para_whatsapp(final_text)
 
         ck("antes salvar_historico_firestore final")
         salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
