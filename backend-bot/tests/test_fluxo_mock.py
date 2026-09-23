@@ -446,6 +446,23 @@ def test_slot_obvio_com_pontuacao_no_final(ambiente, monkeypatch):
     assert bot.obter_rascunho(tel)["forma_pagamento"] == "DINHEIRO"
 
 
+def test_cancelar_pedido_esvazia_carrinho_sem_pedido_registrado(ambiente, monkeypatch):
+    # Caso real de produção: cliente montou um carrinho (nunca chegou a
+    # fechar_pedido) e pediu "cancelar meu pedido". cancelar_pedido_recente
+    # só olha pedidos JÁ REGISTRADOS, achava "sem_pedido" e o carrinho ficava
+    # intocado pra sempre — toda mensagem seguinte caía num fallback confuso
+    # perguntando entrega/pagamento como se nada tivesse acontecido.
+    cx = _codigo("coxinha de frango")
+    roteiro = {
+        "1 coxinha": [("adicionar_item", {"item_id": cx, "quantidade": 1}), "Adicionei! Mais alguma coisa?"],
+        "cancelar meu pedido": (("cancelar_pedido", {}), "Cancelei seu pedido."),
+    }
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "5535999000018"
+    _conversar(tel, ["oi", "1 coxinha", "cancelar meu pedido"])
+    assert bot.obter_rascunho(tel)["itens"] == []
+
+
 def test_heuristica_nao_come_turno_legitimo():
     assert not bot._soa_como_confirmacao("A retirada está confirmada! Agora, qual será a forma de pagamento?")
     assert not bot._soa_como_confirmacao("Pagamento confirmado como PIX. A chave é x@y. Envie o comprovante do seu pedido.")

@@ -176,6 +176,41 @@ def test_variante_ambigua_nao_dispara_pra_item_sem_grupo():
     assert item_certo is None and opcoes is None
 
 
+# ---------------- _variantes_do_grupo com apelido (caso "enroladinho") ----------------
+_CARDAPIO_ENROLADINHO = [
+    {"id": "id-presunto", "codigo": "ePre", "nome": "enroladinho de presunto e queijo", "nome_exibicao": "Enroladinho de Presunto e Queijo", "preco": 8.5},
+    {"id": "id-salsicha", "codigo": "sSal", "nome": "salsicha", "nome_exibicao": "Salsicha", "preco": 6.5},
+]
+_APELIDOS_ENROLADINHO = {"id-salsicha": ["enroladinho de salsicha", "salsicha empanada", "salsicha enrolada"]}
+
+
+def test_enroladinho_generico_pergunta_por_causa_do_apelido(monkeypatch):
+    # Caso real de produção: "2 enroladinhos" (sem dizer "de salsicha" nem
+    # "de presunto") resolvia pra Salsicha via apelido ensinado, ignorando
+    # que existe um item cujo NOME DE VERDADE é "Enroladinho de presunto e
+    # queijo" — a leitura mais direta da palavra sozinha.
+    monkeypatch.setattr(bot, "_apelidos_aprendidos", lambda: _APELIDOS_ENROLADINHO)
+    item_certo, opcoes = bot._resolver_variante_ambigua(_CARDAPIO_ENROLADINHO[1], _CARDAPIO_ENROLADINHO, "quero 2 enroladinhos")
+    assert item_certo is None
+    assert len(opcoes) == 2
+
+
+def test_enroladinho_de_salsicha_confirma_o_apelido(monkeypatch):
+    monkeypatch.setattr(bot, "_apelidos_aprendidos", lambda: _APELIDOS_ENROLADINHO)
+    item_certo, opcoes = bot._resolver_variante_ambigua(
+        _CARDAPIO_ENROLADINHO[0], _CARDAPIO_ENROLADINHO, "quero um enroladinho de salsicha"
+    )
+    assert item_certo is not None and item_certo["id"] == "id-salsicha"
+
+
+def test_enroladinho_de_presunto_confirma_o_nome_real(monkeypatch):
+    monkeypatch.setattr(bot, "_apelidos_aprendidos", lambda: _APELIDOS_ENROLADINHO)
+    item_certo, opcoes = bot._resolver_variante_ambigua(
+        _CARDAPIO_ENROLADINHO[1], _CARDAPIO_ENROLADINHO, "quero um enroladinho de presunto e queijo"
+    )
+    assert item_certo is not None and item_certo["id"] == "id-presunto"
+
+
 # ---------------- _normalizar_termo ----------------
 def test_normalizar_termo_remove_acento_e_espacos():
     assert bot._normalizar_termo("  São  Genaro ") == "sao genaro"

@@ -1835,36 +1835,52 @@ def _itens_mencionados(mensagem, cardapio):
 # silenciosamente: cliente pediu "coxinha de frango com catupiry", o item
 # adicionado foi a Coxinha Frango normal (R$1 mais barata, sem catupiry) —
 # sem perguntar nada. Cada palavra aqui é a "base" que agrupa as variações;
-# extensível se aparecer outro caso parecido no cardápio.
-_PALAVRAS_BASE_VARIACAO_ITEM = ["coxinha"]
+# extensível se aparecer outro caso parecido no cardápio. "enroladinho":
+# caso real de produção — cliente pediu "2 enroladinhos" (sem dizer "de
+# salsicha" nem "de presunto"), a IA resolveu pra Salsicha via apelido
+# ensinado ("enroladinho de salsicha"), ignorando que existe um item cujo
+# NOME DE VERDADE é "Enroladinho de presunto e queijo" — a leitura mais
+# direta da palavra sozinha.
+_PALAVRAS_BASE_VARIACAO_ITEM = ["coxinha", "enroladinho"]
 
 
-def _variantes_do_grupo(item, cardapio):
+def _nome_com_apelidos(item, apelidos):
+    """Nome + apelidos ensinados (itens_aprendizado), normalizado — pra
+    detectar ambiguidade que só existe por causa de um apelido (ex.: o
+    apelido 'enroladinho de salsicha' faz 'Salsicha' competir com o item
+    que se chama de verdade 'Enroladinho de presunto e queijo')."""
+    extras = " ".join(apelidos.get(item.get("id"), []))
+    return _normalizar_termo(f"{item.get('nome') or ''} {item.get('nome_exibicao') or ''} {extras}")
+
+
+def _variantes_do_grupo(item, cardapio, apelidos=None):
     """Outros itens do cardápio que compartilham a mesma palavra-base deste
-    (ex.: as duas coxinhas). None se este item não faz parte de um grupo
-    conhecido ou só existe uma variação dele agora (ex.: a outra ficou
-    indisponível)."""
+    (ex.: as duas coxinhas, ou 'enroladinho' batendo tanto no nome de um
+    item quanto no apelido ensinado de outro). None se este item não faz
+    parte de um grupo conhecido ou só existe uma variação dele agora (ex.:
+    a outra ficou indisponível)."""
     if not item:
         return None
-    nome_item = _normalizar_termo(f"{item.get('nome') or ''} {item.get('nome_exibicao') or ''}")
+    apelidos = apelidos if apelidos is not None else _apelidos_aprendidos()
+    nome_item = _nome_com_apelidos(item, apelidos)
     base = next((b for b in _PALAVRAS_BASE_VARIACAO_ITEM if b in nome_item), None)
     if not base:
         return None
-    variantes = [it for it in (cardapio or [])
-                 if base in _normalizar_termo(f"{it.get('nome') or ''} {it.get('nome_exibicao') or ''}")]
+    variantes = [it for it in (cardapio or []) if base in _nome_com_apelidos(it, apelidos)]
     return variantes if len(variantes) >= 2 else None
 
 
-def _palavras_proprias(item, variantes):
-    """Palavras do nome deste item que NENHUMA outra variação do grupo tem
-    — o que realmente diferencia esta variação das demais (ex.: 'catupiry')."""
+def _palavras_proprias(item, variantes, apelidos=None):
+    """Palavras do nome/apelido deste item que NENHUMA outra variação do
+    grupo tem — o que realmente diferencia esta variação das demais (ex.:
+    'catupiry', ou 'salsicha' pro item que só bate no apelido)."""
+    apelidos = apelidos if apelidos is not None else _apelidos_aprendidos()
     outras = [o for o in variantes if o["id"] != item["id"]]
-    nome = _normalizar_termo(f"{item.get('nome') or ''} {item.get('nome_exibicao') or ''}")
+    nome = _nome_com_apelidos(item, apelidos)
     toks = set(t for t in re.split(r"[^a-z0-9]+", nome) if len(t) >= 4)
     toks_outras = set()
     for o in outras:
-        nome_o = _normalizar_termo(f"{o.get('nome') or ''} {o.get('nome_exibicao') or ''}")
-        toks_outras |= set(re.split(r"[^a-z0-9]+", nome_o))
+        toks_outras |= set(re.split(r"[^a-z0-9]+", _nome_com_apelidos(o, apelidos)))
     return toks - toks_outras
 
 
@@ -1874,11 +1890,12 @@ def _resolver_variante_ambigua(item_resolvido, cardapio, mensagem):
     a IA tinha escolhido a errada — ou (None, [opções]) se está ambíguo e
     precisa perguntar antes de adicionar. (None, None) se não é um item com
     variações conhecidas."""
-    variantes = _variantes_do_grupo(item_resolvido, cardapio)
+    apelidos = _apelidos_aprendidos()
+    variantes = _variantes_do_grupo(item_resolvido, cardapio, apelidos)
     if not variantes:
         return None, None
     msg_toks = set(re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")))
-    bateu = [v for v in variantes if _palavras_proprias(v, variantes) & msg_toks]
+    bateu = [v for v in variantes if _palavras_proprias(v, variantes, apelidos) & msg_toks]
     if len(bateu) == 1:
         return bateu[0], None
     return None, variantes
@@ -2194,9 +2211,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         _f("consultar_meu_pedido",
            "Pedido mais recente JÁ REGISTRADO deste cliente (itens, valor, status). Use quando ele perguntar de um pedido já feito."),
         _f("cancelar_pedido",
-           "Cancela DE VERDADE o pedido mais recente já registrado (fechar_pedido já rodou) quando o cliente pedir pra cancelar. "
-           "Sem parâmetros. OBRIGATÓRIO chamar antes de dizer 'cancelado' — NUNCA diga que cancelou sem chamar. Se voltar status "
-           "'erro' (já em preparo), diga que a equipe vai confirmar o cancelamento."),
+           "Chame sempre que o cliente pedir pra cancelar — funciona tanto pro pedido mais recente JÁ REGISTRADO (fechar_pedido "
+           "já rodou) quanto pro carrinho que ainda está sendo montado (fechar_pedido nunca rodou). Sem parâmetros. OBRIGATÓRIO "
+           "chamar antes de dizer 'cancelado' — NUNCA diga que cancelou sem chamar. Se voltar status 'erro' (já em preparo), "
+           "diga que a equipe vai confirmar o cancelamento."),
     ]
 
     nome_atendente = bot_cfg.get("nome_atendente") or BOT_CONFIG_DEFAULTS["nome_atendente"]
@@ -2383,12 +2401,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        topo do prompt avisar que essa dúvida já passou de 10 minutos, não
        prometa de novo: resolva com o cliente.
 
-       SOBRE CANCELAMENTO DE PEDIDO JÁ REGISTRADO (depois de fechar_pedido ter
-       rodado com sucesso): se o cliente pedir pra cancelar, chame
-       'cancelar_pedido' AGORA — NUNCA diga "pedido cancelado"/"cancelei" sem
-       ter chamado essa função e recebido status "ok". Se ela voltar erro
-       (pedido já em preparo), diga que a equipe vai confirmar o cancelamento
-       com ele, não afirme que cancelou.
+       SOBRE CANCELAMENTO: se o cliente disser "cancela"/"não quero mais
+       esse pedido" a qualquer momento — mesmo ANTES de fechar_pedido ter
+       rodado, com o carrinho ainda sendo montado — chame 'cancelar_pedido'
+       AGORA MESMO. A função cuida dos dois casos (pedido já registrado ou
+       só um carrinho em andamento); NUNCA diga "pedido cancelado"/"cancelei"
+       sem ter chamado essa função e recebido status "ok". Se ela voltar
+       erro (pedido já em preparo), diga que a equipe vai confirmar o
+       cancelamento com ele, não afirme que cancelou.
 
        SOBRE MEXER EM PEDIDO JÁ FECHADO: se o resultado de uma ferramenta do
        carrinho trouxer "aviso_pedido_anterior_fechado", não existe função
@@ -2466,6 +2486,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         pedido_registrado_ok = False
         pedido_cancelado_ok = False
         bairro_nao_encontrado = False
+        consultou_pedido_sem_achar = False
         final_text = None
 
         for rodada in range(1, MAX_RODADAS_FERRAMENTA + 1):
@@ -2568,11 +2589,31 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                        tipo="bairro", dados={"bairro_cliente": args.get("bairro_cliente")})
                 elif function_name == "consultar_meu_pedido":
                     content = consultar_meu_pedido(wa_id)
+                    if json.loads(content).get("status") == "sem_pedido":
+                        consultou_pedido_sem_achar = True
                 elif function_name == "cancelar_pedido":
                     resultado = json.loads(cancelar_pedido_recente(wa_id))
                     if resultado.get("status") == "ok":
                         pedido_cancelado_ok = True
-                    else:
+                    elif resultado.get("status") == "sem_pedido" and obter_rascunho(id_usuario).get("itens"):
+                        # Caso real de produção: cliente nunca chegou a
+                        # fechar_pedido (nada registrado de verdade), mas
+                        # pediu "cancela meu pedido"/"não quero mais esse
+                        # pedido" — cancelar_pedido_recente só olha pedidos
+                        # JÁ REGISTRADOS e não achou nada, então o carrinho
+                        # em andamento ficava intocado pra sempre. Cliente
+                        # ficava preso: toda mensagem seguinte caía num
+                        # fallback perguntando entrega/pagamento como se
+                        # nada tivesse acontecido. Sem função pra "esvaziar
+                        # o carrinho" ainda em rascunho, o servidor limpa
+                        # direto — é exatamente isso que o cliente pediu.
+                        _salvar_rascunho(id_usuario, _rascunho_vazio())
+                        pedido_cancelado_ok = True
+                        resultado = {"status": "ok", "carrinho_limpo": True,
+                                     "instrucao": "Não havia pedido registrado ainda — o carrinho em andamento foi esvaziado. "
+                                                  "Diga que cancelou/limpou o que estava montando, sem afirmar que um pedido "
+                                                  "formal foi cancelado."}
+                    elif resultado.get("status") != "sem_pedido":
                         marcar_atencao(
                             id_usuario,
                             f"Cliente pediu cancelamento mas o pedido já está '{resultado.get('status_pedido')}' — confirme manualmente.",
@@ -2667,7 +2708,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     tipo="pedido_falhou",
                     dados={"resposta_suspeita": final_text}
                 )
-                final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
+                # Caso real de produção: cliente perguntou "quero acompanhar
+                # meu pedido" sem nunca ter um pedido registrado —
+                # consultar_meu_pedido voltou "sem_pedido", o guard disparou
+                # (a IA disse algo com jeito de confirmação) e o fallback
+                # genérico de carrinho ("pode confirmar os itens?") repetiu
+                # essa MESMA frase 4 vezes seguidas, ignorando que a pergunta
+                # do cliente era sobre status, não sobre montar um pedido.
+                if consultou_pedido_sem_achar and not obter_rascunho(id_usuario).get("itens"):
+                    final_text = ("Não encontrei nenhum pedido seu registrado por aqui. Se quiser, me diga os "
+                                  "itens que você gostaria de pedir que eu já vou te ajudando!")
+                else:
+                    final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
 
             # Mesma rede de segurança, pro caso do bairro: verificar_bairro_entrega
             # voltou "não achei na lista" (não "não atende" — a lista não tem
