@@ -39,6 +39,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ouvirVendasHoje();
         ouvirPedidosAtivos();
         ouvirUltimosPedidos();
+        ouvirCadastros();
+        carregarDescontos();
     });
 
     async function carregarNomeEmpresa() {
@@ -372,6 +374,90 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     let chartProdutos = null;
+    // ---- Cadastros no app / descontos concedidos (ultimos 30 dias) ----
+    const DIAS_GRAFICO = 30;
+    function chaveDia(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+    function ultimosDias() {
+        const dias = [];
+        for (let i = DIAS_GRAFICO - 1; i >= 0; i--) {
+            const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
+            dias.push({ chave: chaveDia(d), rotulo: String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') });
+        }
+        return dias;
+    }
+    let chartCadastros = null, chartDescontos = null;
+
+    function ouvirCadastros() {
+        db.collection('usuarios_app').onSnapshot(snap => {
+            const dias = ultimosDias();
+            const porDia = {};
+            snap.forEach(doc => {
+                const t = doc.data().criadoEm;
+                const d = t && t.toDate ? t.toDate() : null;
+                if (d) { const k = chaveDia(d); porDia[k] = (porDia[k] || 0) + 1; }
+            });
+            const serie = dias.map(d => porDia[d.chave] || 0);
+            $('cad-total').textContent = snap.size;
+            $('cad-hoje').textContent = porDia[dias[dias.length - 1].chave] || 0;
+            $('cad-7d').textContent = serie.slice(-7).reduce((a, b) => a + b, 0);
+            $('cadastros-legenda').textContent = 'novos por dia (30 dias)';
+            if (chartCadastros) chartCadastros.destroy();
+            chartCadastros = new Chart($('chart-cadastros'), {
+                type: 'bar',
+                data: { labels: dias.map(d => d.rotulo), datasets: [{ label: 'Novos cadastros', data: serie, backgroundColor: '#2a78d6', borderRadius: 3, maxBarThickness: 14 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } }, y: { beginAtZero: true, ticks: { precision: 0, font: { size: 10 } } } },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }, err => console.warn('Cadastros:', err.message));
+    }
+
+    async function carregarDescontos() {
+        try {
+            const dias = ultimosDias();
+            const inicio = new Date(); inicio.setHours(0, 0, 0, 0); inicio.setDate(inicio.getDate() - (DIAS_GRAFICO - 1));
+            const snap = await db.collection('pedidos').where('hora_pedido', '>=', Timestamp.fromDate(inicio)).get();
+            const cupom = {}, pontos = {};
+            let totCupom = 0, totPontos = 0;
+            snap.forEach(doc => {
+                const p = doc.data();
+                if (p.status === 'CANCELADO') return;
+                const c = num(p.desconto_cupom), pt = num(p.desconto_pontos);
+                if (!c && !pt) return;
+                const d = p.hora_pedido && p.hora_pedido.toDate ? p.hora_pedido.toDate() : null;
+                if (!d) return;
+                const k = chaveDia(d);
+                cupom[k] = (cupom[k] || 0) + c; pontos[k] = (pontos[k] || 0) + pt;
+                totCupom += c; totPontos += pt;
+            });
+            $('desc-total').textContent = money(totCupom + totPontos);
+            $('desc-cupom').textContent = money(totCupom);
+            $('desc-pontos').textContent = money(totPontos);
+            const vazio = !(totCupom + totPontos);
+            $('desc-vazio').style.display = vazio ? '' : 'none';
+            $('desc-grafico').style.display = vazio ? 'none' : '';
+            if (vazio) return;
+            if (chartDescontos) chartDescontos.destroy();
+            chartDescontos = new Chart($('chart-descontos'), {
+                type: 'bar',
+                data: {
+                    labels: dias.map(d => d.rotulo),
+                    datasets: [
+                        { label: 'Cupons', data: dias.map(d => cupom[d.chave] || 0), backgroundColor: '#e67e22', borderRadius: 3, maxBarThickness: 14 },
+                        { label: 'Pontos', data: dias.map(d => pontos[d.chave] || 0), backgroundColor: '#2ecc71', borderRadius: 3, maxBarThickness: 14 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: { x: { stacked: true, grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } }, y: { stacked: true, beginAtZero: true, ticks: { font: { size: 10 }, callback: v => 'R$ ' + v } } },
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + money(c.parsed.y) } } }
+                }
+            });
+        } catch (e) { console.warn('Descontos:', e.message); }
+    }
+
     function renderMaisVendidos() {
         const ctx = $('chart-produtos');
         if (chartProdutos) { chartProdutos.destroy(); chartProdutos = null; }

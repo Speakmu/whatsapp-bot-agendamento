@@ -64,6 +64,9 @@ export const finalizarPedido = async ({
     setCarrinho,
     setAbaAtiva,
     pontosResgatados = 0,
+    descontoCupom = 0,
+    descontoPontos = 0,
+    cupomCodigo = null,
 }: any) => {
     if (!nome || !telefone) {
         return alert('Preencha nome e telefone');
@@ -101,6 +104,11 @@ export const finalizarPedido = async ({
                      metodoPagamento === 'cartao' ? 'Cartão' : 'Entrega/Dinheiro',
 
         valor_total: calcularTotal(),
+        // Desconto concedido (cupom e pontos separados) pro painel do gestor.
+        desconto_cupom: Number(Number(descontoCupom).toFixed(2)),
+        desconto_pontos: Number(Number(descontoPontos).toFixed(2)),
+        valor_desconto: Number((Number(descontoCupom) + Number(descontoPontos)).toFixed(2)),
+        cupom_codigo: cupomCodigo,
         // CPF do cliente (necessário pra emitir NFC-e não presencial); dinheiro
         // não emite nota automática, mas fica disponível pra emissão manual.
         cpf_cliente: String(cpf || '').replace(/\D/g, '') || null,

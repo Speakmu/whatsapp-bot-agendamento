@@ -104,6 +104,11 @@
         .meter-fill.danger { background:var(--status-critical); }
         .meter-note { margin-top:7px; color:var(--muted); font-size:.78rem; }
 
+        .coluna-esq { display:grid; gap:16px; }
+        .mini-kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:12px; }
+        .mini-kpis > div { background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+        .mini-kpis strong { display:block; font-size:1.15rem; }
+        .mini-kpis small { color:var(--muted); font-size:.75rem; }
         .lower-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
         .empty { color:var(--muted); background:#f8fafc; border:1px dashed #cfd8e3; border-radius:8px; padding:16px; text-align:center; }
 
@@ -187,6 +192,7 @@
         </div>
 
         <div class="dashboard-grid">
+            <div class="coluna-esq">
             <section class="panel">
                 <div class="panel-head">
                     <h2>Pendencias agora</h2>
@@ -198,6 +204,38 @@
                     </div>
                 </div>
             </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Cadastros no app</h2>
+                    <span id="cadastros-legenda">-</span>
+                </div>
+                <div class="panel-body">
+                    <div class="mini-kpis">
+                        <div><strong id="cad-total">0</strong><small>cadastrados</small></div>
+                        <div><strong id="cad-7d">0</strong><small>ultimos 7 dias</small></div>
+                        <div><strong id="cad-hoje">0</strong><small>hoje</small></div>
+                    </div>
+                    <div class="chart-canvas-wrap short"><canvas id="chart-cadastros"></canvas></div>
+                </div>
+            </section>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Descontos concedidos</h2>
+                    <span id="descontos-legenda">ultimos 30 dias</span>
+                </div>
+                <div class="panel-body">
+                    <div class="mini-kpis">
+                        <div><strong id="desc-total">R$ 0,00</strong><small>total concedido</small></div>
+                        <div><strong id="desc-cupom">R$ 0,00</strong><small>em cupons</small></div>
+                        <div><strong id="desc-pontos">R$ 0,00</strong><small>em pontos</small></div>
+                    </div>
+                    <div id="desc-vazio" class="empty" style="display:none">Coletando dados: os descontos aparecem aqui a partir dos pedidos feitos no app atualizado.</div>
+                    <div class="chart-canvas-wrap short" id="desc-grafico"><canvas id="chart-descontos"></canvas></div>
+                </div>
+            </section>
+            </div>
 
             <section class="panel">
                 <div class="panel-head">

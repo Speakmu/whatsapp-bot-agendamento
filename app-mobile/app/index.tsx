@@ -757,7 +757,10 @@ const SecaoSacola = ({
                 } else if (metodoPagamento === 'pix') {
                   processarPagamentoPix();
                 } else {
-                  finalizarPedido({ carrinho, usuarioId, nome, telefone, cpf, endereco, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados });
+                  finalizarPedido({ carrinho, usuarioId, nome, telefone, cpf, endereco, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados,
+                    descontoCupom: calcularDesconto ? calcularDesconto() : 0,
+                    descontoPontos: calcularDescontoResgate ? calcularDescontoResgate() : 0,
+                    cupomCodigo: cupomAplicado?.codigo || null });
                 }
               }}
             >
@@ -1859,6 +1862,12 @@ function AppCliente() {
           status: 'AGUARDANDO_PIX', // 🔥 CORREÇÃO: Começa como aguardando o pagamento
           pontos_a_creditar: pontosDoPedido(carrinho), // creditado pelo webhook quando o MP confirmar o pagamento
           pontos_resgatados: pontosResgatadosNoPedido, // debitado pelo webhook junto com o crédito, só quando o PIX for confirmado
+          // Desconto concedido (cupom e pontos separados) — o painel do gestor
+          // soma isso; antes só o valor_total final era gravado.
+          desconto_cupom: Number(calcularDesconto().toFixed(2)),
+          desconto_pontos: Number(calcularDescontoResgate().toFixed(2)),
+          valor_desconto: Number((calcularDesconto() + calcularDescontoResgate()).toFixed(2)),
+          cupom_codigo: cupomAplicado?.codigo || null,
           hora_pedido: serverTimestamp(),
           data_formatada: new Date().toLocaleString('pt-BR')
         });
@@ -2065,6 +2074,12 @@ function AppCliente() {
             valor_total: calcularTotal(),
             pontos_gerados: totalPontosGanhos,
             pontos_resgatados: pontosResgatadosNoPedido,
+            // Desconto concedido (cupom e pontos separados) — o painel do gestor
+            // soma isso; antes só o valor_total final era gravado.
+            desconto_cupom: Number(calcularDesconto().toFixed(2)),
+            desconto_pontos: Number(calcularDescontoResgate().toFixed(2)),
+            valor_desconto: Number((calcularDesconto() + calcularDescontoResgate()).toFixed(2)),
+            cupom_codigo: cupomAplicado?.codigo || null,
             forma_pagamento: 'CARTAO',
             // CPF do cliente (já usado no pagamento acima) — necessário pra emitir
             // NFC-e: operação não presencial (indPres=4) exige destinatário
