@@ -910,6 +910,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- 4. FUNÇÕES DO PAINEL DE PEDIDOS ---
 
+    // Texto da origem no cartão do pedido (antes só a cor da borda diferenciava).
+    const ROTULO_CANAL = { app: '📱 APP', bot: '🤖 BOT', ifood: '🍔 IFOOD', sistema: '🖥️ PDV' };
+
     function canalPedido(pedido) {
         const origem = String(pedido.origem || pedido.canal || pedido.source || '').trim().toUpperCase();
         if (origem === 'APP') return 'app';
@@ -1127,6 +1130,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="order-header">
                 <span class="order-id">#${id.substring(0, 5)}</span>
                 ${badgeEntrega}
+                <span class="badge-canal badge-canal--${canal}" title="Origem do pedido">${ROTULO_CANAL[canal] || ROTULO_CANAL.sistema}</span>
                 <span class="order-time">⏰ ${hora}</span>
                 <button type="button" class="btn-imprimir" data-imprimir="${id}" title="Imprimir pedido">🖨️</button>
             </div>

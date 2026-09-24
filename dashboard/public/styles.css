@@ -105,6 +105,11 @@ body {
 .order-card--bot { border-left-color: #16a085; }
 .order-card--ifood { border-left-color: #ea1d2c; }
 .order-card--sistema { border-left-color: var(--accent); }
+.badge-canal { font-size: .68rem; font-weight: 800; letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; color: #fff; white-space: nowrap; }
+.badge-canal--app { background: #2f6fed; }
+.badge-canal--bot { background: #16a085; }
+.badge-canal--ifood { background: #ea1d2c; }
+.badge-canal--sistema { background: var(--accent); }
 .order-header {
     display: flex; justify-content: flex-start; align-items: center; gap: 6px;
     border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 6px;
