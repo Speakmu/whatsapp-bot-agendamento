@@ -120,8 +120,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? (item.nome_exibicao || item.nome || 'Item')
                     : item;
                 const obs = (typeof item === 'object') ? (item.observacao || item.obs) : null;
-                const qtd = (typeof item === 'object' && item.quantidade) ? item.quantidade : null;
-                return { nome: qtd ? `${qtd}x ${nome}` : nome, obs };
+                // Sempre mostra a quantidade, mesmo com 1 unidade; aceita nome
+                // com prefixo "Nx " embutido sem duplicar.
+                const prefixo = /^(\d+)x\s+(.+)$/i.exec(String(nome));
+                const qtd = (typeof item === 'object' && item.quantidade) || (prefixo ? parseInt(prefixo[1], 10) : 1);
+                return { nome: `${qtd}x ${prefixo ? prefixo[2] : nome}`, obs };
             });
         }
         const texto = pedido.item_pedido || pedido.itens_pedido || 'Sem detalhes';

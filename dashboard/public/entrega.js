@@ -203,8 +203,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (lista && Array.isArray(lista)) {
             return lista.map(item => {
                 const nome = item.nome || item.nome_exibicao || item;
-                const texto = (typeof nome === 'object') ? 'Item sem nome' : nome;
-                return escapeHtml(texto);
+                if (typeof nome === 'object') return 'Item sem nome';
+                // Sempre mostra a quantidade, mesmo com 1 unidade, sem duplicar
+                // um prefixo "Nx " que já venha no nome.
+                const prefixo = /^(\d+)x\s+(.+)$/i.exec(String(nome));
+                const qtd = item.quantidade || (prefixo ? parseInt(prefixo[1], 10) : 1);
+                return escapeHtml(`${qtd}x ${prefixo ? prefixo[2] : nome}`);
             }).join(', ');
         }
         return escapeHtml(p.item_pedido || lista || 'Sem detalhes');

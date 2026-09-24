@@ -722,7 +722,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Formata itens para a tabela (Lista vertical)
             let itensLista = '';
             if (p.itens && Array.isArray(p.itens)) {
-                itensLista = p.itens.map(i => `<div>• ${(typeof i === 'object' ? i.nome : i)}</div>`).join('');
+                itensLista = p.itens.map(i => `<div>• ${itemComQuantidade(i)}</div>`).join('');
             } else {
                 itensLista = p.item_pedido || p.itens_pedido || '---';
             }
@@ -1104,11 +1104,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (listaDeItens && Array.isArray(listaDeItens)) {
             itensHTML = listaDeItens.map(item => {
-                // Tenta pegar .nome, .nome_exibicao ou o próprio item se for string
-                const nomeExibicao = item.nome || item.nome_exibicao || item;
-
-                // Se ainda for um objeto vazio ou erro, define um texto padrão
-                const textoFinal = (typeof nomeExibicao === 'object') ? 'Item sem nome' : nomeExibicao;
+                const textoFinal = itemComQuantidade(item);
 
                 return `<div style="border-bottom: 1px dashed #eee; padding: 4px 0; font-weight: 500;">
                         • ${textoFinal}
@@ -1148,6 +1144,17 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         </div>
     `;
+    }
+
+    // Sempre mostra a quantidade ("1x pastel"), mesmo com 1 unidade. O nome já
+    // pode vir com prefixo "Nx " embutido (formato do bot/app) — extrai dali
+    // quando não existe campo numérico próprio, e nunca duplica o prefixo.
+    function itemComQuantidade(item) {
+        const bruto = (item && typeof item === 'object') ? (item.nome || item.nome_exibicao) : item;
+        if (!bruto || typeof bruto === 'object') return 'Item sem nome';
+        const prefixo = /^(\d+)x\s+(.+)$/i.exec(bruto);
+        const qtd = (item && item.quantidade) || (prefixo ? parseInt(prefixo[1], 10) : 1);
+        return `${qtd}x ${prefixo ? prefixo[2] : bruto}`;
     }
 
     function imprimirPedido(id) {
