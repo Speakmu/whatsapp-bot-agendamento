@@ -314,6 +314,7 @@ interface SacolaProps {
   pontosPerfil?: number;
   calcularDescontoResgate?: () => number;
   pontosResgatados?: number;
+  pontosACreditar?: number;
   dicaResgatePontos?: string;
 }
 
@@ -431,7 +432,7 @@ const SecaoSacola = ({
   tecladoVisivel,
   cupom, setCupom, aplicarCupom, cupomAplicado,
   calcularSubtotal, calcularDesconto, corMarca = BRAND_GREEN,
-  usarPontos, setUsarPontos, podeResgatar, pontosPerfil, calcularDescontoResgate, pontosResgatados = 0,
+  usarPontos, setUsarPontos, podeResgatar, pontosPerfil, calcularDescontoResgate, pontosResgatados = 0, pontosACreditar = 0,
   dicaResgatePontos = '',
   lojaFechada = false, horarioTexto = ''
 }: SacolaProps) => {
@@ -778,7 +779,8 @@ const SecaoSacola = ({
                   finalizarPedido({ carrinho, usuarioId, nome, telefone, cpf, endereco, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados,
                     descontoCupom: calcularDesconto ? calcularDesconto() : 0,
                     descontoPontos: calcularDescontoResgate ? calcularDescontoResgate() : 0,
-                    cupomCodigo: cupomAplicado?.codigo || null });
+                    cupomCodigo: cupomAplicado?.codigo || null,
+                    pontosACreditar });
                 }
               }}
             >
@@ -2672,6 +2674,7 @@ function AppCliente() {
                 pontosPerfil={pontosPerfil}
                 calcularDescontoResgate={calcularDescontoResgate}
                 pontosResgatados={usarPontos ? pontosUsados() : 0}
+                pontosACreditar={pontosDoPedido(carrinho)}
                 dicaResgatePontos={dicaResgatePontos}
                 lojaFechada={lojaFechada}
                 horarioTexto={horarioTexto}

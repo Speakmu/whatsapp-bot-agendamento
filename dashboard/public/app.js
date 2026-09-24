@@ -1341,6 +1341,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function creditarPontosPedidoApp(pedidoId) {
+        const ref = db.collection(COLECAO_PEDIDOS).doc(pedidoId);
+        const snap = await ref.get();
+        const p = snap.data() || {};
+        const pontos = Number(p.pontos_a_creditar) || 0;
+        const pagoNaEntrega = /entrega|dinheiro/i.test(String(p.forma_pagamento || ''));
+        if (String(p.origem || '').toUpperCase() !== 'APP' || !pagoNaEntrega) return;
+        if (p.pontos_creditados || pontos <= 0 || !p.usuario_id) return;
+        const batch = db.batch();
+        batch.update(db.collection('usuarios_app').doc(p.usuario_id), { pontos: firebase.firestore.FieldValue.increment(pontos) });
+        batch.update(ref, { pontos_creditados: true, pontos_gerados: pontos });
+        await batch.commit();
+    }
+
     async function handleOrderStatusClick(e) {
         const targetButton = e.currentTarget;
         const id = targetButton.dataset.id;
@@ -1353,6 +1367,14 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 // 1. Atualiza o Firestore
                 await db.collection(COLECAO_PEDIDOS).doc(id).update({ status: novoStatus });
+
+                // 1a. Pontos de fidelidade do pedido do APP pago na entrega/dinheiro:
+                // o app grava pontos_a_creditar (só dos produtos marcados com pontos);
+                // aqui, ao concluir, credita uma única vez (pontos_creditados evita
+                // duplicar). PIX é creditado pelo webhook e cartão já no ato.
+                if (novoStatus === "CONCLUIDO") {
+                    creditarPontosPedidoApp(id).catch(err => console.warn("Pontos do pedido:", err.message));
+                }
 
                 // 1b. Baixa automática de estoque ao concluir o pedido
                 if (novoStatus === "CONCLUIDO" && window.GestorChefEstoque) {

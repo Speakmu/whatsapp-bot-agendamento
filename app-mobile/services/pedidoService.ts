@@ -67,6 +67,7 @@ export const finalizarPedido = async ({
     descontoCupom = 0,
     descontoPontos = 0,
     cupomCodigo = null,
+    pontosACreditar = 0,
 }: any) => {
     if (!nome || !telefone) {
         return alert('Preencha nome e telefone');
@@ -109,6 +110,9 @@ export const finalizarPedido = async ({
         desconto_pontos: Number(Number(descontoPontos).toFixed(2)),
         valor_desconto: Number((Number(descontoCupom) + Number(descontoPontos)).toFixed(2)),
         cupom_codigo: cupomCodigo,
+        // Pago na entrega: os pontos entram quando a equipe conclui o pedido (o painel
+        // credita e marca pontos_creditados), igual ao PIX que credita na confirmação.
+        pontos_a_creditar: Number(pontosACreditar) || 0,
         // CPF do cliente (necessário pra emitir NFC-e não presencial); dinheiro
         // não emite nota automática, mas fica disponível pra emissão manual.
         cpf_cliente: String(cpf || '').replace(/\D/g, '') || null,
