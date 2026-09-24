@@ -770,3 +770,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
         width: 100%;
     }
 }
+
+/* Observação do cliente no card do pedido */
+.order-obs { margin-top: 6px; padding: 5px 8px; background: #fff8e1; border-left: 3px solid #f39c12; border-radius: 4px; font-size: 13px; word-break: break-word; }

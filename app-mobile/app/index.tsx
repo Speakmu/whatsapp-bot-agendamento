@@ -279,6 +279,8 @@ interface SacolaProps {
   cpf: string;
   endereco: string;
   setEndereco: (t: string) => void;
+  observacao?: string;
+  setObservacao?: (t: string) => void;
   bairro: string;
   setBairro: (t: string) => void;
   bairrosEntrega: string[];
@@ -421,7 +423,7 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix }: P
 // --- COMPONENTE SEÇÃO SACOLA (MEMORIZADO) ---
 const SecaoSacola = ({
   carrinho, setCarrinho, nome, setNome, telefone, setTelefone, cpf,
-  endereco, setEndereco, bairro, setBairro, bairrosEntrega = [], taxaEntrega = 0,
+  endereco, setEndereco, observacao = '', setObservacao, bairro, setBairro, bairrosEntrega = [], taxaEntrega = 0,
   metodoPagamento, setMetodoPagamento,
   tipoEntrega, setTipoEntrega,
   calcularTotal, carregandoLogin, insets, styles, usuarioId,
@@ -632,6 +634,17 @@ const SecaoSacola = ({
               </>
             )}
 
+            {/* OBSERVAÇÕES DO PEDIDO (vale para entrega e retirada) */}
+            <Text style={[styles.labelInput, { marginTop: 16 }]}>Observações (opcional)</Text>
+            <TextInput
+              style={[styles.inputCheckout, { height: 60 }]}
+              value={observacao}
+              onChangeText={(t: string) => setObservacao && setObservacao(t)}
+              multiline
+              maxLength={200}
+              placeholder="Ex: fritos na hora, sem cebola, troco pra R$ 100..."
+            />
+
             {/* SELEÇÃO DE PAGAMENTO */}
             <Text style={[styles.tituloCheckout, { marginTop: 20 }]}>Pagamento</Text>
             <View style={styles.gridPagamento}>
@@ -776,7 +789,7 @@ const SecaoSacola = ({
                 } else if (metodoPagamento === 'pix') {
                   processarPagamentoPix();
                 } else {
-                  finalizarPedido({ carrinho, usuarioId, nome, telefone, cpf, endereco, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados,
+                  finalizarPedido({ carrinho, usuarioId, nome, telefone, cpf, endereco, observacao, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados,
                     descontoCupom: calcularDesconto ? calcularDesconto() : 0,
                     descontoPontos: calcularDescontoResgate ? calcularDescontoResgate() : 0,
                     cupomCodigo: cupomAplicado?.codigo || null,
@@ -1521,6 +1534,9 @@ function AppCliente() {
   const [input, setInput] = useState('');
   const [usuarioId, setUsuarioId] = useState<string | undefined>(undefined);
   const [endereco, setEndereco] = useState('');
+  const [observacao, setObservacao] = useState('');
+  // Pedido feito (carrinho esvazia) => limpa a observação pro próximo pedido
+  useEffect(() => { if (carrinho.length === 0) setObservacao(''); }, [carrinho.length]);
   //const [mostrarCadastro, setMostrarCadastro] = useState(false); // Para controlar o modal de dados
 
   //const [editando, setEditando] = useState(false);
@@ -1868,6 +1884,7 @@ function AppCliente() {
           telefone_cliente: telefone,
           tipo_entrega: tipoEntrega === 'retirada' ? 'RETIRADA' : 'ENTREGA',
           endereco: tipoEntrega === 'retirada' ? 'Retirada no balcão' : endereco,
+          ...(observacao.trim() ? { observacao: observacao.trim() } : {}),
           bairro: tipoEntrega === 'retirada' ? null : (bairro || null),
           taxa_entrega: tipoEntrega === 'entrega' ? taxaEntrega : 0,
           itens: itensFormatados, // 🔥 Lista agrupada e formatada
@@ -2088,6 +2105,7 @@ function AppCliente() {
             telefone_cliente: telefone,
             tipo_entrega: tipoEntrega === 'retirada' ? 'RETIRADA' : 'ENTREGA',
             endereco: tipoEntrega === 'retirada' ? 'Retirada no balcão' : endereco,
+            ...(observacao.trim() ? { observacao: observacao.trim() } : {}),
             bairro: tipoEntrega === 'retirada' ? null : (bairro || null),
             taxa_entrega: tipoEntrega === 'entrega' ? taxaEntrega : 0,
             itens: itensFormatados,
@@ -2641,6 +2659,8 @@ function AppCliente() {
                 cpf={cpf}
                 endereco={endereco}
                 setEndereco={setEndereco}
+                observacao={observacao}
+                setObservacao={setObservacao}
                 bairro={bairro}
                 setBairro={setBairro}
                 bairrosEntrega={bairrosEntrega}

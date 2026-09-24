@@ -56,6 +56,7 @@ export const finalizarPedido = async ({
     telefone,
     cpf,
     endereco,
+    observacao = '',
     bairro,
     taxaEntrega = 0,
     metodoPagamento,
@@ -87,6 +88,7 @@ export const finalizarPedido = async ({
         telefone: telefone,
         tipo_entrega: tipoEntrega === 'retirada' ? 'RETIRADA' : 'ENTREGA',
         endereco: tipoEntrega === 'retirada' ? 'Retirada no balcão' : endereco,
+        ...(String(observacao).trim() ? { observacao: String(observacao).trim() } : {}),
         bairro: tipoEntrega === 'retirada' ? null : (bairro || null),
         taxa_entrega: tipoEntrega === 'retirada' ? 0 : taxaEntrega,
 

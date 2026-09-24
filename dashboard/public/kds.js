@@ -197,6 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="ticket-cliente">${escapeHtml(p.nome_cliente || p.nome || 'Cliente')}</div>
             <ul class="ticket-itens">${itens}</ul>
             <div class="ticket-meta">${entrega}</div>
+            ${p.observacao ? `<div class="ticket-meta" style="font-weight:700;color:#e67e22;">📝 ${escapeHtml(p.observacao)}</div>` : ''}
             ${botao}
         </div>`;
     }

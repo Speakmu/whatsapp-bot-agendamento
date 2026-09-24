@@ -136,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="ped-top"><span class="ped-id">#${p.id.substring(0, 5)}</span>
                 <span class="ped-meta">${escapeHtml(p.nome_cliente || 'Cliente')}</span></div>
             <div class="ped-end">📍 ${escapeHtml(p.endereco || '')}</div>
+            ${p.observacao ? `<div class="ped-meta">📝 ${escapeHtml(p.observacao)}</div>` : ''}
             <div class="ped-acoes">
                 <select id="sel-${p.id}">${opts || '<option value="">(sem entregadores ativos)</option>'}</select>
                 <button class="btn btn-azul" data-despachar="${p.id}">Despachar</button>
@@ -152,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span><input type="checkbox" class="chk-rota" data-id="${p.id}"><span class="ped-id">#${p.id.substring(0, 5)}</span></span>
                 <span class="ped-meta">${escapeHtml(p.nome_cliente || 'Cliente')}</span></div>
             <div class="ped-end">📍 ${escapeHtml(p.endereco || '')}</div>
+            ${p.observacao ? `<div class="ped-meta">📝 ${escapeHtml(p.observacao)}</div>` : ''}
             <div class="ped-meta">🛵 ${escapeHtml(p.entregador_nome || 'Entregador')} • saiu ${saida}</div>
             <div class="ped-acoes">
                 <button class="btn btn-verde" data-entregue="${p.id}">✓ Marcar entregue</button>
@@ -234,6 +236,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="parada-cab"><strong>${i + 1}. #${p.id.substring(0, 5)}</strong> — ${escapeHtml(p.nome_cliente || 'Cliente')}</div>
                     ${p.bairro ? `<div>Bairro: <strong>${escapeHtml(p.bairro)}</strong></div>` : ''}
                     <div>Endereço: ${escapeHtml(p.endereco || '-')}</div>
+                    ${p.observacao ? `<div>Obs: ${escapeHtml(p.observacao)}</div>` : ''}
                     <div>Itens: ${itensTextoPedido(p)}</div>
                     <div>Pagamento: ${escapeHtml((p.forma_pagamento || '-').replace(/_/g, ' ').toUpperCase())} — Total: R$ ${Number(p.valor_total || 0).toFixed(2).replace('.', ',')}</div>
                 </div>`).join('');

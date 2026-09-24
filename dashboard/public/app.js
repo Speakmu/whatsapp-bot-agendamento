@@ -1124,6 +1124,9 @@ document.addEventListener('DOMContentLoaded', () => {
             ? ''
             : `<div class="order-endereco">📍 ${pedido.bairro ? `<strong>${pedido.bairro}</strong> — ` : ''}${pedido.endereco || '-'}</div>`;
 
+        const obsLinha = pedido.observacao
+            ? `<div class="order-obs">📝 <strong>Obs:</strong> ${escapeHtmlPedido(pedido.observacao)}</div>`
+            : '';
         const canal = canalPedido(pedido);
         return `
         <div class="order-card order-card--${canal}" id="card-${id}">
@@ -1138,6 +1141,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <p class="order-cliente"><strong>${(pedido.nome_cliente && pedido.nome_cliente !== 'None') ? pedido.nome_cliente : 'N/I'}</strong></p>
                 <div class="order-itens">${itensHTML}</div>
                 ${enderecoLinha}
+                ${obsLinha}
                 <div class="order-footer-info">
                     <span>${formaPagamento.toUpperCase()}</span>
                     <div class="${statusClass} status-tag">${statusClean}</div>
@@ -1159,6 +1163,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const prefixo = /^(\d+)x\s+(.+)$/i.exec(bruto);
         const qtd = (item && item.quantidade) || (prefixo ? parseInt(prefixo[1], 10) : 1);
         return `${qtd}x ${prefixo ? prefixo[2] : bruto}`;
+    }
+
+    function escapeHtmlPedido(t) {
+        return String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     function imprimirPedido(id) {
@@ -1212,13 +1220,13 @@ document.addEventListener('DOMContentLoaded', () => {
             </head><body>
                 <h1>Pedido #${id.substring(0, 5)} — ${ehRetirada ? 'RETIRADA' : 'ENTREGA'}</h1>
                 <div class="linha"><strong>Cliente:</strong> ${nomeClienteExibicao}</div>
-                ${pedido.telefone_cliente ? `<div class="linha"><strong>Tel:</strong> ${pedido.telefone_cliente}</div>` : ''}
+                ${(pedido.telefone_cliente || pedido.telefone) ? `<div class="linha"><strong>Tel:</strong> ${pedido.telefone_cliente || pedido.telefone}</div>` : ''}
                 <hr>
                 ${linhasItens}
                 <hr>
                 ${enderecoHtml}
                 <div class="linha"><strong>Pagamento:</strong> ${formaPagamento.toUpperCase()}</div>
-                ${pedido.observacao ? `<div class="linha"><strong>Obs:</strong> ${pedido.observacao}</div>` : ''}
+                ${pedido.observacao ? `<div class="linha"><strong>OBS:</strong> ${escapeHtmlPedido(pedido.observacao)}</div>` : ''}
                 <hr>
                 <div class="linha total">TOTAL: R$ ${Number(pedido.valor_total || 0).toFixed(2).replace('.', ',')}</div>
                 <hr>
