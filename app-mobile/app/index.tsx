@@ -324,6 +324,24 @@ interface PedidosProps {
   getCorStatus: (status: string) => string;
   onVerPix: (codigo: string) => void;
 }
+// Texto amigável do status na aba "Meus Pedidos" (antes mostrava o nome
+// técnico cru: "SAIU PARA ENTREGA", "CONCLUIDO"). Retirada e entrega têm
+// finais diferentes.
+function textoStatusPedido(item: any): string {
+  const retirada = String(item?.tipo_entrega || '').toUpperCase() === 'RETIRADA';
+  switch (item?.status) {
+    case 'AGUARDANDO_PIX': return 'Aguardando PIX';
+    case 'PENDENTE_VALIDACAO':
+    case 'PENDENTE_PREPARO': return 'Recebido';
+    case 'EM_PREPARO': return 'Em preparo';
+    case 'PRONTO_PARA_ENTREGA': return retirada ? 'Pronto para retirada' : 'Pronto para entrega';
+    case 'SAIU_PARA_ENTREGA': return '🛵 Saiu para entrega';
+    case 'CONCLUIDO': return retirada ? '✅ Retirado' : '✅ Entregue';
+    case 'CANCELADO': return 'Cancelado';
+    default: return typeof item?.status === 'string' ? item.status.replace(/_/g, ' ') : 'Recebido';
+  }
+}
+
 const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix }: PedidosProps) => {
   return (
     <View style={{ flex: 1, backgroundColor: '#f9f9f9', paddingTop: insets.top }}>
@@ -350,7 +368,7 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix }: P
               <View style={styles.linhaPedido}>
                 <Text style={styles.idPedido}>Pedido #{item.id.slice(-4)}</Text>
                 <Text style={[styles.statusBadge, { backgroundColor: getCorStatus(item.status) }]}>
-                  {typeof item.status === 'string' ? item.status.replace(/_/g, ' ') : 'PENDENTE'}
+                  {textoStatusPedido(item)}
                 </Text>
               </View>
 
@@ -2374,9 +2392,14 @@ function AppCliente() {
 
   const getCorStatus = (status: any) => {
     switch (status) {
+      case 'AGUARDANDO_PIX':
+      case 'PENDENTE_VALIDACAO':
       case 'PENDENTE_PREPARO': return '#f39c12'; // Laranja
       case 'EM_PREPARO': return '#3498db';      // Azul
       case 'PRONTO_PARA_ENTREGA': return BRAND_GREEN; // Verde
+      case 'SAIU_PARA_ENTREGA': return '#8e44ad'; // Roxo (destaque: a caminho)
+      case 'CONCLUIDO': return '#27ae60';       // Verde escuro
+      case 'CANCELADO': return '#e74c3c';       // Vermelho
       default: return '#95a5a6';                // Cinza
     }
   };
