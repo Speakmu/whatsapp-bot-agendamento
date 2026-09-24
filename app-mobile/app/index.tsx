@@ -642,7 +642,7 @@ const SecaoSacola = ({
                 >
                   <Text style={[styles.txtPagamento, metodoPagamento === tipo && styles.txtPagamentoAtivo]}>
                     {tipo === 'entrega'
-                      ? (tipoEntrega === 'retirada' ? '💵 Na retirada' : '💵 Na entrega')
+                      ? '💵 Dinheiro'
                       : tipo === 'pix' ? '⚡ PIX' : '💳 Cartão'}
                   </Text>
                 </TouchableOpacity>
