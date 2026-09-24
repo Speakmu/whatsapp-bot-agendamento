@@ -448,6 +448,27 @@ def test_saudacao_inicial_convida_pro_app_quando_configurado(ambiente):
     assert "http" not in resposta2
 
 
+def test_convite_app_pra_cliente_antigo_que_volta_depois_de_horas(ambiente, monkeypatch):
+    # Caso real de produção: cliente que já tinha histórico (pediu dias
+    # atrás) mandou "bom dia" — não caiu na saudação de primeiro contato e o
+    # convite pro app nunca apareceu. Agora, voltando depois de horas, a
+    # resposta normal da IA ganha o convite no fim; dentro da mesma sessão
+    # (mensagens seguidas) não repete.
+    from datetime import datetime, timezone, timedelta
+    ambiente.collection("configuracoes").document("bot").set(
+        {"divulgar_app": True, "link_app": "https://lileamar-app-web.web.app"}, merge=True)
+    tel = "5535999000030"
+    ontem = datetime.now(timezone.utc) - timedelta(days=5)
+    ambiente.collection("historico_conversas").document(tel).set({"mensagens": [
+        {"role": "user", "content": "oi", "timestamp": ontem},
+        {"role": "assistant", "content": "Olá!", "timestamp": ontem}]})
+    roteiro = {"bom dia": "Bom dia! Como posso ajudar?", "quero uma coxinha": "Qual coxinha?"}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    r1, r2 = _conversar(tel, ["bom dia", "quero uma coxinha"])
+    assert "https://lileamar-app-web.web.app" in r1
+    assert "http" not in r2
+
+
 def test_slot_obvio_com_pontuacao_no_final(ambiente, monkeypatch):
     # Caso real de produção: cliente respondeu "Dinheiro." (com ponto) e o
     # regex do slot não batia por causa do ponto sobrando — a IA não chamou

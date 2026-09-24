@@ -1432,6 +1432,36 @@ def baixar_imagem_whatsapp(media_id, tipo):
         print(f"ERRO AO BAIXAR MÍDIA: {e}")
         return None
        
+def _texto_convite_app(bot_cfg):
+    """Convite pro app (mensagem_convite_app com {link_app} trocado) — vazio
+    se "divulgar_app" estiver desligado ou sem link configurado (nunca
+    convida pra algo que o bot não teria como mostrar de verdade)."""
+    link = (bot_cfg.get("link_app") or "").strip()
+    if not (bot_cfg.get("divulgar_app") and link):
+        return ""
+    convite = bot_cfg.get("mensagem_convite_app") or BOT_CONFIG_DEFAULTS["mensagem_convite_app"]
+    return convite.format(link_app=link)
+
+
+def _horas_desde_ultima_mensagem(wa_id):
+    """Horas desde a última mensagem deste cliente no histórico, ou None se
+    não há histórico/timestamp. obter_historico_firestore descarta o
+    timestamp (a OpenAI não entende), então lê o doc direto."""
+    try:
+        doc = db.collection("historico_conversas").document(wa_id).get(timeout=10)
+        if not doc.exists:
+            return None
+        d = doc.to_dict() or {}
+        msgs = d.get("mensagens") or []
+        ts = (msgs[-1].get("timestamp") if msgs else None) or d.get("ultima_interacao")
+        if not ts:
+            return None
+        return (datetime.now(timezone.utc) - ts).total_seconds() / 3600
+    except Exception as e:
+        print(f"Erro ao ler última interação: {e}")
+        return None
+
+
 def obter_historico_firestore(wa_id, limite=None):
     try:
         # timeout explicito: sem isso, uma chamada ao Firestore que trave (ex.:
@@ -2176,14 +2206,22 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         # Convite pro app já no primeiro contato — só quando ativo E com link
         # configurado (mesma trava de "divulgar_app": sem link, nunca convida
         # pra algo que a IA não teria como mostrar de verdade).
-        link_app_inicial = (bot_cfg.get("link_app") or "").strip()
-        if bot_cfg.get("divulgar_app") and link_app_inicial:
-            convite = bot_cfg.get("mensagem_convite_app") or BOT_CONFIG_DEFAULTS["mensagem_convite_app"]
-            saudacao += "\n\n" + convite.format(link_app=link_app_inicial)
+        convite_app = _texto_convite_app(bot_cfg)
+        if convite_app:
+            saudacao += "\n\n" + convite_app
         salvar_historico_firestore(id_usuario, "user", prompt, bot_cfg.get("max_historico_salvar"))
         salvar_historico_firestore(id_usuario, "assistant", saudacao, bot_cfg.get("max_historico_salvar"))
         ck("retornou saudacao inicial")
         return saudacao
+
+    # Cliente que JÁ tem histórico mas volta depois de horas (ex.: pediu na
+    # semana passada, manda "bom dia" hoje): não cai na saudação de primeiro
+    # contato, então o convite pro app nunca aparecia pra quem já era
+    # cliente. Marca a "sessão nova" AQUI (antes de salvar a mensagem de
+    # agora, que atualizaria a hora) e anexa o convite na resposta no fim.
+    horas_parado = _horas_desde_ultima_mensagem(id_usuario)
+    convidar_app_nesta_msg = (horas_parado is not None
+                              and horas_parado >= float(bot_cfg.get("convite_app_intervalo_horas") or 6))
 
     nome_cliente = None
 
@@ -2886,6 +2924,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         # link tinha vindo "duplicado"). WhatsApp tem sua própria sintaxe
         # (negrito com UM asterisco), então converte aqui — regra em
         # código, não depende da IA lembrar de nunca usar Markdown.
+        if convidar_app_nesta_msg and final_text and not pedido_registrado_ok:
+            convite_app = _texto_convite_app(bot_cfg)
+            if convite_app and (bot_cfg.get("link_app") or "").strip() not in final_text:
+                final_text = final_text + "\n\n" + convite_app
+
         final_text = _converter_markdown_para_whatsapp(final_text)
 
         ck("antes salvar_historico_firestore final")
