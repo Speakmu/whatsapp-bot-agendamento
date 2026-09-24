@@ -469,6 +469,27 @@ def test_convite_app_pra_cliente_antigo_que_volta_depois_de_horas(ambiente, monk
     assert "http" not in r2
 
 
+def test_primeiro_contato_com_pergunta_e_respondido_pela_ia(ambiente, monkeypatch):
+    # Caso real de produção: cliente abriu com "Tem salgado assado de
+    # salsicha?" e a saudação fixa engoliu a pergunta (nunca respondida). Só
+    # "oi"/"bom dia" cai na saudação fixa; qualquer pergunta vai pra IA, com o
+    # convite ao app no fim.
+    ambiente.collection("configuracoes").document("bot").set(
+        {"divulgar_app": True, "link_app": "https://lileamar-app-web.web.app"}, merge=True)
+    roteiro = {"Tem salgado assado de salsicha?": ["Temos o Pãozinho Salsicha, R$ 7,50!"]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    r = _conversar("5535999000031", ["Tem salgado assado de salsicha?"])[0]
+    assert "Pãozinho Salsicha" in r and "https://lileamar-app-web.web.app" in r
+    saudacao = _conversar("5535999000032", ["Bom dia!"])[0]
+    assert "Como posso ajudar?" in saudacao
+
+
+def test_e_so_saudacao():
+    assert bot._e_so_saudacao("Bom dia") and bot._e_so_saudacao("oi, tudo bem?") and bot._e_so_saudacao("👋")
+    assert not bot._e_so_saudacao("Tem salgado assado de salsicha?")
+    assert not bot._e_so_saudacao("oi quero fazer um pedido")
+
+
 def test_slot_obvio_com_pontuacao_no_final(ambiente, monkeypatch):
     # Caso real de produção: cliente respondeu "Dinheiro." (com ponto) e o
     # regex do slot não batia por causa do ponto sobrando — a IA não chamou

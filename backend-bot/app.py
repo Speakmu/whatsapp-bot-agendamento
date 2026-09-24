@@ -1432,6 +1432,21 @@ def baixar_imagem_whatsapp(media_id, tipo):
         print(f"ERRO AO BAIXAR MÍDIA: {e}")
         return None
        
+_PALAVRAS_SAUDACAO = {"oi", "oii", "oiii", "oie", "ola", "opa", "bom", "boa", "dia", "tarde", "noite", "e", "ai", "eai",
+                      "hey", "hello", "hi", "salve", "tudo", "bem", "td", "como", "vai", "fala", "pessoal", "gente",
+                      "tranquilo", "blz", "beleza", "ei", "eae"}
+
+
+def _e_so_saudacao(texto):
+    """A mensagem é só um cumprimento ("oi", "bom dia", "tudo bem?")? Se tiver
+    qualquer outra palavra (pergunta, pedido), não é — caso real de produção:
+    cliente abriu com "Tem salgado assado de salsicha?", a saudação fixa de
+    primeiro contato (que nem passa pela IA) engoliu a pergunta e ela nunca
+    foi respondida."""
+    tokens = [t for t in re.split(r"[^a-z0-9]+", _normalizar_termo(texto)) if t]
+    return len(tokens) <= 6 and all(t in _PALAVRAS_SAUDACAO for t in tokens)
+
+
 def _texto_convite_app(bot_cfg):
     """Convite pro app (mensagem_convite_app com {link_app} trocado) — vazio
     se "divulgar_app" estiver desligado ou sem link configurado (nunca
@@ -2201,7 +2216,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # normalmente na mensagem seguinte dele.
     historico_check = obter_historico_firestore(id_usuario, limite=1)
     ck("depois obter_historico_firestore (checagem primeiro contato)")
-    if not historico_check:
+    if not historico_check and _e_so_saudacao(prompt):
         saudacao = bot_cfg.get("mensagem_inicial") or BOT_CONFIG_DEFAULTS["mensagem_inicial"]
         # Convite pro app já no primeiro contato — só quando ativo E com link
         # configurado (mesma trava de "divulgar_app": sem link, nunca convida
@@ -2220,8 +2235,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # cliente. Marca a "sessão nova" AQUI (antes de salvar a mensagem de
     # agora, que atualizaria a hora) e anexa o convite na resposta no fim.
     horas_parado = _horas_desde_ultima_mensagem(id_usuario)
-    convidar_app_nesta_msg = (horas_parado is not None
-                              and horas_parado >= float(bot_cfg.get("convite_app_intervalo_horas") or 6))
+    convidar_app_nesta_msg = (not historico_check  # 1º contato que já veio com pergunta: IA responde e o convite vai no fim
+                              or (horas_parado is not None
+                                  and horas_parado >= float(bot_cfg.get("convite_app_intervalo_horas") or 6)))
 
     nome_cliente = None
 
