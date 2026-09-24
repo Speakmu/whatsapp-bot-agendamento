@@ -490,6 +490,35 @@ def test_e_so_saudacao():
     assert not bot._e_so_saudacao("oi quero fazer um pedido")
 
 
+def test_ia_diz_que_adicionou_sem_chamar_funcao_forca_retentativa(ambiente, monkeypatch):
+    # Caso real de produção: cliente pediu "1 coca zero 600", a IA escreveu que
+    # adicionou mas nunca chamou adicionar_item — o item ficou de fora em
+    # silêncio. Agora o servidor força UMA retentativa exigindo a ferramenta.
+    cz = _codigo("coca cola zero 600ml")
+    estado = {"chamadas": 0, "tool_choices": []}
+    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+        estado["tool_choices"].append(tool_choice)
+        estado["chamadas"] += 1
+        ultimo = messages[-1]
+        if tool_choice == "required":
+            return _Resp(_Msg(tool_calls=[_tc("adicionar_item", {"item_id": cz, "quantidade": 1})]))
+        if isinstance(ultimo, dict) and ultimo.get("role") == "tool":
+            return _Resp(_Msg(content="Coca Cola Zero 600ml adicionada por R$ 8,00. Mais alguma coisa?"))
+        return _Resp(_Msg(content="Adicionei a Coca Cola Zero 600ml ao seu pedido."))
+    monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
+    tel = "5535999000040"
+    resposta = _conversar(tel, ["oi", "1 coca zero 600"])[1]
+    assert "required" in estado["tool_choices"]
+    assert [i["codigo"] for i in bot.obter_rascunho(tel)["itens"]] == [cz] or len(bot.obter_rascunho(tel)["itens"]) == 1
+    assert "8,00" in resposta
+
+
+def test_soa_como_adicao():
+    assert bot._soa_como_adicao("Adicionei a Coca Zero ao seu pedido.")
+    assert not bot._soa_como_adicao("Quer que eu adicione a Coca Zero?")
+    assert not bot._soa_como_adicao("Vou confirmar com a equipe e adicionei uma observação.")
+
+
 def test_slot_obvio_com_pontuacao_no_final(ambiente, monkeypatch):
     # Caso real de produção: cliente respondeu "Dinheiro." (com ponto) e o
     # regex do slot não batia por causa do ponto sobrando — a IA não chamou

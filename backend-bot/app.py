@@ -2045,6 +2045,24 @@ def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
     return eventos
 
 
+def _soa_como_adicao(texto):
+    """O texto final afirma que ADICIONOU/incluiu item no pedido? Caso real de
+    produção: cliente pediu "1 coca zero 600", a IA (gpt-4o-mini) escreveu que
+    tinha adicionado mas nunca chamou adicionar_item — o item não entrou e o
+    cliente nem ficou sabendo. Perguntas e frases com "equipe" não contam."""
+    if not texto:
+        return False
+    radicais = ("adicionei", "adicionado", "adicionada", "incluí", "inclui ", "incluído", "incluido",
+                "coloquei", "acrescentei", "já está no seu pedido", "ja esta no seu pedido")
+    for frase in re.split(r'(?<=[.!?\n])\s+', texto):
+        f = frase.lower()
+        if "?" in f or "equipe" in f:
+            continue
+        if any(r in f for r in radicais):
+            return True
+    return False
+
+
 def _soa_como_confirmacao(texto):
     """Heurística: o texto final da IA afirma que o pedido foi registrado?
     Avaliada FRASE a frase (não no texto inteiro): antes, um único "?" em
@@ -2622,6 +2640,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         pedido_cancelado_ok = False
         bairro_nao_encontrado = False
         consultou_pedido_sem_achar = False
+        item_adicionado_ok = False
+        retentativa_adicao_feita = False
+        tool_choice_rodada = "auto"
         final_text = None
 
         for rodada in range(1, MAX_RODADAS_FERRAMENTA + 1):
@@ -2633,7 +2654,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 model=modelo_usado,
                 messages=messages,
                 tools=tools,
-                tool_choice="auto",
+                tool_choice=tool_choice_rodada,
                 timeout=60
             )
             ck(f"depois chamada OpenAI #{rodada}")
@@ -2641,8 +2662,25 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             _somar_usage(log_usage, response)
 
             response_message = response.choices[0].message
+            tool_choice_rodada = "auto"
             if not response_message.tool_calls:
                 final_text = response_message.content
+                # A IA disse que ADICIONOU algo mas nenhum adicionar_item deu
+                # certo nesta mensagem, e o cliente citou item do cardápio:
+                # uma única retentativa exigindo a chamada da ferramenta (o
+                # item não pode ficar de fora em silêncio). O resultado real
+                # da ferramenta é que vira a resposta final.
+                if (not item_adicionado_ok and not retentativa_adicao_feita and _soa_como_adicao(final_text)
+                        and _itens_mencionados(prompt, cardapio_atual)):
+                    retentativa_adicao_feita = True
+                    log_observacao = "retentativa_forcada_adicionar_item"
+                    messages.append(response_message)
+                    messages.append({"role": "system", "content":
+                                     "Você escreveu que adicionou item(ns) mas NÃO chamou adicionar_item. Chame adicionar_item "
+                                     "AGORA para cada item que o cliente pediu nesta mensagem (use o código do cardápio). "
+                                     "Se algum item for ambíguo, chame só pros claros e pergunte depois."})
+                    tool_choice_rodada = "required"
+                    continue
                 break
 
             messages.append(response_message)
@@ -2762,6 +2800,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     content = "O cardápio completo já está no seu prompt (CARDÁPIO DE AGORA). Use os códigos de lá.\n" + cardapio_texto
                 else:
                     resultado = {"status": "erro", "motivo": f"Função desconhecida: {function_name}"}
+                if function_name == "adicionar_item" and isinstance(resultado, dict) and resultado.get("status") == "ok":
+                    item_adicionado_ok = True
                 if resultado is not None:
                     content = json.dumps(resultado, ensure_ascii=False, default=str)
 
