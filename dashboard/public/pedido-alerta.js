@@ -97,6 +97,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         } catch (e) { bipeReserva(); }
     }
+    // O alarme repete até alguém ver a aba, MAS também para sozinho quando o(s)
+    // pedido(s) que o dispararam deixam de estar novos (cancelado, aceito,
+    // concluído...) — senão continuava tocando por um pedido já resolvido.
+    const pedidosAlarmando = new Map();
+    function conferirAlarme(docs) {
+        const atual = new Map(docs.map(d => [d.id, (d.data() || {}).status]));
+        pedidosAlarmando.forEach((status, id) => { if (atual.get(id) !== status) pedidosAlarmando.delete(id); });
+        if (!pedidosAlarmando.size) pararAlertaSom();
+    }
     function iniciarAlertaSom() {
         tocarAlertaSom();
         pararAlertaSom();
@@ -127,7 +136,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             const snap = await db.collection(COLECAO_PEDIDOS).where("status", "in", STATUS_ATIVOS_PEDIDOS).get();
             const novos = snap.docs.filter(d => !idsConhecidos.has(d.id));
             snap.docs.forEach(d => idsConhecidos.add(d.id));
-            if (pollIniciado && novos.length) { console.log('Alerta pela verificação de segurança:', novos.length); iniciarAlertaSom(); }
+            if (pollIniciado && novos.length) {
+                console.log('Alerta pela verificação de segurança:', novos.length);
+                novos.forEach(d => pedidosAlarmando.set(d.id, (d.data() || {}).status));
+                iniciarAlertaSom();
+            }
+            conferirAlarme(snap.docs);
             pollIniciado = true;
         } catch (e) { console.warn('Verificação de pedidos novos:', e.message); }
     }, 30000);
@@ -138,9 +152,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             .onSnapshot(snapshot => {
                 snapshot.forEach(doc => idsConhecidos.add(doc.id));
                 if (!primeiroSnapshotPedidos) {
-                    const temPedidoNovo = snapshot.docChanges().some(change => change.type === "added");
-                    if (temPedidoNovo) iniciarAlertaSom();
+                    const novosPedidos = snapshot.docChanges().filter(change => change.type === "added");
+                    if (novosPedidos.length) {
+                        novosPedidos.forEach(c => pedidosAlarmando.set(c.doc.id, (c.doc.data() || {}).status));
+                        iniciarAlertaSom();
+                    }
                 }
+                conferirAlarme(snapshot.docs);
                 primeiroSnapshotPedidos = false;
             }, error => {
                 console.warn("Alerta de pedido novo:", error.message);
