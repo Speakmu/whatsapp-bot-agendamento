@@ -161,6 +161,14 @@ CASOS = [
                                                          "sim, entregamos"]},
     },
     {
+        # Caso real: "Alpinia" parecia outra cidade, o bot negou entrega sozinho e a
+        # equipe depois confirmou que entrega. Bairro desconhecido = escalar, nunca negar.
+        "nome": "bairro_desconhecido_nao_nega_sem_equipe",
+        "mensagens": ["oi", "Vocês conseguem entregar alguns salgados aqui na Alpinia?"],
+        "espera": {"pedidos": 0, "resposta_contem": ["equipe"],
+                   "resposta_nao_contem": ["não conseguimos", "não entregamos", "infelizmente"]},
+    },
+    {
         # "são genaro" perdia pro fuzzy contra "São Judas Tadeu" por causa do acento
         "nome": "bairro_com_acento_reconhecido",
         "mensagens": ["oi", "entregam no são genaro?"],

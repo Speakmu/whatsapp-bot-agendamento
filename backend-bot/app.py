@@ -639,9 +639,8 @@ def rascunho_definir_entrega(wa_id, tipo, bairro, endereco, bot_cfg):
         else:
             r["bairro"] = None
             marcar_atencao(wa_id, f"Bairro não reconhecido: \"{bairro}\"", tipo="bairro", dados={"bairro_cliente": bairro})
-            avisos.append(f"Bairro '{bairro}' não está na lista de entrega. Se for cidade vizinha, diga que só entregamos em "
-                          f"{(bot_cfg or {}).get('cidade_atendida') or 'nossa cidade'}; se for bairro local, a equipe foi avisada "
-                          f"— ofereça retirada enquanto isso.")
+            avisos.append(f"Bairro '{bairro}' não está na lista de entrega. A equipe foi avisada: diga que vai confirmar "
+                          f"com a equipe (NÃO diga que não entregamos) e ofereça retirada enquanto isso.")
     if endereco is not None:
         end = str(endereco).strip()
         if end and not any(ch.isdigit() for ch in end):
@@ -2102,12 +2101,16 @@ def _soa_como_negativa_entrega(texto):
     radicais = ("nao entregamos", "não entregamos", "nao atendemos", "não atendemos",
                 "nao realizamos entrega", "não realizamos entrega", "nao fazemos entrega",
                 "não fazemos entrega", "nao entrega nesse bairro", "não entrega nesse bairro",
-                "nao entrega nessa regiao", "não entrega nessa região")
+                "nao entrega nessa regiao", "não entrega nessa região",
+                "só entregamos", "so entregamos", "somente em", "apenas em",
+                "atender somente", "atender apenas", "não temos entrega", "nao temos entrega")
+    padroes = (r"n[aã]o\s+(conseguimos|podemos|temos como|dá pra|da pra|é possível|e possivel)\s+(entregar|atender)",
+               r"infelizmente[^.!?\n]*(entreg|atend)")
     for frase in re.split(r'(?<=[.!?\n])\s+', texto):
         f = frase.lower()
         if "?" in f or "equipe" in f:
             continue
-        if any(r in f for r in radicais):
+        if any(r in f for r in radicais) or any(re.search(p, f) for p in padroes):
             return True
     return False
 
@@ -2538,11 +2541,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        toda). 'definir_entrega'/'verificar_bairro_entrega' já conferem a
        lista. "atende": confirme e informe a taxa. "nao_atende_confirmado":
        diga com firmeza que não entregamos ali e ofereça retirada. Bairro
-       não reconhecido ("nao_encontrado"): se for claramente outra cidade
-       (ex.: "Passos" não é bairro de {cidade_atendida or "nossa cidade"}),
-       diga que só entregamos em {cidade_atendida or "nossa cidade"} e
-       ofereça retirada, sem escalar; se puder ser bairro local, a resposta
-       é SEMPRE algo como "Vou confirmar com a equipe se entregamos no seu
+       não reconhecido ("nao_encontrado"), MESMO que pareça outra
+       cidade, povoado ou zona rural (já erramos com "Alpinia": a equipe
+       entrega lá): você NÃO decide isso. A resposta é SEMPRE algo como "Vou confirmar com a equipe se entregamos no seu
        bairro, só um instante" — e ofereça retirada enquanto isso. NUNCA,
        nesse caso: (1) diga que não entregamos ali (você não sabe isso
        ainda); (2) peça pro cliente confirmar/ter certeza do nome do bairro
@@ -2639,6 +2640,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         pedido_registrado_ok = False
         pedido_cancelado_ok = False
         bairro_nao_encontrado = False
+        bairro_negado_confirmado = False
         consultou_pedido_sem_achar = False
         item_adicionado_ok = False
         retentativa_adicao_feita = False
@@ -2756,6 +2758,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         # A IA "consultou" o bairro no ponto em que devia defini-lo: grava.
                         rascunho_definir_entrega(id_usuario, "ENTREGA", resultado.get("bairro"), None, bot_cfg)
                         resultado["bairro_gravado_no_pedido"] = True
+                    if resultado.get("status") == "nao_atende_confirmado":
+                        bairro_negado_confirmado = True
                     if resultado.get("status") in ("nao_encontrado", "sem_lista_cadastrada"):
                         bairro_nao_encontrado = True
                         marcar_atencao(id_usuario, f"Bairro não reconhecido: \"{args.get('bairro_cliente')}\"",
@@ -2903,7 +2907,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             # produção mesmo com a instrução no prompt pra escalar em vez de
             # negar. marcar_atencao (equipe avisada) já rodou lá na chamada da
             # função; aqui só troca o texto que vai pro cliente.
-            if bairro_nao_encontrado and _soa_como_negativa_entrega(final_text):
+            # Caso real ("Alpinia"): a IA negou entrega sem nem chamar a ferramenta
+            # (tratou como "outra cidade") e a equipe depois confirmou que entrega.
+            # Só a equipe/lista pode negar: sem "nao_atende_confirmado" nesta
+            # rodada, qualquer recusa vira escalação.
+            if not bairro_negado_confirmado and _soa_como_negativa_entrega(final_text):
+                if not bairro_nao_encontrado:
+                    marcar_atencao(id_usuario, f"Bairro não reconhecido (cliente disse: \"{str(prompt)[:120]}\")",
+                                   tipo="bairro", dados={"bairro_cliente": str(prompt)[:120]})
                 log_observacao = "texto_negou_entrega_sem_confirmar_bairro"
                 final_text = (
                     "Deixa eu confirmar esse bairro com a equipe antes de garantir a "
