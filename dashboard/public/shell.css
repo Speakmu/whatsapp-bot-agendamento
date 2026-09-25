@@ -384,3 +384,8 @@ tbody tr:hover {
         padding: 14px !important;
     }
 }
+
+/* Alerta de conversa aguardando a equipe (item Atendimento do menu) */
+#app-sidebar .sb-alerta { margin-left: auto; padding: 1px 7px; border-radius: 10px; background: #e74c3c; color: #fff; font-size: 12px; font-weight: 700; animation: sb-piscar 1s ease-in-out infinite; }
+@keyframes sb-piscar { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .25; transform: scale(1.12); } }
+@media (prefers-reduced-motion: reduce) { #app-sidebar .sb-alerta { animation: none; } }

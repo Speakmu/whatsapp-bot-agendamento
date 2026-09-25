@@ -186,6 +186,7 @@
         document.body.appendChild(backdrop);
 
         aplicarVisibilidade(aside);
+        monitorarAtendimento(aside);
         aplicarMargem();
         window.addEventListener('resize', aplicarMargem);
 
@@ -217,6 +218,41 @@
                 if (u) document.getElementById('sb-user').textContent = u.email || 'Conectado';
             });
         }
+    }
+
+    // Ícone piscando em "Atendimento" enquanto alguma conversa espera a equipe
+    // (precisa_atencao). Só conta marcas das últimas 24h: pendências antigas que
+    // ficaram esquecidas não devem manter o menu piscando pra sempre.
+    const JANELA_ALERTA_MS = 24 * 60 * 60 * 1000;
+    function monitorarAtendimento(aside) {
+        if (!(window.firebase && firebase.firestore && firebase.auth)) return;
+        const link = aside.querySelector('.sb-item[data-key="bot"][data-href="/bot-chat.html"]');
+        if (!link) return;
+        let badge = link.querySelector('.sb-alerta');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'sb-alerta';
+            badge.style.display = 'none';
+            link.appendChild(badge);
+        }
+        let docs = [];
+        const atualizar = () => {
+            const agora = Date.now();
+            const n = docs.filter(d => {
+                const t = d.atencao_marcada_em && d.atencao_marcada_em.toMillis ? d.atencao_marcada_em.toMillis() : agora;
+                return agora - t < JANELA_ALERTA_MS;
+            }).length;
+            badge.style.display = n ? '' : 'none';
+            badge.innerHTML = n ? `&#9888;&#65039; ${n}` : '';
+            badge.title = n ? `${n} conversa(s) aguardando a equipe` : '';
+        };
+        firebase.auth().onAuthStateChanged(function (user) {
+            if (!user) return;
+            firebase.firestore().collection('historico_conversas').where('precisa_atencao', '==', true)
+                .onSnapshot(snap => { docs = snap.docs.map(d => d.data()); atualizar(); },
+                            err => console.warn('Alerta de atendimento indisponível:', err.message));
+            setInterval(atualizar, 5 * 60 * 1000);
+        });
     }
 
     function aplicarExibicaoNoDOM(aside, cfg) {
