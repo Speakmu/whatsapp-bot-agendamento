@@ -1608,6 +1608,15 @@ def marcar_atencao(wa_id, motivo, tipo=None, dados=None):
     except Exception as e:
         print(f"Erro ao marcar atenção: {e}")
 
+def limpar_atencao(wa_id):
+    """Tira a marca "Precisa de atenção" da conversa. Ela só deve existir enquanto
+    o bot está esperando a equipe: quando a equipe responde ou o pedido é
+    registrado, a pendência acabou."""
+    try:
+        db.collection("historico_conversas").document(wa_id).set({"precisa_atencao": False}, merge=True)
+    except Exception as e:
+        print(f"Erro ao limpar atenção: {e}")
+
 def texto_atencao_pendente_antiga(wa_id, minutos_limite=10):
     """Se essa conversa tem uma dúvida marcada pra equipe há mais tempo que
     o limite e ninguém respondeu ainda, devolve um aviso pro prompt — sem
@@ -2740,6 +2749,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                                        confirmacao_explicita=confirmacao_explicita)
                     if resultado.get("status") == "ok":
                         pedido_registrado_ok = True
+                        limpar_atencao(id_usuario)
                     elif resultado.get("motivo") == "Erro interno.":
                         falha_sistema_pedido = "Erro interno."
                         marcar_atencao(id_usuario, "FALHA ao registrar pedido (não foi salvo): Erro interno.",
@@ -2867,6 +2877,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     log_ferramentas.append({"nome": "fechar_pedido[servidor]", "args": {}, "resultado": json.dumps(res_fecha, ensure_ascii=False, default=str)[:2000]})
                     if res_fecha.get("status") == "ok":
                         pedido_registrado_ok = True
+                        limpar_atencao(id_usuario)
                         log_observacao = "fechamento_deterministico"
                         itens_txt = ", ".join(res_fecha.get("itens") or [])
                         total_txt = f"{float(res_fecha.get('valor_total') or 0):.2f}".replace(".", ",")
@@ -2974,14 +2985,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             if not pedido_registrado_ok:
                 valor_real = _totais_rascunho(obter_rascunho(id_usuario), bot_cfg)[2]
                 if not _total_mencionado_bate_com_rascunho(final_text, valor_real):
+                    # Sem marcar_atencao: o bot se corrige sozinho com o resumo real
+                    # do carrinho (não fica esperando a equipe), então não é pendência.
                     log_observacao = "texto_total_nao_bate_com_carrinho"
-                    marcar_atencao(
-                        id_usuario,
-                        f"IA descreveu um total que não bate com o carrinho real (R$ {valor_real:.2f}) — "
-                        "confira com o cliente quais itens ele realmente quer.",
-                        tipo="pedido_falhou",
-                        dados={"resposta_suspeita": final_text, "valor_real": valor_real}
-                    )
                     final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
 
         # Caso real de produção: a IA escreveu "**Total:**" e
@@ -3326,6 +3332,7 @@ def painel_enviar_mensagem():
 
     send_message(wa_id, mensagem)
     salvar_historico_firestore(wa_id, "assistant", mensagem)
+    limpar_atencao(wa_id)  # equipe respondeu: pendência resolvida
     if assumir_manual:
         db.collection("historico_conversas").document(wa_id).set({"modo_manual": True}, merge=True)
     return jsonify({"ok": True}), 200
