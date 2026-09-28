@@ -424,6 +424,9 @@ def _rascunho_ref(wa_id):
     return db.collection("pedidos_rascunho").document(str(wa_id))
 
 
+HORAS_EXPIRA_RASCUNHO = 6
+
+
 def _rascunho_vazio():
     return {"itens": [], "tipo_entrega": None, "bairro": None, "endereco": None,
             "forma_pagamento": None, "nome_cliente": None, "observacao": None,
@@ -441,6 +444,16 @@ def obter_rascunho(wa_id):
         if doc.exists:
             r = doc.to_dict() or {}
             if not r.get("pedido_id"):
+                # Caso real (26/09): carrinho abandonado em 17/09 voltou a valer 9
+                # dias depois — itens que a cliente nunca pediu entraram no total.
+                # Carrinho parado há mais de HORAS_EXPIRA_RASCUNHO começa do zero
+                # (só guarda a referência do último pedido fechado).
+                ultimo_toque = r.get("atualizado_em") or r.get("criado_em")
+                if (r.get("itens") and ultimo_toque
+                        and datetime.now(timezone.utc) - ultimo_toque > timedelta(hours=HORAS_EXPIRA_RASCUNHO)):
+                    base = _rascunho_vazio()
+                    base["ultimo_pedido"] = r.get("ultimo_pedido")
+                    return base
                 base = _rascunho_vazio()
                 base.update(r)
                 return base
@@ -728,7 +741,7 @@ def _aplicar_nome_identificado(r, nome_identificado):
     return r
 
 
-def _texto_seguro_progresso(wa_id, bot_cfg, nome_cliente=None):
+def _texto_seguro_progresso(wa_id, bot_cfg, nome_cliente=None, pergunta_prioritaria=None):
     """Usada quando um guard troca a resposta da IA por algo seguro. Caso
     real de produção: o guard de _soa_como_confirmacao disparou (falso
     positivo — a IA só descreveu itens já salvos de verdade via
@@ -736,7 +749,13 @@ def _texto_seguro_progresso(wa_id, bot_cfg, nome_cliente=None):
     pedia pro cliente confirmar TUDO de novo, inclusive o endereço que ele
     tinha acabado de mandar — pareceu o bot travado repetindo a mesma
     pergunta. Em vez de um texto fixo, monta a pergunta a partir do estado
-    REAL do rascunho: só pede o que realmente falta."""
+    REAL do rascunho: só pede o que realmente falta.
+
+    'pergunta_prioritaria': pergunta que o servidor exigiu nesta mensagem (ex.:
+    qual variação da coxinha). Caso real: o texto seguro trocava a resposta e a
+    pergunta sumia — as coxinhas nunca entraram no pedido."""
+    if pergunta_prioritaria:
+        return pergunta_prioritaria
     resumo = rascunho_ver_resumo(wa_id, bot_cfg, nome_identificado=nome_cliente)
     itens = resumo.get("itens") or []
     if not itens:
@@ -2168,6 +2187,21 @@ def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
     return eventos
 
 
+_RE_PEDIU_HUMANO = re.compile(
+    r"\b(falar|conversar|contato|contatar|atendido|atender)\b[^.?!]{0,25}\b(alguem|atendente|pessoa|humano|equipe|gerente|dono|dona|"
+    r"responsavel|funcionari\w*|moca|moco|eles)\b|atendimento humano|atendente humano|\bquero (um|uma) atendente\b")
+
+
+_RE_MSG_DE_PEDIDO = re.compile(r"\d|\b(quero|queria|manda|mande|encomend\w*|pedido|pedir|me ve|vou querer|gostaria)\b")
+
+
+def _soa_como_nao_temos(texto):
+    """A IA respondeu que algum item não existe/não temos?"""
+    t = _normalizar_termo(texto or "")
+    return any(r in t for r in ("nao temos", "nao trabalhamos", "nao possuimos", "nao esta no cardapio",
+                                "nao tem no cardapio", "nao temos no cardapio", "nao consta no cardapio"))
+
+
 def _soa_como_adicao(texto):
     """O texto final afirma que ADICIONOU/incluiu item no pedido? Caso real de
     produção: cliente pediu "1 coca zero 600", a IA (gpt-4o-mini) escreveu que
@@ -2537,6 +2571,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
 
     # Slots óbvios ("retirada", "pix", "dinheiro") registrados pelo servidor
     # ANTES da IA — o prompt já reflete, e a IA não precisa chamar a função.
+    # Cliente pediu pra falar com uma pessoa: marca a conversa pra equipe (selo
+    # piscando no painel) e a equipe responde pelo Atendimento. Caso real
+    # (26/09): o bot disse "não consigo conectar você com a equipe aqui".
+    pediu_humano = bool(_RE_PEDIU_HUMANO.search(_normalizar_termo(prompt or "")))
+    if pediu_humano:
+        marcar_atencao(id_usuario, f"Cliente pediu pra falar com a equipe: \"{str(prompt)[:150]}\"", tipo="humano")
     eventos_servidor = _resolver_bairro_pendente(wa_id, id_usuario, prompt, bot_cfg)
     eventos_servidor += _preencher_slots_obvios(id_usuario, prompt, bot_cfg)
 
@@ -2550,6 +2590,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         for e in eventos_servidor:
             if e.get("instrucao"):
                 rascunho_texto += f"\n  INSTRUÇÃO DESTA MENSAGEM: {e['instrucao']}"
+    if pediu_humano:
+        rascunho_texto += ("\n  INSTRUÇÃO DESTA MENSAGEM: o cliente pediu pra falar com a equipe e o servidor JÁ AVISOU a equipe. "
+                           "Diga que chamou a equipe e que alguém responde AQUI MESMO nesta conversa em instantes "
+                           "(não mande ligar nem mandar mensagem pra outro número).")
 
     # 5. Prompt Otimizado (Limpo e Direto)
     system_prompt = f"""
@@ -2777,6 +2821,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         bairro_negado_confirmado = False
         consultou_pedido_sem_achar = False
         item_adicionado_ok = False
+        pergunta_variacao = None
         retentativa_adicao_feita = False
         tool_choice_rodada = "auto"
         final_text = None
@@ -2806,15 +2851,24 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 # uma única retentativa exigindo a chamada da ferramenta (o
                 # item não pode ficar de fora em silêncio). O resultado real
                 # da ferramenta é que vira a resposta final.
-                if (not item_adicionado_ok and not retentativa_adicao_feita and _soa_como_adicao(final_text)
+                # Caso real (26/09): cliente mandou pedido de 8 itens, a IA respondeu
+                # "não temos pastel de palmito" (tinha!) sem chamar adicionar_item
+                # pra nada. Mensagem com cara de PEDIDO (quantidade/"quero") que
+                # cita itens do cardápio e ficou sem nenhum adicionar_item → mesma
+                # retentativa forçada. Pergunta "tem X?" não entra (não é pedido).
+                soa_nao_temos = (_soa_como_nao_temos(final_text) and pergunta_variacao is None
+                                 and _RE_MSG_DE_PEDIDO.search(_normalizar_termo(prompt)))
+                if (not item_adicionado_ok and not retentativa_adicao_feita
+                        and (_soa_como_adicao(final_text) or soa_nao_temos)
                         and _itens_mencionados(prompt, cardapio_atual)):
                     retentativa_adicao_feita = True
                     log_observacao = "retentativa_forcada_adicionar_item"
                     messages.append(response_message)
                     messages.append({"role": "system", "content":
-                                     "Você escreveu que adicionou item(ns) mas NÃO chamou adicionar_item. Chame adicionar_item "
-                                     "AGORA para cada item que o cliente pediu nesta mensagem (use o código do cardápio). "
-                                     "Se algum item for ambíguo, chame só pros claros e pergunte depois."})
+                                     "O cliente pediu itens que EXISTEM no cardápio e você NÃO chamou adicionar_item. Chame "
+                                     "adicionar_item AGORA para cada item do cardápio que o cliente pediu nesta mensagem (use o "
+                                     "código do cardápio). Se algum item for ambíguo, chame só pros claros e pergunte depois; "
+                                     "só diga que não temos o que realmente não está no cardápio."})
                     tool_choice_rodada = "required"
                     continue
                 break
@@ -2846,6 +2900,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         # mensagem não deixou claro qual: não adiciona nada, pergunta.
                         opcoes_txt = " ou ".join(f"{v.get('nome_exibicao') or v.get('nome')} (R$ {float(v.get('preco') or 0):.2f})"
                                                   for v in opcoes_variante)
+                        pergunta_variacao = ("Uma dúvida antes de seguir: qual você quer — "
+                                             + " ou ".join(f"{v.get('nome_exibicao') or v.get('nome')} (R$ {float(v.get('preco') or 0):.2f})".replace(".", ",")
+                                                           for v in opcoes_variante) + "?")
                         resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg, status="erro",
                                                      motivo=f"Existe mais de uma variação: {opcoes_txt}. NÃO adicione nenhuma ainda — "
                                                             "pergunte ao cliente qual delas ele quer.")
@@ -2908,9 +2965,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         consultou_pedido_sem_achar = True
                 elif function_name == "cancelar_pedido":
                     resultado = json.loads(cancelar_pedido_recente(wa_id))
-                    if resultado.get("status") == "ok":
+                    if resultado.get("status") == "ok" and not (resultado.get("ja_estava_cancelado")
+                                                                and obter_rascunho(id_usuario).get("itens")):
                         pedido_cancelado_ok = True
-                    elif resultado.get("status") == "sem_pedido" and obter_rascunho(id_usuario).get("itens"):
+                    elif obter_rascunho(id_usuario).get("itens") and (
+                            resultado.get("status") == "sem_pedido" or resultado.get("ja_estava_cancelado")
+                            or resultado.get("status_pedido") == "CONCLUIDO"):
+                        # Caso real (26/09): o último pedido registrado era de 9 dias
+                        # antes e já estava CONCLUIDO; o bot respondeu "o pedido já
+                        # está concluído, só a equipe cancela" e o carrinho de agora
+                        # ficou lá. Pedido antigo encerrado + carrinho em andamento
+                        # = o cliente quer cancelar o carrinho.
                         # Caso real de produção: cliente nunca chegou a
                         # fechar_pedido (nada registrado de verdade), mas
                         # pediu "cancela meu pedido"/"não quero mais esse
@@ -3037,7 +3102,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     final_text = ("Não encontrei nenhum pedido seu registrado por aqui. Se quiser, me diga os "
                                   "itens que você gostaria de pedir que eu já vou te ajudando!")
                 else:
-                    final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
+                    final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente, pergunta_prioritaria=pergunta_variacao)
 
             # Mesma rede de segurança, pro caso do bairro: verificar_bairro_entrega
             # voltou "não achei na lista" (não "não atende" — a lista não tem
@@ -3121,7 +3186,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     # Sem marcar_atencao: o bot se corrige sozinho com o resumo real
                     # do carrinho (não fica esperando a equipe), então não é pendência.
                     log_observacao = "texto_total_nao_bate_com_carrinho"
-                    final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
+                    final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente, pergunta_prioritaria=pergunta_variacao)
 
         # Caso real de produção: a IA escreveu "**Total:**" e
         # "[link](link)" — Markdown padrão, que o WhatsApp não entende.
@@ -3134,6 +3199,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             convite_app = _texto_convite_app(bot_cfg)
             if convite_app and (bot_cfg.get("link_app") or "").strip() not in final_text:
                 final_text = final_text + "\n\n" + convite_app
+
+        if pediu_humano and "equipe" not in _normalizar_termo(final_text or ""):
+            log_observacao = "pediu_humano_texto_substituido"
+            final_text = "Já chamei nossa equipe! Alguém vai te responder aqui mesmo nesta conversa em instantes. 🙂"
 
         final_text = _converter_markdown_para_whatsapp(final_text)
 

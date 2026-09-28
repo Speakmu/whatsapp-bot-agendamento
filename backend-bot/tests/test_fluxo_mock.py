@@ -791,3 +791,54 @@ def test_parece_nome_de_bairro():
     assert bot._parece_nome_de_bairro("Alpinia")
     assert not bot._parece_nome_de_bairro("Rua Goiás 120")
     assert not bot._parece_nome_de_bairro("Avenida Monsenhor Felipe")
+
+
+def test_carrinho_abandonado_expira(ambiente):
+    """Caso 26/09: carrinho de 9 dias antes voltou a valer e itens que a cliente
+    nunca pediu entraram no total. Parado há mais de 6h começa do zero."""
+    cfg = bot.obter_config_bot()
+    tel = "5535999000041"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    antigo = bot.datetime.now(bot.timezone.utc) - bot.timedelta(days=9)
+    ambiente.collection("pedidos_rascunho").document(tel).set({"atualizado_em": antigo, "criado_em": antigo}, merge=True)
+    assert bot.obter_rascunho(tel)["itens"] == []
+
+
+def test_cancelar_com_pedido_antigo_concluido_limpa_carrinho(ambiente, monkeypatch):
+    """Caso 26/09: último pedido registrado era antigo e CONCLUIDO; 'cancela'
+    tem que limpar o carrinho de agora, não dizer que só a equipe cancela."""
+    cfg = bot.obter_config_bot()
+    tel = "5535999000042"
+    ambiente.collection("pedidos").add({"telefone_cliente": tel, "status": "CONCLUIDO",
+                                        "hora_pedido": bot.datetime.now(bot.timezone.utc) - bot.timedelta(days=9)})
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"pode cancelar": (("cancelar_pedido", {}), "Cancelei o que estava montando.")}))
+    _conversar(tel, ["oi", "pode cancelar"])
+    assert bot.obter_rascunho(tel)["itens"] == []
+
+
+def test_pediu_para_falar_com_equipe_marca_atencao(ambiente, monkeypatch):
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"Por aqui não consigo conversar com eles?": ["Não consigo conectar você."]}))
+    tel = "5535999000043"
+    resp = _conversar(tel, ["oi", "Por aqui não consigo conversar com eles?"])
+    h = ambiente.collection("historico_conversas").document(tel).get().to_dict()
+    assert h.get("precisa_atencao") and h.get("tipo_atencao") == "humano"
+    assert "equipe" in resp[-1].lower()
+
+
+def test_nao_temos_em_pedido_com_itens_do_cardapio_forca_adicao(ambiente, monkeypatch):
+    """Caso 26/09: pedido de vários itens, IA disse 'não temos' sem adicionar nada."""
+    pc = _codigo("pastel de carne")
+    estado = {"tool_choices": []}
+    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+        estado["tool_choices"].append(tool_choice)
+        if tool_choice == "required":
+            return _Resp(_Msg(tool_calls=[_tc("adicionar_item", {"item_id": pc, "quantidade": 2})]))
+        if isinstance(messages[-1], dict) and messages[-1].get("role") == "tool":
+            return _Resp(_Msg(content="Anotei 2 pastéis de carne!"))
+        return _Resp(_Msg(content="Infelizmente não temos pastel de carne."))
+    monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
+    tel = "5535999000044"
+    _conversar(tel, ["oi", "quero 2 pastel de carne"])
+    assert "required" in estado["tool_choices"]
+    assert [i["quantidade"] for i in bot.obter_rascunho(tel)["itens"]] == [2]
