@@ -773,3 +773,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 
 /* Observação do cliente no card do pedido */
 .order-obs { margin-top: 6px; padding: 5px 8px; background: #fff8e1; border-left: 3px solid #f39c12; border-radius: 4px; font-size: 13px; word-break: break-word; }
+
+/* Pedido com bairro que o bot aceitou (cliente confirmou ser da cidade) */
+.badge-bairro-novo { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 10px; background: #f39c12; color: #fff; font-size: 11px; font-weight: 700; }

@@ -1206,7 +1206,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const enderecoLinha = ehRetirada
             ? ''
-            : `<div class="order-endereco">📍 ${pedido.bairro ? `<strong>${pedido.bairro}</strong> — ` : ''}${pedido.endereco || '-'}</div>`;
+            : `<div class="order-endereco">📍 ${pedido.bairro ? `<strong>${pedido.bairro}</strong> — ` : ''}${pedido.endereco || '-'}${pedido.bairro_novo_pelo_bot && !pedido.bairro_promovido ? ' <span class="badge-bairro-novo" title="Bairro fora da lista: o cliente confirmou que é dentro da cidade. Confira o endereço; ao concluir a entrega o bairro entra na lista oficial.">⚠️ Bairro novo — conferir</span>' : ''}</div>`;
 
         const obsLinha = pedido.observacao
             ? `<div class="order-obs">📝 <strong>Obs:</strong> ${escapeHtmlPedido(pedido.observacao)}</div>`
@@ -1433,20 +1433,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function creditarPontosPedidoApp(pedidoId) {
-        const ref = db.collection(COLECAO_PEDIDOS).doc(pedidoId);
-        const snap = await ref.get();
-        const p = snap.data() || {};
-        const pontos = Number(p.pontos_a_creditar) || 0;
-        const pagoNaEntrega = /entrega|dinheiro/i.test(String(p.forma_pagamento || ''));
-        if (String(p.origem || '').toUpperCase() !== 'APP' || !pagoNaEntrega) return;
-        if (p.pontos_creditados || pontos <= 0 || !p.usuario_id) return;
-        const batch = db.batch();
-        batch.update(db.collection('usuarios_app').doc(p.usuario_id), { pontos: firebase.firestore.FieldValue.increment(pontos) });
-        batch.update(ref, { pontos_creditados: true, pontos_gerados: pontos });
-        await batch.commit();
-    }
-
     async function handleOrderStatusClick(e) {
         const targetButton = e.currentTarget;
         const id = targetButton.dataset.id;
@@ -1460,12 +1446,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // 1. Atualiza o Firestore
                 await db.collection(COLECAO_PEDIDOS).doc(id).update({ status: novoStatus });
 
-                // 1a. Pontos de fidelidade do pedido do APP pago na entrega/dinheiro:
-                // o app grava pontos_a_creditar (só dos produtos marcados com pontos);
-                // aqui, ao concluir, credita uma única vez (pontos_creditados evita
-                // duplicar). PIX é creditado pelo webhook e cartão já no ato.
-                if (novoStatus === "CONCLUIDO") {
-                    creditarPontosPedidoApp(id).catch(err => console.warn("Pontos do pedido:", err.message));
+                // 1a. Pontos de fidelidade (app/dinheiro) e bairro novo do bot — ver pedido-concluido.js
+                if (novoStatus === "CONCLUIDO" && window.GestorChefPedidoConcluido) {
+                    window.GestorChefPedidoConcluido(db, id).catch(err => console.warn("Pedido concluído:", err.message));
                 }
 
                 // 1b. Baixa automática de estoque ao concluir o pedido

@@ -187,6 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 hora_entrega: FieldValue.serverTimestamp()
             });
             if (window.GestorChefEstoque) window.GestorChefEstoque.baixarDoPedido(db, id).then(avisarPratosDesativados).catch(() => {});
+            if (window.GestorChefPedidoConcluido) window.GestorChefPedidoConcluido(db, id).catch(() => {});
             // Emissão fiscal: confirmar a entrega É a confirmação de pagamento
             // pra pedidos sem gateway (bot/app-dinheiro-na-entrega). Marca pra
             // fila do backend (fiscalRetryScheduler) processar. Dinheiro nunca

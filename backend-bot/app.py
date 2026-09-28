@@ -427,6 +427,7 @@ def _rascunho_ref(wa_id):
 def _rascunho_vazio():
     return {"itens": [], "tipo_entrega": None, "bairro": None, "endereco": None,
             "forma_pagamento": None, "nome_cliente": None, "observacao": None,
+            "bairro_pendente": None, "bairro_novo": None,
             "resumo_visto_em": None, "atualizado_em": None, "criado_em": datetime.now(timezone.utc),
             "pedido_id": None, "fechado_em": None, "ultimo_pedido": None}
 
@@ -638,9 +639,9 @@ def rascunho_definir_entrega(wa_id, tipo, bairro, endereco, bot_cfg):
             avisos.append(f"A equipe já confirmou que NÃO entregamos em '{bairro}'. Ofereça retirada.")
         else:
             r["bairro"] = None
-            marcar_atencao(wa_id, f"Bairro não reconhecido: \"{bairro}\"", tipo="bairro", dados={"bairro_cliente": bairro})
-            avisos.append(f"Bairro '{bairro}' não está na lista de entrega. A equipe foi avisada: diga que vai confirmar "
-                          f"com a equipe (NÃO diga que não entregamos) e ofereça retirada enquanto isso.")
+            pend = _marcar_bairro_pendente(wa_id, bairro, bot_cfg)
+            r["bairro_pendente"] = obter_rascunho(wa_id).get("bairro_pendente")
+            avisos.append(pend["instrucao"] + (f" Pergunta: \"{pend['pergunta']}\"" if pend.get("pergunta") else ""))
     if endereco is not None:
         end = str(endereco).strip()
         if end and not any(ch.isdigit() for ch in end):
@@ -702,8 +703,11 @@ def rascunho_para_prompt(r, bot_cfg):
     """Estado do pedido em andamento, injetado no system prompt a cada
     mensagem — a IA sabe o que já está no carrinho e o que falta sem
     precisar chamar ver_resumo nem reler a conversa."""
+    pendente = (f"\n  BAIRRO AGUARDANDO RESPOSTA DO CLIENTE: '{r['bairro_pendente']}' — pergunta feita: "
+                f"\"{_pergunta_perimetro(r['bairro_pendente'], bot_cfg)}\" Quando ele responder, chame confirmar_bairro_na_cidade."
+                if r.get("bairro_pendente") else "")
     if not r.get("itens") and not r.get("tipo_entrega") and not r.get("forma_pagamento"):
-        return "PEDIDO EM ANDAMENTO: nenhum (carrinho vazio)."
+        return "PEDIDO EM ANDAMENTO: nenhum (carrinho vazio)." + pendente
     valor_itens, taxa, total = _totais_rascunho(r, bot_cfg)
     linhas = ["PEDIDO EM ANDAMENTO (do servidor — fonte da verdade):"]
     for i in r.get("itens") or []:
@@ -713,7 +717,7 @@ def rascunho_para_prompt(r, bot_cfg):
     linhas.append(f"  itens R$ {valor_itens:.2f} + taxa R$ {taxa:.2f} = TOTAL R$ {total:.2f}")
     faltando = _faltando(r)
     linhas.append(f"  falta para fechar: {', '.join(faltando) if faltando else 'nada — mostre o resumo (ver_resumo) e peça confirmação'}")
-    return "\n".join(linhas)
+    return "\n".join(linhas) + pendente
 
 
 def _aplicar_nome_identificado(r, nome_identificado):
@@ -857,6 +861,10 @@ def rascunho_fechar_pedido(wa_id, bot_cfg, nome_identificado=None, confirmacao_e
             "valor_total": total,
             "valor_itens": valor_itens,
             "taxa_entrega": taxa,
+            # Bairro que o próprio cliente confirmou ser da cidade (não estava na
+            # lista): o painel destaca pra equipe conferir o endereço.
+            "bairro_novo_pelo_bot": bool(r.get("bairro_novo") and r.get("bairro_novo") == r.get("bairro")
+                                         and r["tipo_entrega"] == "ENTREGA"),
         }
         batch.set(pedido_ref, dados_pedido)
         if user_doc and total_pontos > 0:
@@ -1995,6 +2003,113 @@ def _resolver_variante_ambigua(item_resolvido, cardapio, mensagem):
 _RE_PARECE_ENDERECO = re.compile(r"^(?=.*\d)(?=.*[a-z]{3,}).{5,80}$")
 
 
+# --- Bairro fora da lista: o próprio cliente confirma se é da cidade ---
+# Antes, bairro não reconhecido chamava a equipe e o cliente ficava esperando.
+# Agora o bot pergunta se o local fica dentro da cidade (perímetro urbano); se
+# o cliente disser que sim, o bairro entra na lista de entrega na hora e o
+# pedido segue, marcado "bairro_novo_pelo_bot" pra equipe conferir (e cancelar
+# se for o caso). Bairro que a equipe já recusou continua recusado
+# (bairros_aprendizado é consultado antes, em verificar_bairro_entrega).
+_RE_NAO_E_BAIRRO = re.compile(r"^(rua|r|av|avenida|praca|pca|travessa|tv|alameda|rodovia|rod|estrada)\b\.?", re.I)
+_RE_SIM_PERIMETRO = re.compile(r"^(sim|s|ss|fica|fica sim|e sim|isso|isso mesmo|claro|com certeza|exato|correto|certo|"
+                               r"e dentro|fica dentro|dentro|e da cidade|e aqui|aqui mesmo|e|uhum|aham|yes)\b", re.I)
+_RE_NAO_PERIMETRO = re.compile(r"^(nao|n|nop|negativo|nem|fora)\b|outra cidade|zona rural|sitio|fazenda|chacara|distrito", re.I)
+
+
+def _parece_nome_de_bairro(nome):
+    n = str(nome or "").strip()
+    if not n or len(n) > 40 or len(n.split()) > 5 or any(ch.isdigit() for ch in n):
+        return False
+    return not _RE_NAO_E_BAIRRO.match(_normalizar_termo(n))
+
+
+def _cidade_principal(bot_cfg):
+    return str((bot_cfg or {}).get("cidade_atendida") or "").split(",")[0].strip() or "nossa cidade"
+
+
+def _pergunta_perimetro(bairro, bot_cfg):
+    return f"{bairro} fica dentro da cidade de {_cidade_principal(bot_cfg)} (perímetro urbano)?"
+
+
+def _marcar_bairro_pendente(wa_id, bairro, bot_cfg):
+    """verificar_bairro_entrega não achou o bairro: guarda no rascunho e devolve
+    a instrução pra IA perguntar ao cliente — sem chamar a equipe."""
+    if not _parece_nome_de_bairro(bairro):
+        return {"acao": "pedir_nome_do_bairro",
+                "instrucao": f"'{bairro}' não parece nome de bairro (rua/número). Peça só o NOME DO BAIRRO ao cliente. "
+                             "NÃO diga que entregamos nem que não entregamos."}
+    r = obter_rascunho(wa_id)
+    r["bairro_pendente"] = str(bairro).strip()
+    _salvar_rascunho(wa_id, r, tocou=False)
+    return {"acao": "perguntar_perimetro", "pergunta": _pergunta_perimetro(str(bairro).strip(), bot_cfg),
+            "instrucao": "Bairro fora da lista. Faça EXATAMENTE esta pergunta ao cliente e pare (NÃO diga que entregamos nem "
+                         "que não entregamos, NÃO fale em equipe). Quando ele responder, chame confirmar_bairro_na_cidade."}
+
+
+def _registrar_bairro_novo(bairro, wa_id):
+    """Cliente confirmou que é da cidade: vai pra lista SEPARADA de bairros
+    pendentes (configuracoes/bot.bairros_pendentes_bot). Só entra na lista
+    oficial de entrega quando um pedido pra esse bairro for concluído (o painel
+    promove ao marcar CONCLUIDO) — pedido cancelado não promove."""
+    try:
+        ref = db.collection("configuracoes").document("bot")
+        doc = ref.get(timeout=10)
+        dados = (doc.to_dict() or {}) if doc.exists else {}
+        pendentes = list(dados.get("bairros_pendentes_bot") or [])
+        if not any(_normalizar_termo(p.get("bairro")) == _normalizar_termo(bairro) for p in pendentes if isinstance(p, dict)):
+            pendentes.append({"bairro": bairro, "wa_id": str(wa_id), "em": datetime.now(timezone.utc)})
+            ref.set({"bairros_pendentes_bot": pendentes[-200:]}, merge=True)
+    except Exception as e:
+        print(f"Erro ao registrar bairro novo: {e}")
+
+
+def confirmar_bairro_na_cidade(wa_id, dentro_da_cidade, bot_cfg):
+    r = obter_rascunho(wa_id)
+    bairro = r.get("bairro_pendente")
+    if not bairro:
+        return {"status": "erro", "motivo": "Nenhum bairro aguardando confirmação. Use definir_entrega/verificar_bairro_entrega."}
+    r["bairro_pendente"] = None
+    if not dentro_da_cidade:
+        _salvar_rascunho(wa_id, r, tocou=False)
+        return {"status": "fora_da_cidade", "bairro": bairro,
+                "instrucao": f"Diga, com educação, que só entregamos dentro de {_cidade_principal(bot_cfg)} e ofereça retirada na loja."}
+    _registrar_bairro_novo(bairro, wa_id)
+    r["bairro_novo"] = bairro
+    if r.get("itens") and r.get("tipo_entrega") != "RETIRADA":
+        r.update({"tipo_entrega": "ENTREGA", "bairro": bairro, "resumo_visto_em": None})
+        _salvar_rascunho(wa_id, r)
+    else:
+        _salvar_rascunho(wa_id, r, tocou=False)
+    return {"status": "atende", "bairro": bairro, "taxa_entrega": (bot_cfg or {}).get("taxa_entrega") or 0,
+            "bairro_gravado_no_pedido": r.get("bairro") == bairro,
+            "instrucao": f"Confirme que entregamos em {bairro} (informe a taxa) e siga o pedido normalmente."}
+
+
+def _resolver_bairro_pendente(wa_id, id_usuario, mensagem, bot_cfg):
+    """Resposta curta ("sim"/"não, é em Passos") à pergunta do perímetro urbano
+    vira estado sem depender da IA. Só age se a ÚLTIMA fala do bot foi essa
+    pergunta — senão um "sim" pra "posso fechar?" seria consumido aqui."""
+    r = obter_rascunho(id_usuario)
+    if not r.get("bairro_pendente"):
+        return []
+    ultima = next((m.get("content") or "" for m in reversed(obter_historico_firestore(wa_id, limite=4))
+                   if m.get("role") == "assistant"), "")
+    if "perimetro urbano" not in _normalizar_termo(ultima):
+        return []
+    m = _normalizar_termo(mensagem).strip(".!?,; ")
+    if not m or len(m) > 80:
+        return []
+    if _RE_NAO_PERIMETRO.search(m):
+        dentro = False
+    elif _RE_SIM_PERIMETRO.match(m) or _cliente_confirmou(m):
+        dentro = True
+    else:
+        return []
+    res = confirmar_bairro_na_cidade(id_usuario, dentro, bot_cfg)
+    return [{"nome": "confirmar_bairro_na_cidade[servidor]", "args": {"dentro_da_cidade": dentro},
+             "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000], "instrucao": res.get("instrucao")}]
+
+
 def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
     """Resposta de uma palavra a uma pergunta do fluxo ("retirada", "pix",
     "dinheiro") não precisa da IA pra virar estado — e o gpt-4o-mini às
@@ -2362,6 +2477,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         _f("verificar_bairro_entrega",
            "Só pra responder 'vocês entregam no bairro X?' quando o cliente ainda NÃO está fechando pedido. No fechamento use definir_entrega.",
            {"bairro_cliente": {"type": "string"}}, ["bairro_cliente"]),
+        _f("confirmar_bairro_na_cidade",
+           "Chame quando o cliente RESPONDER à pergunta se o bairro fica dentro da cidade (perímetro urbano). "
+           "dentro_da_cidade=true se ele disse que sim; false se disse que é outra cidade, zona rural, sítio etc.",
+           {"dentro_da_cidade": {"type": "boolean"}}, ["dentro_da_cidade"]),
         _f("consultar_meu_pedido",
            "Pedido mais recente JÁ REGISTRADO deste cliente (itens, valor, status). Use quando ele perguntar de um pedido já feito."),
         _f("cancelar_pedido",
@@ -2418,7 +2537,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
 
     # Slots óbvios ("retirada", "pix", "dinheiro") registrados pelo servidor
     # ANTES da IA — o prompt já reflete, e a IA não precisa chamar a função.
-    eventos_servidor = _preencher_slots_obvios(id_usuario, prompt, bot_cfg)
+    eventos_servidor = _resolver_bairro_pendente(wa_id, id_usuario, prompt, bot_cfg)
+    eventos_servidor += _preencher_slots_obvios(id_usuario, prompt, bot_cfg)
 
     # Estado do pedido em andamento (Fase 4) — uma leitura por mensagem.
     rascunho_inicio_turno = _aplicar_nome_identificado(obter_rascunho(id_usuario), nome_cliente)
@@ -2427,6 +2547,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         rascunho_texto += "\n  (o servidor acabou de registrar, a partir desta mensagem do cliente: " + \
             ", ".join(e["nome"].replace("[servidor]", "") + "=" + json.dumps(e["args"], ensure_ascii=False) for e in eventos_servidor) + \
             " — NÃO chame essa função de novo; siga pro próximo passo)"
+        for e in eventos_servidor:
+            if e.get("instrucao"):
+                rascunho_texto += f"\n  INSTRUÇÃO DESTA MENSAGEM: {e['instrucao']}"
 
     # 5. Prompt Otimizado (Limpo e Direto)
     system_prompt = f"""
@@ -2551,14 +2674,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        lista. "atende": confirme e informe a taxa. "nao_atende_confirmado":
        diga com firmeza que não entregamos ali e ofereça retirada. Bairro
        não reconhecido ("nao_encontrado"), MESMO que pareça outra
-       cidade, povoado ou zona rural (já erramos com "Alpinia": a equipe
-       entrega lá): você NÃO decide isso. A resposta é SEMPRE algo como "Vou confirmar com a equipe se entregamos no seu
-       bairro, só um instante" — e ofereça retirada enquanto isso. NUNCA,
-       nesse caso: (1) diga que não entregamos ali (você não sabe isso
-       ainda); (2) peça pro cliente confirmar/ter certeza do nome do bairro
-       que ele já disse; (3) sugira ou troque pra outro nome de bairro que
-       ele não mencionou. Se o topo do prompt avisar que essa dúvida já
-       passou de 10 minutos, não prometa de novo: resolva com o cliente.
+       cidade, povoado ou zona rural (já erramos com "Alpinia": entregamos
+       lá): você NÃO decide isso e NÃO chama a equipe. O resultado traz a
+       'pergunta' — faça EXATAMENTE ela ao cliente (se o bairro fica dentro
+       da cidade, perímetro urbano) e pare. Quando ele responder, chame
+       'confirmar_bairro_na_cidade' (true = dentro da cidade; false = outra
+       cidade/zona rural/sítio). "atende" → confirme a entrega com a taxa e
+       siga o pedido; "fora_da_cidade" → diga que só entregamos na cidade e
+       ofereça retirada. NUNCA, antes da resposta do cliente: (1) diga que
+       entregamos ou que não entregamos; (2) peça pro cliente confirmar o
+       nome do bairro que ele já disse; (3) sugira outro nome de bairro.
 
        SOBRE CANCELAMENTO: se o cliente disser "cancela"/"não quero mais
        esse pedido" a qualquer momento — mesmo ANTES de fechar_pedido ter
@@ -2772,8 +2897,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         bairro_negado_confirmado = True
                     if resultado.get("status") in ("nao_encontrado", "sem_lista_cadastrada"):
                         bairro_nao_encontrado = True
-                        marcar_atencao(id_usuario, f"Bairro não reconhecido: \"{args.get('bairro_cliente')}\"",
-                                       tipo="bairro", dados={"bairro_cliente": args.get("bairro_cliente")})
+                        resultado.update(_marcar_bairro_pendente(id_usuario, args.get("bairro_cliente"), bot_cfg))
+                elif function_name == "confirmar_bairro_na_cidade":
+                    resultado = confirmar_bairro_na_cidade(id_usuario, bool(args.get("dentro_da_cidade")), bot_cfg)
+                    if resultado.get("status") == "fora_da_cidade":
+                        bairro_negado_confirmado = True
                 elif function_name == "consultar_meu_pedido":
                     content = consultar_meu_pedido(wa_id)
                     if json.loads(content).get("status") == "sem_pedido":
@@ -2922,16 +3050,21 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             # (tratou como "outra cidade") e a equipe depois confirmou que entrega.
             # Só a equipe/lista pode negar: sem "nao_atende_confirmado" nesta
             # rodada, qualquer recusa vira escalação.
+            if any(e.get("nome") == "confirmar_bairro_na_cidade[servidor]" and not e["args"].get("dentro_da_cidade")
+                   for e in eventos_servidor):
+                bairro_negado_confirmado = True   # o próprio cliente disse que é fora da cidade
+            pendente_agora = obter_rascunho(id_usuario).get("bairro_pendente")
             if not bairro_negado_confirmado and _soa_como_negativa_entrega(final_text):
-                if not bairro_nao_encontrado:
-                    marcar_atencao(id_usuario, f"Bairro não reconhecido (cliente disse: \"{str(prompt)[:120]}\")",
-                                   tipo="bairro", dados={"bairro_cliente": str(prompt)[:120]})
                 log_observacao = "texto_negou_entrega_sem_confirmar_bairro"
-                final_text = (
-                    "Deixa eu confirmar esse bairro com a equipe antes de garantir a "
-                    "entrega — já registrei aqui e alguém confirma com você em instantes. "
-                    "Se preferir, também dá pra combinar a retirada na loja."
-                )
+                final_text = (_pergunta_perimetro(pendente_agora, bot_cfg) if pendente_agora else
+                              f"Pra eu confirmar a entrega: qual o nome do seu bairro? Ele fica dentro da cidade de "
+                              f"{_cidade_principal(bot_cfg)} (perímetro urbano)?")
+            elif (bairro_nao_encontrado and pendente_agora
+                  and "perimetro urbano" not in _normalizar_termo(final_text)):
+                # Bairro acabou de ficar pendente mas a IA não fez a pergunta (ou
+                # já "confirmou" a entrega por conta própria): a pergunta é obrigatória.
+                log_observacao = "bairro_pendente_sem_pergunta_perimetro"
+                final_text = _pergunta_perimetro(pendente_agora, bot_cfg)
 
             # Mesma rede de segurança pro cancelamento: já aconteceu em produção
             # a IA dizer "pedido cancelado" sem ter chamado cancelar_pedido — o

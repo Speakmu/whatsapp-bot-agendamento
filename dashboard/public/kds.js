@@ -213,6 +213,9 @@ document.addEventListener('DOMContentLoaded', () => {
             await db.collection(COLECAO_PEDIDOS).doc(id).update({ status: novoStatus });
 
             // Baixa de estoque ao concluir (despachar) direto pela cozinha
+            if (novoStatus === "CONCLUIDO" && window.GestorChefPedidoConcluido) {
+                window.GestorChefPedidoConcluido(db, id).catch(() => {});
+            }
             if (novoStatus === "CONCLUIDO" && window.GestorChefEstoque) {
                 window.GestorChefEstoque.baixarDoPedido(db, id).then(avisarPratosDesativados).catch(() => {});
             }

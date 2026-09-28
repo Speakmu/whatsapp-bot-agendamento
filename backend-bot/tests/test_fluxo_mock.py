@@ -743,3 +743,51 @@ def test_sim_depois_do_total_fecha_mesmo_sem_pergunta(ambiente, monkeypatch):
     tel2 = "5535999000026"
     _conversar(tel2, ["oi", "1 coxinha retirada", "pix", "sim"])
     assert len(_pedidos(ambiente, tel2)) == 0
+
+
+def test_bairro_desconhecido_cliente_confirma_perimetro(ambiente, monkeypatch):
+    """Bairro fora da lista: o bot pergunta se fica dentro da cidade (perímetro
+    urbano), sem chamar a equipe. 'sim' grava o bairro no pedido e o coloca na
+    lista SEPARADA de pendentes (a oficial só recebe quando o pedido é entregue).
+    Mesmo que a IA diga 'entregamos sim' antes da resposta, a pergunta é forçada."""
+    cfg = bot.obter_config_bot()
+    roteiro = {"entregam na Alpinia?": (("verificar_bairro_entrega", {"bairro_cliente": "Alpinia"}), "Entregamos sim!"),
+               "sim": ["Ótimo! Entregamos aí."]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "5535999000031"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    bot.rascunho_definir_entrega(tel, "ENTREGA", None, None, cfg)
+    resp = _conversar(tel, ["oi", "entregam na Alpinia?"])
+    assert "perímetro urbano" in resp[-1]
+    assert bot.obter_rascunho(tel)["bairro_pendente"] == "Alpinia"
+    atencao = ambiente.collection("historico_conversas").document(tel).get().to_dict() or {}
+    assert not atencao.get("precisa_atencao")
+    _conversar(tel, ["sim"])
+    r = bot.obter_rascunho(tel)
+    assert r["bairro"] == "Alpinia" and r["bairro_novo"] == "Alpinia" and not r["bairro_pendente"]
+    cfg2 = ambiente.collection("configuracoes").document("bot").get().to_dict()
+    assert any(p["bairro"] == "Alpinia" for p in cfg2.get("bairros_pendentes_bot") or [])
+    assert "Alpinia" not in (cfg2.get("bairros_entrega") or [])
+
+
+def test_bairro_desconhecido_cliente_diz_outra_cidade(ambiente, monkeypatch):
+    cfg = bot.obter_config_bot()
+    roteiro = {"entregam no Alpinia?": (("verificar_bairro_entrega", {"bairro_cliente": "Alpinia"}), "Vou ver."),
+               "não, é em Passos": ["Infelizmente não entregamos em Passos, só em São Sebastião do Paraíso. Pode retirar na loja!"]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "5535999000032"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    bot.rascunho_definir_entrega(tel, "ENTREGA", None, None, cfg)
+    resp = _conversar(tel, ["oi", "entregam no Alpinia?", "não, é em Passos"])
+    assert "perímetro urbano" in resp[1]
+    r = bot.obter_rascunho(tel)
+    assert r["bairro"] is None and not r["bairro_pendente"]
+    assert "Passos" in resp[2]   # negativa legítima (o próprio cliente disse) não é trocada
+    cfg2 = ambiente.collection("configuracoes").document("bot").get().to_dict()
+    assert not cfg2.get("bairros_pendentes_bot")
+
+
+def test_parece_nome_de_bairro():
+    assert bot._parece_nome_de_bairro("Alpinia")
+    assert not bot._parece_nome_de_bairro("Rua Goiás 120")
+    assert not bot._parece_nome_de_bairro("Avenida Monsenhor Felipe")

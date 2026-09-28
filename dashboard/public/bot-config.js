@@ -161,6 +161,13 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-taxa-entrega').value = d.taxa_entrega != null ? d.taxa_entrega : 0;
             $('bot-cidade-atendida').value = d.cidade_atendida || '';
             atualizarContagemBairros();
+            const pend = Array.isArray(d.bairros_pendentes_bot) ? d.bairros_pendentes_bot : [];
+            $('bairros-pendentes-bot').innerHTML = pend.length
+                ? pend.map(p => {
+                    const em = p.em && p.em.toDate ? p.em.toDate().toLocaleDateString('pt-BR') : '';
+                    return `<div>• <strong>${escapeHtmlApelido(p.bairro || '')}</strong> <span style="opacity:.7">(${escapeHtmlApelido(p.wa_id || '')}${em ? ', ' + em : ''})</span></div>`;
+                }).join('')
+                : 'Nenhum.';
         } catch (err) {
             console.warn('bot:', err.message);
         }
