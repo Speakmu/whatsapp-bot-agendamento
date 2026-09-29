@@ -430,7 +430,7 @@ HORAS_EXPIRA_RASCUNHO = 6
 def _rascunho_vazio():
     return {"itens": [], "tipo_entrega": None, "bairro": None, "endereco": None,
             "forma_pagamento": None, "nome_cliente": None, "observacao": None,
-            "bairro_pendente": None, "bairro_novo": None,
+            "bairro_pendente": None, "bairro_novo": None, "endereco_sugerido": None,
             "resumo_visto_em": None, "atualizado_em": None, "criado_em": datetime.now(timezone.utc),
             "pedido_id": None, "fechado_em": None, "ultimo_pedido": None}
 
@@ -672,10 +672,47 @@ def rascunho_definir_entrega(wa_id, tipo, bairro, endereco, bot_cfg, texto_clien
     # Idempotência: o gpt-4o-mini "reconfirma" entrega/pagamento no turno do
     # "sim". Se nada mudou de fato, não invalida o resumo já mostrado — senão
     # fechar_pedido recusa e o "sim" do cliente é desperdiçado (harness).
+    if bairro or endereco:
+        r["endereco_sugerido"] = None      # cliente deu endereço: não sugere o antigo
+    elif not r.get("bairro") and not r.get("endereco") and not r.get("endereco_sugerido"):
+        sug = _endereco_do_ultimo_pedido(wa_id, bot_cfg)
+        if sug:
+            r["endereco_sugerido"] = sug
+            _salvar_rascunho(wa_id, r, tocou=False)
+    if r.get("endereco_sugerido") and not r.get("bairro"):
+        avisos.append(f"O cliente já recebeu aqui antes. Pergunte EXATAMENTE: \"{_pergunta_mesmo_endereco(r['endereco_sugerido'])}\"")
     if (r.get("tipo_entrega"), r.get("bairro"), r.get("endereco")) != antes:
         r["resumo_visto_em"] = None
         _salvar_rascunho(wa_id, r)
     return _resumo_rascunho(r, bot_cfg, avisos=avisos) if avisos else _resumo_rascunho(r, bot_cfg)
+
+
+def _endereco_do_ultimo_pedido(wa_id, bot_cfg):
+    """Endereço do último pedido de ENTREGA do cliente (WhatsApp ou app), se o
+    bairro continua atendido. Caso real (29/09): a cliente tinha recebido no dia
+    anterior na Rua Noruega 140, Jardim Europa, e o bot pediu tudo de novo."""
+    try:
+        for _doc, p in _pedidos_do_cliente(wa_id, limite=10):
+            end, bai = str(p.get("endereco") or "").strip(), str(p.get("bairro") or "").strip()
+            if (str(p.get("tipo_entrega") or "").upper() != "ENTREGA" or p.get("status") == "CANCELADO"
+                    or not bai or not any(ch.isdigit() for ch in end)):
+                continue
+            res = verificar_bairro_entrega(bai, bot_cfg)
+            if res.get("status") != "atende":
+                return None
+            return {"bairro": res.get("bairro") or bai, "endereco": end}
+    except Exception as e:
+        print(f"Erro ao buscar endereço do último pedido: {e}")
+    return None
+
+
+def _pergunta_mesmo_endereco(sug):
+    return f"Entrego no mesmo endereço do último pedido: {sug['endereco']} — {sug['bairro']}?"
+
+
+_RE_SIM_ENDERECO = re.compile(r"^(sim|s|ss|isso|isso mesmo|mesmo|o mesmo|e o mesmo|mesmo endereco|pode|pode sim|pode ser|"
+                              r"claro|certo|correto|exato|ok|beleza|blz|esse mesmo|e esse|aham|uhum)\b")
+_RE_NAO_ENDERECO = re.compile(r"^(nao|n|nop|negativo|outro)\b|outro endereco|mudei|endereco diferente")
 
 
 def rascunho_definir_pagamento(wa_id, forma, bot_cfg):
@@ -727,6 +764,10 @@ def rascunho_para_prompt(r, bot_cfg):
     pendente = (f"\n  BAIRRO AGUARDANDO RESPOSTA DO CLIENTE: '{r['bairro_pendente']}' — pergunta feita: "
                 f"\"{_pergunta_perimetro(r['bairro_pendente'], bot_cfg)}\" Quando ele responder, chame confirmar_bairro_na_cidade."
                 if r.get("bairro_pendente") else "")
+    if r.get("endereco_sugerido") and not r.get("bairro"):
+        pendente = (f"\n  ENDEREÇO DO ÚLTIMO PEDIDO DO CLIENTE: {r['endereco_sugerido']['endereco']} — "
+                    f"{r['endereco_sugerido']['bairro']}. Ao pedir o endereço de entrega, pergunte: "
+                    f"\"{_pergunta_mesmo_endereco(r['endereco_sugerido'])}\"") + pendente
     if not r.get("itens") and not r.get("tipo_entrega") and not r.get("forma_pagamento"):
         return "PEDIDO EM ANDAMENTO: nenhum (carrinho vazio)." + pendente
     valor_itens, taxa, total = _totais_rascunho(r, bot_cfg)
@@ -2229,6 +2270,37 @@ def confirmar_bairro_na_cidade(wa_id, dentro_da_cidade, bot_cfg):
             "instrucao": f"Confirme que entregamos em {bairro} (informe a taxa) e siga o pedido normalmente."}
 
 
+def _resolver_endereco_sugerido(wa_id, id_usuario, mensagem, bot_cfg):
+    """Resposta à pergunta "Entrego no mesmo endereço do último pedido: ...?".
+    'sim' grava rua e bairro de uma vez; 'não'/endereço novo descarta a sugestão
+    (o endereço novo segue pela IA). Só age se a ÚLTIMA fala do bot foi a pergunta."""
+    r = obter_rascunho(id_usuario)
+    sug = r.get("endereco_sugerido")
+    if not sug or r.get("bairro"):
+        return []
+    ultima = next((m.get("content") or "" for m in reversed(obter_historico_firestore(wa_id, limite=4))
+                   if m.get("role") == "assistant"), "")
+    if "mesmo endereco" not in _normalizar_termo(ultima):
+        return []
+    m = _normalizar_termo(mensagem).strip(".!?,; ")
+    if not m or len(m) > 80:
+        return []
+    if any(ch.isdigit() for ch in m) or _RE_NAO_ENDERECO.search(m):
+        r["endereco_sugerido"] = None
+        _salvar_rascunho(id_usuario, r, tocou=False)
+        return [{"nome": "endereco_ultimo_pedido[servidor]", "args": {"mesmo": False}, "resultado": "{}",
+                 "instrucao": "O cliente NÃO quer o endereço do último pedido. Use o endereço que ele mandou "
+                              "(definir_entrega) ou peça rua, número e bairro."}]
+    if not (_RE_SIM_ENDERECO.match(m) or _cliente_confirmou(m)):
+        return []
+    r.update({"tipo_entrega": "ENTREGA", "bairro": sug["bairro"], "endereco": sug["endereco"],
+              "endereco_sugerido": None, "resumo_visto_em": None})
+    _salvar_rascunho(id_usuario, r)
+    return [{"nome": "definir_entrega[servidor]", "args": {"tipo": "ENTREGA", "bairro": sug["bairro"], "endereco": sug["endereco"]},
+             "resultado": "{}", "instrucao": f"Entrega confirmada no endereço do último pedido ({sug['endereco']} — "
+                                             f"{sug['bairro']}). Siga pro próximo passo; NÃO pergunte endereço nem bairro."}]
+
+
 def _resolver_bairro_pendente(wa_id, id_usuario, mensagem, bot_cfg):
     """Resposta curta ("sim"/"não, é em Passos") à pergunta do perímetro urbano
     vira estado sem depender da IA. Só age se a ÚLTIMA fala do bot foi essa
@@ -2727,7 +2799,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     pediu_humano = bool(_RE_PEDIU_HUMANO.search(_normalizar_termo(prompt or "")))
     if pediu_humano:
         marcar_atencao(id_usuario, f"Cliente pediu pra falar com a equipe: \"{str(prompt)[:150]}\"", tipo="humano")
-    eventos_servidor = _resolver_bairro_pendente(wa_id, id_usuario, prompt, bot_cfg)
+    eventos_servidor = _resolver_endereco_sugerido(wa_id, id_usuario, prompt, bot_cfg)
+    eventos_servidor += _resolver_bairro_pendente(wa_id, id_usuario, prompt, bot_cfg)
     eventos_servidor += _preencher_slots_obvios(id_usuario, prompt, bot_cfg)
 
     # Estado do pedido em andamento (Fase 4) — uma leitura por mensagem.
@@ -3397,6 +3470,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         # o comprovante antes de prosseguirmos/para eu fechar" e o pedido nunca era
         # criado. Carrinho completo + texto condicionando o fechamento ao comprovante
         # → troca pelo resumo real + "Posso fechar?" (o comprovante vem depois).
+        # Cliente já recebeu antes: se a IA vai pedir bairro/endereço sem oferecer o
+        # do último pedido, troca pela pergunta do "mesmo endereço".
+        if not pedido_registrado_ok:
+            r_end = obter_rascunho(id_usuario)
+            t_norm = _normalizar_termo(final_text or "")
+            if (r_end.get("endereco_sugerido") and not r_end.get("bairro") and "?" in (final_text or "")
+                    and ("bairro" in t_norm or "endereco" in t_norm) and "mesmo endereco" not in t_norm):
+                log_observacao = "pergunta_endereco_trocada_por_ultimo_endereco"
+                final_text = _pergunta_mesmo_endereco(r_end["endereco_sugerido"])
+
         if not pedido_registrado_ok and _RE_COMPROVANTE_ANTES_DE_FECHAR.search(_normalizar_termo(final_text or "")):
             r_fim = obter_rascunho(id_usuario)
             if r_fim.get("itens") and not _faltando(r_fim):

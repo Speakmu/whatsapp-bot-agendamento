@@ -941,3 +941,34 @@ def test_cliente_diz_bairro_oficial_com_pendente_aberto(ambiente, monkeypatch):
     _conversar(tel, ["oi", "San Genaro! rua x 505 san genaro"])
     r = bot.obter_rascunho(tel)
     assert r["bairro"] == "San Genaro" and not r["bairro_pendente"]
+
+
+def test_oferece_endereco_do_ultimo_pedido(ambiente, monkeypatch):
+    """Caso Isabel (29/09): recebeu no dia anterior na Rua Noruega 140 e o bot pediu
+    tudo de novo. Agora oferece o mesmo endereço; 'sim' grava rua e bairro."""
+    cfg = bot.obter_config_bot()
+    tel = "553574006702"
+    ambiente.collection("pedidos").add({"origem": "WHATSAPP", "telefone_cliente": tel, "status": "CONCLUIDO",
+                                        "tipo_entrega": "ENTREGA", "bairro": "San Genaro", "endereco": "Rua Noruega 140",
+                                        "hora_pedido": bot.datetime.now(bot.timezone.utc) - bot.timedelta(days=1)})
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"entrega": ["Qual o seu bairro e endereço?"],
+                                                             "sim": ["Certo! Como vai pagar?"]}))
+    resp = _conversar(tel, ["oi", "entrega"])
+    assert "mesmo endereço do último pedido: Rua Noruega 140 — San Genaro" in resp[-1]
+    _conversar(tel, ["sim"])
+    r = bot.obter_rascunho(tel)
+    assert r["bairro"] == "San Genaro" and r["endereco"] == "Rua Noruega 140" and not r["endereco_sugerido"]
+
+
+def test_endereco_do_ultimo_pedido_recusado(ambiente, monkeypatch):
+    cfg = bot.obter_config_bot()
+    tel = "553574006703"
+    ambiente.collection("pedidos").add({"origem": "WHATSAPP", "telefone_cliente": tel, "status": "CONCLUIDO",
+                                        "tipo_entrega": "ENTREGA", "bairro": "San Genaro", "endereco": "Rua Noruega 140",
+                                        "hora_pedido": bot.datetime.now(bot.timezone.utc) - bot.timedelta(days=1)})
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"entrega": ["Qual o seu endereço?"]}))
+    _conversar(tel, ["oi", "entrega", "não, outro endereço"])
+    r = bot.obter_rascunho(tel)
+    assert r["bairro"] is None and not r["endereco_sugerido"]
