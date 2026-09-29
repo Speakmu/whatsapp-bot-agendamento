@@ -1118,7 +1118,13 @@ const SecaoHome = React.memo(({
           {/* Banner principal (imagem) — primeiro bloco da vitrine. Some quando
               há promoção ativa: só um dos dois aparece por vez. */}
           {mostrarVitrine && promocoes.length === 0 && !!heroUrl && (
-            <Image source={{ uri: heroUrl }} style={styles.heroBanner} contentFit="cover" />
+            <Image
+              source={{ uri: heroUrl }}
+              style={styles.heroBanner}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={150}
+            />
           )}
 
           {/* Promoções (carrossel) — quando existe pelo menos uma ativa, toma o
