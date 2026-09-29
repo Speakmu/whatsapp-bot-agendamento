@@ -691,7 +691,8 @@ def rascunho_definir_pagamento(wa_id, forma, bot_cfg):
         extra["chave_pix"] = chave_pix or "NÃO CONFIGURADA — diga pro cliente que a equipe passa a chave"
         extra["aviso_pix"] = ("PIX é antecipado: passe a chave e diga que precisa do comprovante antes do preparo. "
                               "Na MESMA resposta mostre o resumo (itens, taxa, valor_total) e pergunte 'Confere? Posso fechar?' — "
-                              "não termine a resposta sem essa pergunta.")
+                              "não termine a resposta sem essa pergunta. O comprovante vem DEPOIS do fechamento: quando o "
+                              "cliente confirmar, feche o pedido (fechar_pedido) — NUNCA exija o comprovante pra fechar.")
     return _resumo_rascunho(r, bot_cfg, **extra)
 
 
@@ -1306,6 +1307,44 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
         print(f"ERRO: {str(e)}")
         return json.dumps({"status": "erro", "motivo": "Erro interno."})
 
+def _variantes_telefone(wa_id):
+    """O WhatsApp manda o número SEM o nono dígito (553592678488) e o app grava
+    COM ele (5535992678488). Devolve as duas formas pra busca achar os dois."""
+    t = re.sub(r"\D", "", str(wa_id or ""))
+    v = {t}
+    if t.startswith("55") and len(t) == 12:
+        v.add(t[:4] + "9" + t[4:])
+    elif t.startswith("55") and len(t) == 13 and t[4] == "9":
+        v.add(t[:4] + t[5:])
+    return [x for x in v if x]
+
+
+def _pedidos_do_cliente(wa_id, limite=5):
+    """Pedidos deste cliente em QUALQUER canal, mais recente primeiro. Caso real
+    (29/09): cliente pediu pelo app, veio ao WhatsApp falar do pedido e o bot
+    disse que "o pedido do app foi cancelado" — só procurava telefone_cliente com
+    o número do WhatsApp; o app grava com o nono dígito e, no dinheiro, no campo
+    'telefone'. Devolve [(doc, dados)]."""
+    achados = {}
+    variantes = _variantes_telefone(wa_id)
+    for campo in ("telefone_cliente", "telefone"):
+        try:
+            for doc in db.collection('pedidos').where(campo, 'in', variantes).get(timeout=10):
+                achados[doc.id] = doc
+        except Exception as e:
+            print(f"Erro ao buscar pedidos por {campo}: {e}")
+    minimo = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    docs = sorted(achados.values(), key=lambda d: (d.to_dict() or {}).get('hora_pedido') or minimo, reverse=True)
+    return [(d, d.to_dict() or {}) for d in docs[:limite]]
+
+
+def _pix_app_ja_pago(p):
+    """PIX do app é cobrado pelo gateway (Mercado Pago) e confirmado sozinho pelo
+    webhook: saiu de AGUARDANDO_PIX = pago. Não precisa de comprovante."""
+    return (str(p.get('origem') or '').upper() == 'APP' and 'PIX' in str(p.get('forma_pagamento') or '').upper()
+            and p.get('status') not in ('AGUARDANDO_PIX', 'CANCELADO'))
+
+
 def consultar_meu_pedido(wa_id: str):
     """Busca o pedido mais recente já registrado deste cliente — usada quando
     ele pergunta sobre um pedido que JÁ fez (valor, itens, status), pra não
@@ -1314,23 +1353,32 @@ def consultar_meu_pedido(wa_id: str):
     de verdade no sistema)."""
     if db is None: return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
     try:
-        docs = db.collection('pedidos') \
-            .where('telefone_cliente', '==', str(wa_id)) \
-            .order_by('hora_pedido', direction=firestore.Query.DESCENDING) \
-            .limit(1).get()
-        if not docs:
+        pedidos = _pedidos_do_cliente(wa_id, limite=1)
+        if not pedidos:
             return json.dumps({"status": "sem_pedido"})
 
-        pedido = docs[0].to_dict()
-        return json.dumps({
+        doc, pedido = pedidos[0]
+        hp = pedido.get("hora_pedido")
+        out = {
             "status": "ok",
-            "itens": [i.get("nome") for i in (pedido.get("itens") or [])],
+            "pedido_id": doc.id,
+            "canal": "APP" if str(pedido.get("origem") or "").upper() == "APP" else "WHATSAPP/LOJA",
+            "feito_em": hp.astimezone(timezone(timedelta(hours=-3))).strftime("%d/%m %H:%M") if hp else None,
+            "itens": [(i.get("nome_exibicao") or i.get("nome")) if isinstance(i, dict) else i for i in (pedido.get("itens") or [])],
             "valor_total": pedido.get("valor_total"),
             "taxa_entrega": pedido.get("taxa_entrega"),
             "tipo_entrega": pedido.get("tipo_entrega"),
+            "endereco": pedido.get("endereco"),
             "forma_pagamento": pedido.get("forma_pagamento"),
-            "status_pedido": pedido.get("status")
-        })
+            "status_pedido": pedido.get("status"),
+            "instrucao": "Este é o pedido que o cliente já fez (fale dele com a data/hora). Se o cliente está falando "
+                         "DESTE pedido, NÃO monte outro carrinho nem chame adicionar_item.",
+        }
+        if _pix_app_ja_pago(pedido):
+            out["pagamento"] = "PIX já confirmado automaticamente pelo app — NÃO peça comprovante."
+        elif pedido.get("status") == "AGUARDANDO_PIX":
+            out["pagamento"] = "PIX do app ainda não pago: o cliente paga pelo código PIX na aba Pedidos do app (confirma sozinho)."
+        return json.dumps(out, ensure_ascii=False, default=str)
     except Exception as e:
         print(f"ERRO ao consultar pedido: {e}")
         return json.dumps({"status": "erro", "motivo": "Erro interno."})
@@ -1349,15 +1397,11 @@ def cancelar_pedido_recente(wa_id: str):
     if db is None:
         return json.dumps({"status": "erro", "motivo": "Erro de conexão."})
     try:
-        docs = db.collection('pedidos') \
-            .where('telefone_cliente', '==', str(wa_id)) \
-            .order_by('hora_pedido', direction=firestore.Query.DESCENDING) \
-            .limit(1).get(timeout=10)
-        if not docs:
+        pedidos = _pedidos_do_cliente(wa_id, limite=1)
+        if not pedidos:
             return json.dumps({"status": "sem_pedido"})
 
-        doc = docs[0]
-        pedido = doc.to_dict()
+        doc, pedido = pedidos[0]
         status_atual = pedido.get("status")
         if status_atual == "CANCELADO":
             return json.dumps({"status": "ok", "ja_estava_cancelado": True})
@@ -1382,16 +1426,31 @@ def registrar_comprovante(wa_id: str, imagem_url: str):
         # OBS: registrar_pedido() grava o telefone em 'telefone_cliente', não 'wa_id'
         # (esse campo nunca existiu nos pedidos) — por isso a busca é por esse campo,
         # e usa a coleção 'pedidos' direto (mesma que registrar_pedido usa).
-        pedidos_ref = db.collection('pedidos')
-        query = pedidos_ref.where('telefone_cliente', '==', str(wa_id))\
-                          .order_by('hora_pedido', direction=firestore.Query.DESCENDING)\
-                          .limit(1)
+        pedidos = _pedidos_do_cliente(wa_id, limite=1)
 
-        docs = query.get(timeout=10)
+        if pedidos:
+            doc, dados = pedidos[0]
+            forma_up = str(dados.get('forma_pagamento') or '').upper()
 
-        if docs:
-            doc = docs[0]
-            dados = doc.to_dict()
+            def _anotar(nota):
+                obs = str(dados.get('observacao') or '').strip()
+                obs = f"{obs} | {nota}" if obs and obs.lower() != 'nenhuma' else nota
+                doc.reference.update({'comprovante_url': imagem_url, 'observacao': obs}, timeout=10)
+
+            # PIX do app: cobrado e confirmado pelo gateway — comprovante não muda nada.
+            if _pix_app_ja_pago(dados):
+                doc.reference.update({'comprovante_url': imagem_url}, timeout=10)
+                return "Recebi! Mas nem precisava: o pagamento PIX do seu pedido pelo app já foi confirmado automaticamente. ✅"
+            if str(dados.get('origem') or '').upper() == 'APP' and dados.get('status') == 'AGUARDANDO_PIX':
+                _anotar("Cliente mandou comprovante PIX pelo WhatsApp")
+                return ("Recebi o comprovante e anexei ao seu pedido! Se pagou pelo código PIX do app, ele confirma sozinho "
+                        "em instantes e o pedido segue pro preparo.")
+            # Caso real (29/09): pedido do app em dinheiro, cliente pagou uma PARTE no
+            # PIX. Anexa ao pedido e anota pra equipe/entregador cobrar só o restante.
+            if 'PIX' not in forma_up and dados.get('status') not in ('CONCLUIDO', 'CANCELADO'):
+                _anotar("Cliente pagou parte no PIX (comprovante no pedido) — confira o valor e cobre só o restante")
+                return ("Recebi seu comprovante e anexei ao seu pedido! ✅ A equipe confere o valor e na entrega "
+                        "é cobrado só o que faltar.")
 
             # 2. Só vincula o comprovante se for um pedido de PIX ainda em
             # aberto — sem isso, um comprovante mandado por engano (ou um
@@ -1867,7 +1926,8 @@ def is_modo_manual(wa_id):
 _RE_CONFIRMACAO_CLIENTE = re.compile(
     r"^\s*(sim|s|ss|pode|pode sim|pode ser|pode fechar|fecha|fechar|confirma|confirmo|confirmado|confere|isso|isso mesmo|"
     r"ok|okay|certo|correto|beleza|blz|show|perfeito|claro|manda|vai|bora|pode mandar|é isso|e isso|tá certo|ta certo|"
-    r"tá|ta|tudo certo|está certo|esta certo|pode confirmar|pode registrar|👍|✅)\s*[.!]*\s*$", re.I)
+    r"tá|ta|tudo certo|está certo|esta certo|pode confirmar|pode registrar|pode mandar entregar|pode entregar|"
+    r"manda entregar|pode enviar|pode mandar fazer|pode fazer|pode preparar|fechado|pode fechar sim|👍|✅)\s*[.!]*\s*$", re.I)
 
 
 def _cliente_confirmou(texto):
@@ -2728,6 +2788,20 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        ofereça retirada. NUNCA, antes da resposta do cliente: (1) diga que
        entregamos ou que não entregamos; (2) peça pro cliente confirmar o
        nome do bairro que ele já disse; (3) sugira outro nome de bairro.
+
+       SOBRE PEDIDO JÁ FEITO (inclusive PELO APP): se o cliente falar de um
+       pedido que já fez ("pedi no app", "meu pedido", "já paguei"), chame
+       'consultar_meu_pedido' ANTES de tudo e fale desse pedido. NUNCA monte
+       o mesmo pedido de novo no carrinho. Se o resultado diz que o PIX já
+       foi confirmado, NÃO peça comprovante.
+
+       SOBRE PAGAMENTO DIVIDIDO (parte PIX, parte dinheiro): o sistema não
+       divide pagamento e você NUNCA inventa nem calcula as partes. Pedido
+       já feito: passe a chave PIX, peça pro cliente mandar o comprovante
+       AQUI (ele é anexado ao pedido) e diga que na entrega é cobrado só o
+       restante em dinheiro. Pedido novo: registre a forma principal e use
+       'definir_observacao' com o que o cliente disse (ex.: "paga R$ 8 no
+       PIX e o resto em dinheiro"), só com valores que ELE falou.
 
        SOBRE CANCELAMENTO: se o cliente disser "cancela"/"não quero mais
        esse pedido" a qualquer momento — mesmo ANTES de fechar_pedido ter

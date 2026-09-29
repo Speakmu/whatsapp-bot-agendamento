@@ -842,3 +842,41 @@ def test_nao_temos_em_pedido_com_itens_do_cardapio_forca_adicao(ambiente, monkey
     _conversar(tel, ["oi", "quero 2 pastel de carne"])
     assert "required" in estado["tool_choices"]
     assert [i["quantidade"] for i in bot.obter_rascunho(tel)["itens"]] == [2]
+
+
+def test_bot_enxerga_pedido_do_app(ambiente):
+    """Caso 29/09: pedido do app (número com nono dígito, campo 'telefone', dinheiro)
+    era invisível pro bot, que disse 'seu pedido do app foi cancelado'."""
+    wa = "553592678400"
+    ambiente.collection("pedidos").add({"origem": "BOT", "telefone_cliente": wa, "status": "CANCELADO", "valor_total": 8.5,
+                                        "hora_pedido": bot.datetime.now(bot.timezone.utc) - bot.timedelta(days=14)})
+    ambiente.collection("pedidos").add({"origem": "APP", "telefone": "5535992678400", "status": "PENDENTE_PREPARO",
+                                        "valor_total": 46.0, "forma_pagamento": "Entrega/Dinheiro",
+                                        "hora_pedido": bot.datetime.now(bot.timezone.utc)})
+    r = json.loads(bot.consultar_meu_pedido(wa))
+    assert r["canal"] == "APP" and r["valor_total"] == 46.0 and r["status_pedido"] == "PENDENTE_PREPARO"
+
+
+def test_comprovante_em_pedido_app_dinheiro_anexa_e_anota(ambiente):
+    wa = "553592678401"
+    _, ref = ambiente.collection("pedidos").add({"origem": "APP", "telefone": "5535992678401", "status": "PENDENTE_PREPARO",
+                                                 "valor_total": 46.0, "forma_pagamento": "Entrega/Dinheiro",
+                                                 "hora_pedido": bot.datetime.now(bot.timezone.utc)})
+    msg = bot.registrar_comprovante(wa, "https://x/comp.jpg")
+    p = ref.get().to_dict()
+    assert "anexei" in msg and p["status"] == "PENDENTE_PREPARO" and p["comprovante_url"] == "https://x/comp.jpg"
+    assert "parte no PIX" in p["observacao"]
+
+
+def test_comprovante_em_pix_do_app_ja_pago_nao_muda_status(ambiente):
+    wa = "553592678402"
+    _, ref = ambiente.collection("pedidos").add({"origem": "APP", "telefone_cliente": "5535992678402", "status": "EM_PREPARO",
+                                                 "valor_total": 30.0, "forma_pagamento": "PIX",
+                                                 "hora_pedido": bot.datetime.now(bot.timezone.utc)})
+    msg = bot.registrar_comprovante(wa, "https://x/comp.jpg")
+    assert "confirmado automaticamente" in msg and ref.get().to_dict()["status"] == "EM_PREPARO"
+
+
+def test_pode_mandar_entregar_conta_como_confirmacao():
+    assert bot._cliente_confirmou("Pode mandar entregar")
+    assert bot._variantes_telefone("553592678488") and "5535992678488" in bot._variantes_telefone("553592678488")

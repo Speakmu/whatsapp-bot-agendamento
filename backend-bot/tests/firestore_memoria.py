@@ -112,10 +112,25 @@ class _Query:
         return _Query(self._q.limit(n))
 
     def get(self, **_k):
-        return list(self._q.stream())
+        return [_Snap(s) for s in self._q.stream()]
 
     def stream(self, **_k):
-        return self._q.stream()
+        return (_Snap(s) for s in self._q.stream())
+
+
+class _Snap:
+    """Snapshot de consulta com .reference que aceita timeout= (como o real)."""
+    def __init__(self, s):
+        self._s = s
+        self.id = s.id
+        self.exists = getattr(s, "exists", True)
+        self.reference = _Doc(s.reference)
+
+    def to_dict(self):
+        return self._s.to_dict()
+
+    def get(self, campo):
+        return (self._s.to_dict() or {}).get(campo)
 
 
 class _Col(_Query):

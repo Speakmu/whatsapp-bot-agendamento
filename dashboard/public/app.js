@@ -1211,6 +1211,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const obsLinha = pedido.observacao
             ? `<div class="order-obs">📝 <strong>Obs:</strong> ${escapeHtmlPedido(pedido.observacao)}</div>`
             : '';
+        const comprovanteLinha = /^https?:\/\//.test(String(pedido.comprovante_url || ''))
+            ? `<div class="order-obs"><a href="${escapeHtmlPedido(pedido.comprovante_url)}" target="_blank" rel="noopener">🧾 Ver comprovante PIX enviado pelo cliente</a></div>`
+            : '';
         const canal = canalPedido(pedido);
         return `
         <div class="order-card order-card--${canal}" id="card-${id}">
@@ -1226,6 +1229,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="order-itens">${itensHTML}</div>
                 ${enderecoLinha}
                 ${obsLinha}
+                ${comprovanteLinha}
                 <div class="order-footer-info">
                     <span>${formaPagamento.toUpperCase()}</span>
                     <div class="${statusClass} status-tag">${statusClean}</div>
