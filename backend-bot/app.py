@@ -627,7 +627,7 @@ def rascunho_remover_item(wa_id, item_id, quantidade, bot_cfg, cardapio=None):
     return _resumo_rascunho(r, bot_cfg)
 
 
-def rascunho_definir_entrega(wa_id, tipo, bairro, endereco, bot_cfg):
+def rascunho_definir_entrega(wa_id, tipo, bairro, endereco, bot_cfg, texto_cliente=None):
     r = obter_rascunho(wa_id)
     tipo = str(tipo or "").strip().upper()
     if tipo not in ("ENTREGA", "RETIRADA"):
@@ -644,15 +644,22 @@ def rascunho_definir_entrega(wa_id, tipo, bairro, endereco, bot_cfg):
     r["tipo_entrega"] = "ENTREGA"
     avisos = []
     if bairro:
-        res = verificar_bairro_entrega(bairro, bot_cfg)
+        # Bairro que ESTE cliente acabou de confirmar ser da cidade: continua valendo
+        # (a config carregada no início da mensagem ainda não o tem nos pendentes).
+        if r.get("bairro_novo") and _normalizar_termo(r["bairro_novo"]) == _normalizar_termo(bairro):
+            res = {"status": "atende", "bairro": r["bairro_novo"]}
+        else:
+            res = verificar_bairro_entrega(bairro, bot_cfg)
         if res.get("status") == "atende":
             r["bairro"] = res.get("bairro")
+            if res.get("bairro_novo"):
+                r["bairro_novo"] = res.get("bairro")
         elif res.get("status") == "nao_atende_confirmado":
             r["bairro"] = None
             avisos.append(f"A equipe já confirmou que NÃO entregamos em '{bairro}'. Ofereça retirada.")
         else:
             r["bairro"] = None
-            pend = _marcar_bairro_pendente(wa_id, bairro, bot_cfg)
+            pend = _marcar_bairro_pendente(wa_id, bairro, bot_cfg, texto_cliente=texto_cliente)
             r["bairro_pendente"] = obter_rascunho(wa_id).get("bairro_pendente")
             avisos.append(pend["instrucao"] + (f" Pergunta: \"{pend['pergunta']}\"" if pend.get("pergunta") else ""))
     if endereco is not None:
@@ -773,7 +780,10 @@ def _texto_seguro_progresso(wa_id, bot_cfg, nome_cliente=None, pergunta_priorita
     }
     falta = resumo.get("falta_para_fechar") or []
     pedir = next((f for f in falta if f != "itens"), None)
-    return f"Só falta uma coisa pra eu fechar seu pedido: {perguntas.get(pedir, 'pode confirmar o que ainda falta?')}"
+    itens_txt = ", ".join(f"{i['quantidade']}x {i['nome']}" for i in itens)
+    total_txt = f"{float(resumo.get('valor_total') or 0):.2f}".replace(".", ",")
+    return (f"Seu pedido até agora: {itens_txt} — total R$ {total_txt}.\n"
+            f"Só falta uma coisa pra eu fechar: {perguntas.get(pedir, 'pode confirmar o que ainda falta?')}")
 
 
 def rascunho_ver_resumo(wa_id, bot_cfg, nome_identificado=None):
@@ -1426,6 +1436,21 @@ def registrar_comprovante(wa_id: str, imagem_url: str):
         # OBS: registrar_pedido() grava o telefone em 'telefone_cliente', não 'wa_id'
         # (esse campo nunca existiu nos pedidos) — por isso a busca é por esse campo,
         # e usa a coleção 'pedidos' direto (mesma que registrar_pedido usa).
+
+        # Caso real (29/09, duas clientes): o bot pediu "o comprovante antes de
+        # fechar", a cliente pagou e mandou — e o pedido nunca tinha sido criado; o
+        # comprovante caía num pedido antigo. Carrinho completo com PIX + comprovante
+        # = o cliente confirmou: fecha o pedido AGORA e anexa o comprovante nele.
+        r = obter_rascunho(wa_id)
+        if r.get("itens") and not _faltando(r) and r.get("forma_pagamento") == "PIX":
+            res = rascunho_fechar_pedido(wa_id, obter_config_bot(), confirmacao_explicita=True)
+            if res.get("status") == "ok" and res.get("pedido_id"):
+                db.collection('pedidos').document(res["pedido_id"]).update(
+                    {'comprovante_url': imagem_url, 'status': "PENDENTE_VALIDACAO"}, timeout=10)
+                total = f"{float(res.get('valor_total') or 0):.2f}".replace(".", ",")
+                return (f"Recebi o comprovante e seu pedido foi registrado! ✅ Total: R$ {total}. "
+                        "Nossa equipe confere o pagamento e já inicia o preparo.")
+
         pedidos = _pedidos_do_cliente(wa_id, limite=1)
 
         if pedidos:
@@ -1821,6 +1846,15 @@ def verificar_bairro_entrega(bairro_cliente, bot_cfg=None):
     except Exception as e:
         print(f"Erro ao checar bairro aprendido: {e}")
 
+    # Bairro que um cliente já confirmou ser da cidade (lista de pendentes, aguardando
+    # a 1ª entrega): vale como atendido. Caso real (29/09): o cliente confirmou, e a
+    # chamada seguinte de definir_entrega não achava o bairro na lista oficial, apagava
+    # do pedido e perguntava tudo de novo — o "pode fechar" dele foi recusado.
+    for pend in bot_cfg.get("bairros_pendentes_bot") or []:
+        if isinstance(pend, dict) and _normalizar_termo(pend.get("bairro")) == termo_normalizado:
+            return {"status": "atende", "bairro": pend.get("bairro"), "bairro_novo": True,
+                    "taxa_entrega": bot_cfg.get("taxa_entrega") or 0}
+
     bairros = [str(b).strip() for b in (bot_cfg.get("bairros_entrega") or []) if str(b).strip()]
 
     if not bairros:
@@ -2002,6 +2036,17 @@ def _tokens_item(it):
     return {t for t in re.split(r"[^a-z0-9]+", nome) if len(t) >= 4 and t not in _PALAVRAS_GENERICAS_ITEM}
 
 
+def _tipo_do_item_na_mensagem(item, mensagem):
+    """A primeira palavra do nome do item (o tipo: pastel, coxinha, esfirra, coca...)
+    aparece na mensagem? Compara pelo começo da palavra (pastel/pastéis)."""
+    nome = _normalizar_termo((item or {}).get("nome_exibicao") or (item or {}).get("nome") or "")
+    tipo = next((p for p in re.split(r"[^a-z0-9]+", nome) if len(p) >= 3), "")
+    if not tipo:
+        return True
+    raiz = tipo[:4]
+    return any(t.startswith(raiz) for t in re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")))
+
+
 def _itens_mencionados(mensagem, cardapio):
     """ids dos itens do cardápio cujo nome (palavra distintiva) aparece na mensagem."""
     m = " " + _normalizar_termo(mensagem or "") + " "
@@ -2110,10 +2155,21 @@ def _pergunta_perimetro(bairro, bot_cfg):
     return f"{bairro} fica dentro da cidade de {_cidade_principal(bot_cfg)} (perímetro urbano)?"
 
 
-def _marcar_bairro_pendente(wa_id, bairro, bot_cfg):
+def _e_nome_de_rua_na_mensagem(nome, texto_cliente):
+    """O cliente escreveu esse nome logo depois de 'rua'/'av'...? Então é a RUA, não
+    o bairro. Caso real (29/09): "rua Pinto Ribeiro 505" → a IA passou "Pinto
+    Ribeiro" como bairro e perguntou o perímetro urbano de uma rua."""
+    n, t = _normalizar_termo(nome), _normalizar_termo(texto_cliente or "")
+    if not n or not t:
+        return False
+    return bool(re.search(r"\b(rua|r|av|avenida|travessa|tv|alameda|praca|pca|rodovia|estrada)\.?\s+"
+                          r"(\w+\s+){0,3}" + re.escape(n) + r"\b", t))
+
+
+def _marcar_bairro_pendente(wa_id, bairro, bot_cfg, texto_cliente=None):
     """verificar_bairro_entrega não achou o bairro: guarda no rascunho e devolve
     a instrução pra IA perguntar ao cliente — sem chamar a equipe."""
-    if not _parece_nome_de_bairro(bairro):
+    if not _parece_nome_de_bairro(bairro) or _e_nome_de_rua_na_mensagem(bairro, texto_cliente):
         return {"acao": "pedir_nome_do_bairro",
                 "instrucao": f"'{bairro}' não parece nome de bairro (rua/número). Peça só o NOME DO BAIRRO ao cliente. "
                              "NÃO diga que entregamos nem que não entregamos."}
@@ -2171,6 +2227,25 @@ def _resolver_bairro_pendente(wa_id, id_usuario, mensagem, bot_cfg):
     r = obter_rascunho(id_usuario)
     if not r.get("bairro_pendente"):
         return []
+    # Caso real (29/09): pendente era a RUA ("Pinto Ribeiro"); a cliente respondeu
+    # "Centro! Pinto Ribeiro 505 centro" e o bot seguiu com a rua. Se a mensagem cita
+    # um bairro da lista oficial, é esse o bairro.
+    msg_norm = f" {' '.join(re.split(r'[^a-z0-9]+', _normalizar_termo(mensagem or '')))} "
+    oficiais = sorted((str(b).strip() for b in (bot_cfg or {}).get("bairros_entrega") or [] if str(b).strip()),
+                      key=len, reverse=True)
+    citado = next((b for b in oficiais if len(_normalizar_termo(b)) >= 4
+                   and f" {' '.join(re.split(r'[^a-z0-9]+', _normalizar_termo(b)))} " in msg_norm), None)
+    if citado:
+        r["bairro_pendente"] = None
+        if r.get("itens") and r.get("tipo_entrega") != "RETIRADA":
+            r.update({"tipo_entrega": "ENTREGA", "bairro": citado, "resumo_visto_em": None})
+            _salvar_rascunho(id_usuario, r)
+        else:
+            _salvar_rascunho(id_usuario, r, tocou=False)
+        return [{"nome": "definir_entrega[servidor]", "args": {"tipo": "ENTREGA", "bairro": citado},
+                 "resultado": json.dumps({"status": "atende", "bairro": citado}, ensure_ascii=False),
+                 "instrucao": f"O cliente informou o bairro {citado}, que é atendido (taxa normal). Siga o pedido; "
+                              "NÃO pergunte de novo sobre bairro nem perímetro urbano."}]
     ultima = next((m.get("content") or "" for m in reversed(obter_historico_firestore(wa_id, limite=4))
                    if m.get("role") == "assistant"), "")
     if "perimetro urbano" not in _normalizar_termo(ultima):
@@ -2250,6 +2325,12 @@ def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
 _RE_PEDIU_HUMANO = re.compile(
     r"\b(falar|conversar|contato|contatar|atendido|atender)\b[^.?!]{0,25}\b(alguem|atendente|pessoa|humano|equipe|gerente|dono|dona|"
     r"responsavel|funcionari\w*|moca|moco|eles)\b|atendimento humano|atendente humano|\bquero (um|uma) atendente\b")
+
+
+_RE_COMPROVANTE_ANTES_DE_FECHAR = re.compile(
+    r"comprovante[^.?!\n]{0,90}\b(fech|finaliz|prossegu|registr|conclu)|"
+    r"\b(fech|finaliz|prossegu|registr|conclu)\w*[^.?!\n]{0,60}(assim que|depois que|quando)[^.?!\n]{0,40}comprovante|"
+    r"(antes de|para|pra) (fechar|finalizar|prosseguir|registrar)[^.?!\n]{0,60}comprovante")
 
 
 _RE_MSG_DE_PEDIDO = re.compile(r"\d|\b(quero|queria|manda|mande|encomend\w*|pedido|pedir|me ve|vou querer|gostaria)\b")
@@ -2959,7 +3040,24 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     ja_no_carrinho = it_pedido and any(i.get("id") == it_pedido["id"] for i in obter_rascunho(id_usuario).get("itens") or [])
                     mencionados = _itens_mencionados(prompt, cardapio_atual)
                     item_certo, opcoes_variante = _resolver_variante_ambigua(it_pedido, cardapio_atual, prompt)
-                    if ja_no_carrinho and mencionados and it_pedido["id"] not in mencionados:
+                    if opcoes_variante:
+                        # Caso real (28/09): "coxinha com catupiry" veio numa mensagem e a
+                        # IA só adicionou depois ("valor e número do pix") — a checagem
+                        # olhava só a mensagem atual e perguntou 3x qual coxinha.
+                        # Considera também as últimas mensagens do cliente.
+                        recentes = [m.get("content") or "" for m in historico_msgs if m.get("role") == "user"][-3:]
+                        certo_ctx, _ = _resolver_variante_ambigua(it_pedido, cardapio_atual, " ".join(recentes + [prompt]))
+                        if certo_ctx:
+                            item_certo, opcoes_variante = certo_ctx, None
+                    if (retentativa_adicao_feita and it_pedido
+                            and not _tipo_do_item_na_mensagem(it_pedido, " ".join([prompt] + [m.get("content") or "" for m in historico_msgs if m.get("role") == "user"][-2:]))):
+                        # Caso real (28/09): na retentativa forçada a IA adicionou um
+                        # "Pastel Frango Catupiry" pra quem escreveu "coxinha de frango
+                        # com catupiry". Na retentativa só entra item cujo TIPO
+                        # (pastel, coxinha...) o cliente citou.
+                        resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg, status="erro",
+                                                     motivo="Esse item não foi pedido pelo cliente — não adicionei. Adicione só o que ele pediu.")
+                    elif ja_no_carrinho and mencionados and it_pedido["id"] not in mencionados:
                         # "1 guaraná lata" → o mini readicionava as 2 coxinhas que já
                         # estavam no carrinho (total dobrava). Se a mensagem cita outro
                         # item e não este, é repetição: devolve o rascunho sem somar.
@@ -2986,7 +3084,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 elif function_name == "remover_item":
                     resultado = rascunho_remover_item(id_usuario, args.get("item_id"), args.get("quantidade"), bot_cfg, cardapio_atual)
                 elif function_name == "definir_entrega":
-                    resultado = rascunho_definir_entrega(id_usuario, args.get("tipo"), args.get("bairro"), args.get("endereco"), bot_cfg)
+                    resultado = rascunho_definir_entrega(id_usuario, args.get("tipo"), args.get("bairro"), args.get("endereco"), bot_cfg,
+                                                         texto_cliente=prompt)
                 elif function_name == "definir_pagamento":
                     if _cliente_mencionou_pagamento(args.get("forma"), prompt, historico_msgs):
                         resultado = rascunho_definir_pagamento(id_usuario, args.get("forma"), bot_cfg)
@@ -3028,7 +3127,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         bairro_negado_confirmado = True
                     if resultado.get("status") in ("nao_encontrado", "sem_lista_cadastrada"):
                         bairro_nao_encontrado = True
-                        resultado.update(_marcar_bairro_pendente(id_usuario, args.get("bairro_cliente"), bot_cfg))
+                        resultado.update(_marcar_bairro_pendente(id_usuario, args.get("bairro_cliente"), bot_cfg, texto_cliente=prompt))
                 elif function_name == "confirmar_bairro_na_cidade":
                     resultado = confirmar_bairro_na_cidade(id_usuario, bool(args.get("dentro_da_cidade")), bot_cfg)
                     if resultado.get("status") == "fora_da_cidade":
@@ -3261,6 +3360,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                     # do carrinho (não fica esperando a equipe), então não é pendência.
                     log_observacao = "texto_total_nao_bate_com_carrinho"
                     final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente, pergunta_prioritaria=pergunta_variacao)
+                elif ("total" in _normalizar_termo(final_text or "") and "r$" in (final_text or "").lower()
+                      and pergunta_variacao is None):
+                    # Caso real (28/09): o resumo mostrado tinha coxinha + Coca Zero e
+                    # o total certo (R$ 29,50), mas o carrinho tinha também uma Sprite
+                    # Zero que a cliente nunca pediu — o item ficou escondido e foi pro
+                    # pedido. Resumo com total que omite item do carrinho → resumo real.
+                    faltou = [i for i in obter_rascunho(id_usuario).get("itens") or []
+                              if not _tipo_do_item_na_mensagem(i, final_text)]
+                    if faltou:
+                        log_observacao = "resumo_omitiu_item_do_carrinho"
+                        final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
 
         # Caso real de produção: a IA escreveu "**Total:**" e
         # "[link](link)" — Markdown padrão, que o WhatsApp não entende.
@@ -3273,6 +3383,19 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             convite_app = _texto_convite_app(bot_cfg)
             if convite_app and (bot_cfg.get("link_app") or "").strip() not in final_text:
                 final_text = final_text + "\n\n" + convite_app
+
+        # Caso real (29/09, duas clientes): mesmo com a instrução, a IA dizia "me envie
+        # o comprovante antes de prosseguirmos/para eu fechar" e o pedido nunca era
+        # criado. Carrinho completo + texto condicionando o fechamento ao comprovante
+        # → troca pelo resumo real + "Posso fechar?" (o comprovante vem depois).
+        if not pedido_registrado_ok and _RE_COMPROVANTE_ANTES_DE_FECHAR.search(_normalizar_termo(final_text or "")):
+            r_fim = obter_rascunho(id_usuario)
+            if r_fim.get("itens") and not _faltando(r_fim):
+                log_observacao = "texto_exigiu_comprovante_antes_de_fechar"
+                final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
+                chave = (bot_cfg.get("chave_pix") or "").strip()
+                if r_fim.get("forma_pagamento") == "PIX" and chave:
+                    final_text += f"\n\nChave PIX: {chave} — o comprovante você pode mandar depois que eu fechar."
 
         if pediu_humano and "equipe" not in _normalizar_termo(final_text or ""):
             log_observacao = "pediu_humano_texto_substituido"
@@ -3526,9 +3649,13 @@ def _processar_mensagem_recebida(message, from_number):
             nome_arquivo = os.path.basename(caminho_arquivo)
             url_publica = upload_comprovante_firebase(caminho_arquivo, nome_arquivo)
             if url_publica:
-                msg = f"Recebi seu comprovante! Vou registrar aqui."
-                send_message(from_number, msg)
-                registrar_comprovante(from_number, url_publica)
+                # Antes: mandava sempre "Recebi seu comprovante! Vou registrar aqui."
+                # e descartava a resposta real de registrar_comprovante (pedido fechado
+                # agora, PIX do app já confirmado, anexado ao pedido...).
+                resposta = registrar_comprovante(from_number, url_publica)
+                send_message(from_number, resposta)
+                salvar_historico_firestore(from_number, "user", "[cliente enviou imagem/comprovante]")
+                salvar_historico_firestore(from_number, "assistant", resposta)
                 os.remove(caminho_arquivo)
 
 

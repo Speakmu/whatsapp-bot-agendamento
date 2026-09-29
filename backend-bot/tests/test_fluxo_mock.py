@@ -880,3 +880,64 @@ def test_comprovante_em_pix_do_app_ja_pago_nao_muda_status(ambiente):
 def test_pode_mandar_entregar_conta_como_confirmacao():
     assert bot._cliente_confirmou("Pode mandar entregar")
     assert bot._variantes_telefone("553592678488") and "5535992678488" in bot._variantes_telefone("553592678488")
+
+
+def test_comprovante_com_carrinho_completo_fecha_o_pedido(ambiente):
+    """Caso 29/09: bot pediu comprovante antes de fechar; cliente pagou e mandou,
+    mas o pedido nunca existia. Carrinho completo + PIX + comprovante = fecha."""
+    cfg = bot.obter_config_bot()
+    tel = "553574006700"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    bot.rascunho_definir_entrega(tel, "RETIRADA", None, None, cfg)
+    bot.rascunho_definir_pagamento(tel, "pix", cfg)
+    msg = bot.registrar_comprovante(tel, "https://x/c.jpg")
+    peds = _pedidos(ambiente, tel)
+    assert len(peds) == 1 and peds[0]["status"] == "PENDENTE_VALIDACAO" and peds[0]["comprovante_url"] == "https://x/c.jpg"
+    assert "registrado" in msg
+
+
+def test_texto_exigindo_comprovante_antes_de_fechar_vira_resumo(ambiente, monkeypatch):
+    cfg = bot.obter_config_bot()
+    tel = "553574006701"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    bot.rascunho_definir_entrega(tel, "RETIRADA", None, None, cfg)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"pix": ["Chave: x. Me envie o comprovante antes de prosseguirmos."]}))
+    resp = _conversar(tel, ["oi", "pix"])[-1]
+    assert "Posso fechar" in resp and "antes de prosseguirmos" not in resp
+
+
+def test_bairro_confirmado_nao_some_no_definir_entrega_seguinte(ambiente, monkeypatch):
+    """Caso Taíssa: confirmou o perímetro e o definir_entrega seguinte apagava o bairro."""
+    cfg = bot.obter_config_bot()
+    tel = "553597260100"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    bot.rascunho_definir_entrega(tel, "ENTREGA", "Alpinia", None, cfg)
+    assert bot.obter_rascunho(tel)["bairro_pendente"] == "Alpinia"
+    bot.confirmar_bairro_na_cidade(tel, True, cfg)
+    r = bot.rascunho_definir_entrega(tel, "ENTREGA", "Alpinia", "Rua A, 10", cfg)
+    assert r["bairro"] == "Alpinia" and "bairro" not in r["falta_para_fechar"]
+    # outro cliente, depois: o pendente vale como atendido
+    tel2 = "553597260101"
+    bot.rascunho_adicionar_item(tel2, _codigo("esfirra de carne"), 1, cfg)
+    r2 = bot.rascunho_definir_entrega(tel2, "ENTREGA", "Alpinia", "Rua B, 5", bot.obter_config_bot())
+    assert r2["bairro"] == "Alpinia" and bot.obter_rascunho(tel2)["bairro_novo"] == "Alpinia"
+
+
+def test_nome_de_rua_nao_vira_bairro_pendente(ambiente):
+    cfg = bot.obter_config_bot()
+    tel = "553597260102"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    r = bot.rascunho_definir_entrega(tel, "ENTREGA", "Pinto Ribeiro", None, cfg,
+                                     texto_cliente="Qual o valor da entrega na rua Pinto Ribeiro 505?")
+    assert not bot.obter_rascunho(tel)["bairro_pendente"] and "NOME DO BAIRRO" in " ".join(r["avisos"])
+
+
+def test_cliente_diz_bairro_oficial_com_pendente_aberto(ambiente, monkeypatch):
+    cfg = bot.obter_config_bot()
+    tel = "553597260103"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    bot.rascunho_definir_entrega(tel, "ENTREGA", "Alpinia", None, cfg)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
+    _conversar(tel, ["oi", "San Genaro! rua x 505 san genaro"])
+    r = bot.obter_rascunho(tel)
+    assert r["bairro"] == "San Genaro" and not r["bairro_pendente"]
