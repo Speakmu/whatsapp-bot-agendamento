@@ -1702,20 +1702,29 @@ def _normalizar_termo(s):
     )
     return ' '.join(semAcento.lower().split())
 
+TIPOS_ALERTA_PISCANTE = ("humano",)
+
+
 def marcar_atencao(wa_id, motivo, tipo=None, dados=None):
     """Sinaliza pro painel de Atendimento (bot-chat.html) que essa conversa
     tem uma situação que o bot não conseguiu resolver sozinho — bairro
     ambíguo, item do pedido não reconhecido, etc. — e precisa de um humano
     olhando. 'tipo'/'dados' alimentam a caixa de resposta rápida do painel
-    (ex.: tipo='bairro', dados={'bairro_cliente': 'Passos'})."""
+    (ex.: tipo='bairro', dados={'bairro_cliente': 'Passos'}).
+    Só o cliente pedindo pra FALAR COM A EQUIPE (tipo 'humano') acende o alerta
+    piscando (precisa_atencao). O resto vira um aviso discreto na lista
+    (aviso_equipe), sem piscar: o alerta ficava aceso em conversa já resolvida."""
+    campos = {
+        "aviso_equipe": True,
+        "motivo_atencao": motivo,
+        "tipo_atencao": tipo,
+        "atencao_dados": dados or {},
+        "atencao_marcada_em": datetime.now(timezone.utc),
+    }
+    if tipo in TIPOS_ALERTA_PISCANTE:
+        campos["precisa_atencao"] = True
     try:
-        db.collection("historico_conversas").document(wa_id).set({
-            "precisa_atencao": True,
-            "motivo_atencao": motivo,
-            "tipo_atencao": tipo,
-            "atencao_dados": dados or {},
-            "atencao_marcada_em": datetime.now(timezone.utc)
-        }, merge=True)
+        db.collection("historico_conversas").document(wa_id).set(campos, merge=True)
     except Exception as e:
         print(f"Erro ao marcar atenção: {e}")
 
@@ -1724,7 +1733,7 @@ def limpar_atencao(wa_id):
     o bot está esperando a equipe: quando a equipe responde ou o pedido é
     registrado, a pendência acabou."""
     try:
-        db.collection("historico_conversas").document(wa_id).set({"precisa_atencao": False}, merge=True)
+        db.collection("historico_conversas").document(wa_id).set({"precisa_atencao": False, "aviso_equipe": False}, merge=True)
     except Exception as e:
         print(f"Erro ao limpar atenção: {e}")
 

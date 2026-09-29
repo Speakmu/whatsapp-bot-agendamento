@@ -117,9 +117,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const ativo = c.id === conversaAtualId ? ' active' : '';
             const classeAtencao = c.precisa_atencao ? ' precisa-atencao' : '';
             const badgeManual = c.modo_manual ? '<span class="badge-manual">Manual</span>' : '';
+            // Só "cliente quer falar com a equipe" é alerta (pisca no menu); o resto
+            // é aviso discreto, sem piscar — resolva com "✓ Resolvido" na conversa.
             const badgeAtencao = c.precisa_atencao
-                ? `<span class="badge-atencao" title="${escapeHtml(c.motivo_atencao || '')}">⚠️ Precisa de atenção</span>`
-                : '';
+                ? `<span class="badge-atencao" title="${escapeHtml(c.motivo_atencao || '')}">⚠️ Quer falar com a equipe</span>`
+                : (c.aviso_equipe
+                    ? `<span class="badge-aviso" title="${escapeHtml(c.motivo_atencao || '')}">ℹ️ Aviso do bot</span>`
+                    : '');
             const btnExcluir = souSuporte
                 ? `<button class="conv-excluir" data-excluir="${escapeHtml(c.id)}" title="Excluir conversa">🗑️</button>`
                 : '';
@@ -212,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // sendo processado) — isso re-habilitaria os botões antes da hora.
         if (acaoAtencaoEmAndamento) return;
         const box = $('atencao-box');
-        if (!dados.precisa_atencao || !dados.tipo_atencao) {
+        if (!(dados.precisa_atencao || dados.aviso_equipe) || !dados.motivo_atencao) {
             box.style.display = 'none';
             box.innerHTML = '';
             return;
@@ -250,15 +254,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 vincularItem(info.nome_produto, itemId);
             });
         } else {
-            box.style.display = 'none';
-            box.innerHTML = '';
+            box.innerHTML = `
+                <div class="atencao-titulo">${dados.precisa_atencao ? '⚠️' : 'ℹ️'} ${escapeHtml(dados.motivo_atencao || '')}</div>
+                <div class="atencao-acoes"></div>
+            `;
+        }
+        // Qualquer marca pode ser encerrada pela equipe (antes não havia como, e o
+        // alerta ficava aceso em conversa já resolvida).
+        const acoesBox = box.querySelector('.atencao-acoes');
+        if (acoesBox) {
+            const btn = document.createElement('button');
+            btn.className = 'btn';
+            btn.textContent = '✓ Resolvido';
+            btn.addEventListener('click', async () => {
+                await limparAtencao(conversaAtualId);
+                box.style.display = 'none';
+                box.innerHTML = '';
+            });
+            acoesBox.appendChild(btn);
         }
     }
 
     async function limparAtencao(id) {
-        await COL.doc(id).set({ precisa_atencao: false }, { merge: true });
+        await COL.doc(id).set({ precisa_atencao: false, aviso_equipe: false }, { merge: true });
         const conversa = conversas.find(c => c.id === id);
-        if (conversa) conversa.precisa_atencao = false;
+        if (conversa) { conversa.precisa_atencao = false; conversa.aviso_equipe = false; }
         renderConversas();
     }
 
