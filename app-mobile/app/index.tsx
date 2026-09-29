@@ -141,14 +141,40 @@ function calcularHorarioFuncionamento(horarioCfg: any): { aberto: boolean; texto
   return { aberto: dentro, texto };
 }
 
+// No navegador de computador (tela larga), o layout pensado pra celular ficava
+// esticado de ponta a ponta — texto em linhas gigantes, cards deformados. Em vez
+// de redesenhar tudo pra desktop, limita a largura a uma "moldura" de celular
+// centralizada, igual a maioria dos apps web mobile-only faz (ex: WhatsApp Web
+// mobile, apps de delivery). No app nativo (Platform.OS !== 'web') isso não
+// muda nada — os estilos ficam vazios e o conteúdo ocupa a tela normalmente.
+const ehWeb = Platform.OS === 'web';
+
 export default function App() {
   return (
     <SafeAreaProvider>
-      <AppCliente />
+      <View style={ehWeb ? webStyles.fundo : styles_none}>
+        <View style={ehWeb ? webStyles.moldura : styles_none}>
+          <AppCliente />
+        </View>
+      </View>
       <InstalarAppBanner />
     </SafeAreaProvider>
   );
 }
+const styles_none = { flex: 1 } as const;
+const webStyles = StyleSheet.create({
+  fundo: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: '#dfe3e6',
+  },
+  moldura: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 480,
+    backgroundColor: '#fff',
+  },
+});
 
 // Só existe na versão web (o app nativo já é instalado de verdade, não
 // precisa disso). Sem esse aviso, quase ninguém descobre sozinho que dá
@@ -1065,16 +1091,14 @@ const SecaoHome = React.memo(({
               </View>
             )}
 
-            {/* Saudação + Logo + Notificação */}
+            {/* Logo centralizada + saudação logo abaixo */}
             <View style={[styles.headerHome, { backgroundColor: corMarca }]}>
               {usaLogotipo && logoUrl ? (
                 <Image source={{ uri: logoUrl }} style={styles.marcaLogoHeader} contentFit="contain" />
               ) : (
                 <Text style={[styles.logoTexto, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeApp}</Text>
               )}
-              <View style={{ alignItems: 'center' }}>
-                <Text style={styles.saudacao}>Olá, {nome.split(' ')[0] || 'Cliente'}! 👋</Text>
-              </View>
+              <Text style={styles.saudacao}>Olá, {nome.split(' ')[0] || 'Cliente'}! 👋</Text>
             </View>
 
             {/* Search Bar (branca sobre verde) */}
@@ -2974,15 +2998,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   headerHome: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexDirection: 'column',
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 10,
     paddingBottom: 8,
     backgroundColor: BRAND_GREEN,
   },
-  saudacao: { fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: '500', marginTop: 3 },
+  saudacao: { fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: '500', marginTop: 4, textAlign: 'center' },
   logoTexto: {
     fontSize: 32,
     fontWeight: '700',
