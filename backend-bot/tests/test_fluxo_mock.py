@@ -972,3 +972,22 @@ def test_endereco_do_ultimo_pedido_recusado(ambiente, monkeypatch):
     _conversar(tel, ["oi", "entrega", "não, outro endereço"])
     r = bot.obter_rascunho(tel)
     assert r["bairro"] is None and not r["endereco_sugerido"]
+
+
+def test_aviso_de_saida_vai_pra_conversa_existente(ambiente, monkeypatch):
+    """Caso Raquel (30/09): pedido do app com nono dígito; o aviso abria uma
+    conversa separada no painel. Fora da janela de 24h não envia."""
+    enviados = []
+    monkeypatch.setattr(bot.requests, "post", lambda url, headers=None, json=None, timeout=None:
+                        enviados.append(json) or types.SimpleNamespace(status_code=200, json=lambda: {}, text=""))
+    bot.salvar_historico_firestore("553597687700", "user", "Olá boa tarde")
+    c = bot.app.test_client()
+    r = c.post("/notificar_pronto", json={"wa_id": "5535997687700", "nome": "Raquel", "status": "saiu_entrega"})
+    assert r.status_code == 200 and enviados[-1]["to"] == "553597687700"
+    assert not ambiente.collection("historico_conversas").document("5535997687700").get().exists
+    msgs = ambiente.collection("historico_conversas").document("553597687700").get().to_dict()["mensagens"]
+    assert "saiu para entrega" in msgs[-1]["content"]
+    # cliente sem conversa recente: não envia
+    n = len(enviados)
+    r = c.post("/notificar_pronto", json={"wa_id": "5535997000001", "nome": "X", "status": "saiu_entrega"})
+    assert r.get_json()["status"] == "fora_janela_24h" and len(enviados) == n

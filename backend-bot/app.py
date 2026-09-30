@@ -3271,6 +3271,29 @@ def salvar_token():
         return jsonify({"status": "erro"}), 500
     
 #Envia o aviso via whatsapp
+def _wa_id_da_conversa(telefone):
+    """Das formas do número (com/sem nono dígito), a que já tem conversa no
+    WhatsApp (historico_conversas); senão o próprio número."""
+    for v in sorted(_variantes_telefone(telefone), key=lambda x: x != telefone):
+        try:
+            if db.collection("historico_conversas").document(v).get(timeout=10).exists:
+                return v
+        except Exception as e:
+            print(f"Erro ao procurar conversa de {v}: {e}")
+    return telefone
+
+
+def _cliente_escreveu_nas_ultimas_24h(wa_id):
+    try:
+        doc = db.collection("historico_conversas").document(wa_id).get(timeout=10)
+        msgs = (doc.to_dict() or {}).get("mensagens", []) if doc.exists else []
+        ult = max((m.get("timestamp") for m in msgs if m.get("role") == "user" and m.get("timestamp")), default=None)
+        return bool(ult and datetime.now(timezone.utc) - ult < timedelta(hours=24))
+    except Exception as e:
+        print(f"Erro ao checar janela de 24h: {e}")
+        return True   # na dúvida, tenta enviar (a Meta recusa se estiver fora)
+
+
 @app.route('/notificar_pronto', methods=['POST'])
 def notificar_pronto():
     try:
@@ -3301,7 +3324,18 @@ def notificar_pronto():
         )
 
         import re
-        telefone_limpo = re.sub(r'\D', '', str(telefone))
+        # Caso real (30/09): pedido do app grava o número COM o nono dígito; a
+        # conversa do WhatsApp do cliente está SEM. O aviso ia pra uma conversa
+        # separada no painel e o bot não sabia que tinha avisado. Usa a conversa
+        # que já existe (qualquer das duas formas).
+        telefone_limpo = _wa_id_da_conversa(re.sub(r'\D', '', str(telefone)))
+
+        # Mensagem de texto livre só é entregue (e só é grátis) dentro da janela de
+        # 24h desde a última mensagem do cliente. Fora dela a Meta recusa — não
+        # envia nem grava como se tivesse avisado.
+        if not _cliente_escreveu_nas_ultimas_24h(telefone_limpo):
+            print(f"ℹ️ Aviso não enviado a {telefone_limpo}: fora da janela de 24h do WhatsApp")
+            return jsonify({"status": "fora_janela_24h"}), 200
 
         # Configuração da API da Meta (WhatsApp)
         url = f"https://graph.facebook.com/v21.0/{PHONE_NUMBER_ID}/messages"
