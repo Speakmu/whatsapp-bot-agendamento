@@ -1142,13 +1142,15 @@ const SecaoHome = React.memo(({
           {/* Banner principal (imagem) — primeiro bloco da vitrine. Some quando
               há promoção ativa: só um dos dois aparece por vez. */}
           {mostrarVitrine && promocoes.length === 0 && !!heroUrl && (
-            <Image
-              source={{ uri: heroUrl }}
-              style={styles.heroBanner}
-              contentFit="cover"
-              cachePolicy="memory-disk"
-              transition={150}
-            />
+            <View style={styles.heroBannerCaixa}>
+              <Image
+                source={{ uri: heroUrl }}
+                style={styles.heroBanner}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={150}
+              />
+            </View>
           )}
 
           {/* Promoções (carrossel) — quando existe pelo menos uma ativa, toma o
@@ -3216,9 +3218,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  heroBanner: {
+  heroBannerCaixa: {
     width: '100%',
     height: 190,
+    overflow: 'hidden',
+  },
+  heroBanner: {
+    width: '100%',
+    height: '100%',
   },
   faixaDestaque: {
     marginTop: 10,
