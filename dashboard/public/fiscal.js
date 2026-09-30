@@ -173,9 +173,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }, err => console.warn('estoque_insumos:', err.message));
     }
 
+    // A tela inteira e redesenhada a cada mudanca no banco (pedido concluido,
+    // baixa de estoque, cardapio...). Sem isto, o formulario de entrada de
+    // estoque de uma nota voltava pras sugestoes automaticas no meio do
+    // preenchimento, e o operador confirmava sem perceber (ex.: Tampico 450 ml
+    // ligado ao produto de 250 ml).
+    const CAMPOS_ENTRADA = ['item-tipo', 'item-produto', 'item-insumo', 'item-novo-nome', 'item-qtd'];
+    function capturarFormEntrada() {
+        if (!state.dfeExpandido) return null;
+        const valores = {};
+        CAMPOS_ENTRADA.forEach(campo => document.querySelectorAll(`[data-${campo}]`).forEach(el => {
+            valores[`${campo}:${el.getAttribute('data-' + campo)}`] = el.value;
+        }));
+        const ativo = document.activeElement;
+        const foco = CAMPOS_ENTRADA.find(c => ativo && ativo.hasAttribute && ativo.hasAttribute('data-' + c));
+        return {
+            dfeId: state.dfeExpandido, valores,
+            foco: foco ? `${foco}:${ativo.getAttribute('data-' + foco)}` : null
+        };
+    }
+    function restaurarFormEntrada(salvo) {
+        if (!salvo || salvo.dfeId !== state.dfeExpandido) return;
+        Object.entries(salvo.valores).forEach(([chave, valor]) => {
+            const [campo, idx] = chave.split(':');
+            const el = document.querySelector(`[data-${campo}="${idx}"]`);
+            if (!el) return;
+            if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === valor)) return;
+            el.value = valor;
+        });
+        // Reaplica visibilidade dos selects e o custo recalculado.
+        document.querySelectorAll('[data-item-tipo],[data-item-insumo]').forEach(el => el.onchange && el.onchange());
+        document.querySelectorAll('[data-item-qtd]').forEach(el => el.oninput && el.oninput());
+        if (salvo.foco) {
+            const [campo, idx] = salvo.foco.split(':');
+            document.querySelector(`[data-${campo}="${idx}"]`)?.focus();
+        }
+    }
+
     function render() {
         const content = $('fiscal-content');
         if (!content) return;
+        const formEntrada = capturarFormEntrada();
         if (state.tab === 'overview') content.innerHTML = renderOverview();
         if (state.tab === 'settings') content.innerHTML = renderSettings();
         if (state.tab === 'documents') content.innerHTML = renderDocuments();
@@ -188,6 +226,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.tab === 'company') content.innerHTML = renderCompany();
         if (state.tab === 'products') content.innerHTML = renderProducts();
         bindActions();
+        restaurarFormEntrada(formEntrada);
     }
 
     // state.notas agora traz as ultimas 300 (nao so as de hoje), mas os cartoes
@@ -458,12 +497,55 @@ document.addEventListener('DOMContentLoaded', () => {
         if (apelidos.includes(a)) return 1000; // ja aprendido antes = certeza
         const b = normalizarNome(alvo.nome);
         if (a === b) return 999;
-        const palavrasA = new Set(a.split(' ').filter(w => w.length > 2));
-        const palavrasB = new Set(b.split(' ').filter(w => w.length > 2));
+        // Tamanho (ml/litro/g/kg) decide: "TAMPICO 12X450ML" nunca casa com
+        // "tampico 250 ml", nem "COCA-COLA PET 600ML" com "coca cola pet 200ml".
+        // Antes so contava palavras em comum, e produtos da mesma marca em
+        // tamanhos diferentes empatavam (ou o tamanho errado ganhava).
+        const tamA = tamanhoDoNome(nomeNota), tamB = tamanhoDoNome(alvo.nome);
+        if (tamA && tamB && tamA !== tamB) return 0;
+        // Palavras com numero (tamanho, "12x", "12un") ficam fora da conta de
+        // palavras: o tamanho ja foi comparado acima.
+        const palavras = s => new Set(s.split(' ').filter(w => w.length > 2 && !/\d/.test(w)));
+        const palavrasA = palavras(a), palavrasB = palavras(b);
+        // Marca (primeira palavra) tem que bater: sem isso "PEPSI ZERO LATA"
+        // caia em "sprite zero lata" e "DEL VALLE LARANJA" em "fanta laranja".
+        // Sem sugestao e melhor que sugestao errada.
+        const [marcaA] = palavrasA, [marcaB] = palavrasB;
+        if (marcaA !== marcaB) return 0;
+        // Sabor/variante tambem tem que bater exatamente: "PEPSI ZERO" nao e
+        // "pepsi black", "FANTA UVA" nao e "fanta maracuja", "GUARANA DIET" nao
+        // e o guarana normal.
+        if (variantesDoNome(a) !== variantesDoNome(b)) return 0;
         let comuns = 0;
         palavrasA.forEach(w => { if (palavrasB.has(w)) comuns++; });
         if (comuns === 0 || !palavrasA.size || !palavrasB.size) return 0;
-        return (comuns / Math.max(palavrasA.size, palavrasB.size)) * 100;
+        // Divide pela uniao: palavra que so o cadastro tem (ex.: "zero") pesa
+        // contra, pra "coca cola 600 ml" ganhar de "coca cola zero 600ml".
+        const uniao = new Set([...palavrasA, ...palavrasB]).size;
+        const pontos = (comuns / uniao) * 100;
+        if (tamA && tamA === tamB) return pontos + 10;
+        // So um dos lados tem tamanho: nao da pra confirmar que e o mesmo item.
+        return (tamA || tamB) ? pontos * 0.6 : pontos;
+    }
+
+    // Sabores/variantes que distinguem produtos da mesma marca e tamanho.
+    // "sa"/"acucar" (Coca-Cola SA, Sprite S/ACUCAR) contam como "zero".
+    const VARIANTES = { zero: 'zero', sa: 'zero', acucar: 'zero', diet: 'diet', light: 'light', black: 'black',
+        laranja: 'laranja', uva: 'uva', maracuja: 'maracuja', limao: 'limao', morango: 'morango',
+        pessego: 'pessego', manga: 'manga', abacaxi: 'abacaxi', caju: 'caju', goiaba: 'goiaba', maca: 'maca', cafe: 'cafe' };
+    function variantesDoNome(nomeNormalizado) {
+        return [...new Set(nomeNormalizado.split(' ').map(w => VARIANTES[w]).filter(Boolean))].sort().join(',');
+    }
+
+    // Tamanho do produto no nome, convertido pra ml/g (ex.: "12x450ml" -> 450,
+    // "2litros" -> 2000, "1,5L" -> 1500). null se o nome nao tiver tamanho.
+    // Le do nome original (nao normalizado) pra nao perder a virgula decimal.
+    function tamanhoDoNome(nome) {
+        const s = String(nome || '').toLowerCase().replace(',', '.');
+        const m = s.match(/(\d+(?:\.\d+)?)\s*(ml|litros?|lts?|l|kg|g)(?![a-z])/);
+        if (!m) return null;
+        const n = Number(m[1]);
+        return Math.round(/^(litro|lt|l|kg)/.test(m[2]) ? n * 1000 : n);
     }
 
     // Sugere o item mais parecido com o nome vindo da nota (exato > apelido ja
@@ -1111,8 +1193,32 @@ document.addEventListener('DOMContentLoaded', () => {
         const operador = (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'operador';
         const now = firebase.firestore.FieldValue.serverTimestamp();
 
+        // Dois itens diferentes da nota ligados ao mesmo destino quase sempre e
+        // engano (ex.: Tampico 450 ml e 250 ml os dois no produto de 250 ml).
+        const destinos = {};
+        d.itens.forEach((it, idx) => {
+            const tipo = document.querySelector(`[data-item-tipo="${idx}"]`)?.value || 'produto';
+            const alvo = tipo === 'produto'
+                ? document.querySelector(`[data-item-produto="${idx}"]`)?.value
+                : document.querySelector(`[data-item-insumo="${idx}"]`)?.value;
+            if (!alvo) return;
+            (destinos[tipo + ':' + alvo] = destinos[tipo + ':' + alvo] || []).push(it.xProd || `item ${idx + 1}`);
+        });
+        const repetidos = Object.values(destinos).filter(nomes => nomes.length > 1);
+        if (repetidos.length && !confirm(
+            'Atencao: estes itens da nota estao ligados ao MESMO produto/insumo:\n\n'
+            + repetidos.map(n => '- ' + n.join('\n- ')).join('\n\n')
+            + '\n\nAs quantidades vao ser somadas num item so. Confirmar mesmo assim?'
+        )) return;
+
         try {
             const batch = db.batch();
+            // Saldo corrente por insumo dentro desta nota, e insumo ja criado por
+            // produto nesta nota: sem isso, dois itens no mesmo destino criavam
+            // dois insumos (produto sem vinculo) ou o segundo sobrescrevia o
+            // saldo do primeiro (produto/insumo existente).
+            const saldoNoLote = {};
+            const insumoCriadoPorProduto = {};
             d.itens.forEach((it, idx) => {
                 const qtd = parseFloat(document.querySelector(`[data-item-qtd="${idx}"]`)?.value);
                 if (!(qtd > 0)) throw new Error(`Informe uma quantidade valida para "${it.xProd || 'item ' + (idx + 1)}".`);
@@ -1126,7 +1232,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     const produto = state.produtos.find(p => p.id === produtoId);
                     if (!produto) throw new Error('Produto selecionado nao encontrado.');
 
-                    if (produto.insumo_vinculado_id && state.insumos.find(i => i.id === produto.insumo_vinculado_id)) {
+                    if (insumoCriadoPorProduto[produtoId]) {
+                        // Outro item desta mesma nota ja criou o insumo desse produto.
+                        insumoId = insumoCriadoPorProduto[produtoId]; insumoNome = produto.nome; insumoAtual = 0;
+                    } else if (produto.insumo_vinculado_id && state.insumos.find(i => i.id === produto.insumo_vinculado_id)) {
                         // Ja existe a ponte produto <-> insumo/ficha tecnica, so reusa.
                         const insumo = state.insumos.find(i => i.id === produto.insumo_vinculado_id);
                         insumoId = insumo.id; insumoNome = insumo.nome; insumoAtual = Number(insumo.quantidade_atual) || 0;
@@ -1146,6 +1255,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
                         batch.update(db.collection('cardapio').doc(produtoId), { insumo_vinculado_id: novoInsumoRef.id });
                         insumoId = novoInsumoRef.id; insumoNome = produto.nome; insumoAtual = 0;
+                        insumoCriadoPorProduto[produtoId] = novoInsumoRef.id;
                         motivoExtra = ' (produto novo no estoque)';
                     }
 
@@ -1183,7 +1293,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
-                const novoSaldo = insumoAtual + qtd;
+                const novoSaldo = (insumoId in saldoNoLote ? saldoNoLote[insumoId] : insumoAtual) + qtd;
+                saldoNoLote[insumoId] = novoSaldo;
                 batch.set(db.collection('estoque_insumos').doc(insumoId), { quantidade_atual: novoSaldo, atualizado_em: now }, { merge: true });
                 batch.set(db.collection('estoque_movimentos').doc(), {
                     insumo_id: insumoId, insumo_nome: insumoNome, tipo: 'ENTRADA',
