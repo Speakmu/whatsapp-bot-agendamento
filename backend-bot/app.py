@@ -904,7 +904,6 @@ def rascunho_fechar_pedido(wa_id, bot_cfg, nome_identificado=None, confirmacao_e
         "id": i["id"], "nome": i["nome"], "nome_exibicao": i.get("nome_exibicao"),
         "quantidade": i["quantidade"], "preco_unitario": i["preco_unitario"], "preco": i["preco"],
     } for i in r["itens"]]
-    total_pontos = sum(int(i.get("pontos_fidelidade", 0) or 0) * int(i.get("quantidade") or 0) for i in r["itens"])
 
     try:
         user_query = db.collection('usuarios_app').where('telefone', '==', str(wa_id)).limit(1).get()
