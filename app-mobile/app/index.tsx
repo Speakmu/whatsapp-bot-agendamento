@@ -81,6 +81,13 @@ const dbModular = getFirestore(firebase.app() as any); // <--- ADICIONE ISTO PAR
 const BRAND_GREEN = '#174e2a';
 const BRAND_WHITE = '#ffffff';
 const BRAND_NAME = 'Lileamar Salgados';
+// CPF reservado só pros revisores da App Store/Play Store testarem o fluxo de
+// pagamento sem custo financeiro — o Mercado Pago está em produção de
+// verdade, sem sandbox. Pedidos com esse CPF pulam o gateway e são
+// aprovados na hora; nenhum cliente real teria justamente essa sequência.
+// Nunca dispara nota fiscal (forma_pagamento marcada como dinheiro, que o
+// painel já sabe pular da fila de emissão automática).
+const CPF_REVISOR_LOJAS = '11111111111';
 const BRAND_LOGO = require('../assets/images/lileamar-logo.jpeg');
 
 // Identifica o payment_method_id (visa/master/...) pelo prefixo do número —
@@ -1840,6 +1847,47 @@ function AppCliente() {
 
     return () => unsubscribe();
   }, [usuarioId]);
+
+  // Bypass de pagamento só pro CPF reservado de revisão de loja (ver
+  // CPF_REVISOR_LOJAS) — pula o Mercado Pago inteiro e aprova na hora.
+  // forma_pagamento contém "Dinheiro" de propósito: é o sinal que o painel
+  // já usa pra NUNCA enfileirar emissão automática de NFC-e (ver app.js,
+  // "ehDinheiro"), então esse pedido de teste nunca gera nota fiscal real.
+  const finalizarPedidoTesteRevisor = async () => {
+    const acumulador: Record<string, any> = {};
+    carrinho.forEach((item: any) => {
+      const nomeItem = item.nome_exibicao || item.nome;
+      if (!acumulador[nomeItem]) acumulador[nomeItem] = { nome: nomeItem, qtd: 0, preco: item.preco };
+      acumulador[nomeItem].qtd += 1;
+    });
+    const itensFormatados = Object.values(acumulador).map((item: any) => ({
+      nome: item.qtd > 1 ? `${item.qtd}x ${item.nome}` : item.nome,
+      preco: item.preco,
+      quantidade: item.qtd
+    }));
+    await addDoc(collection(db, "pedidos"), {
+      origem: "APP",
+      usuario_id: usuarioId,
+      nome_cliente: nome || 'Revisor loja de apps',
+      telefone_cliente: telefone,
+      tipo_entrega: tipoEntrega === 'retirada' ? 'RETIRADA' : 'ENTREGA',
+      endereco: tipoEntrega === 'retirada' ? 'Retirada no balcão' : endereco,
+      bairro: tipoEntrega === 'retirada' ? null : (bairro || null),
+      taxa_entrega: tipoEntrega === 'entrega' ? taxaEntrega : 0,
+      itens: itensFormatados,
+      valor_total: calcularTotal(),
+      forma_pagamento: 'Revisão de loja (Dinheiro)',
+      status: 'PENDENTE_PREPARO',
+      hora_pedido: serverTimestamp(),
+      data_formatada: new Date().toLocaleString('pt-BR')
+    });
+    setStatusPagamento('sucesso');
+    setModalVisivel(true);
+    setCarrinho([]);
+    setUsarPontos(false);
+    setAbaAtiva('pedidos');
+  };
+
   const processarPagamentoPix = async () => {
     // 0. Endereço/bairro obrigatórios apenas em entrega
     if (tipoEntrega === 'entrega' && (!endereco || endereco.trim() === '')) {
@@ -1861,6 +1909,12 @@ function AppCliente() {
     }
 
     if (carrinho.length === 0) return;
+
+    if (cpfLimpo === CPF_REVISOR_LOJAS) {
+      setCarregandoLogin(true);
+      try { await finalizarPedidoTesteRevisor(); } finally { setCarregandoLogin(false); }
+      return;
+    }
 
     const disponivelOk = await checarDisponibilidadeCarrinho(carrinho, setCarrinho);
     if (!disponivelOk) return;
@@ -1973,6 +2027,12 @@ function AppCliente() {
   const processarPagamentoAPI = async (dadosCartaoEnviados: any) => {
     // CPF: usa o do cartão se preenchido, senão puxa o do perfil (igual ao PIX)
     const cpfFinal = (dadosCartaoEnviados?.cpf || cpf || '').replace(/\D/g, '');
+
+    if (cpfFinal === CPF_REVISOR_LOJAS) {
+      setCarregandoLogin(true);
+      try { await finalizarPedidoTesteRevisor(); } finally { setCarregandoLogin(false); }
+      return;
+    }
 
     // 1. Verificação inicial "blindada" contra campos vazios ou nulos
     if (!dadosCartaoEnviados?.numero || !dadosCartaoEnviados?.cvv || !dadosCartaoEnviados?.validade) {
