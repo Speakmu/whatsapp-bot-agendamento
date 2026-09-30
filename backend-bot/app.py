@@ -925,7 +925,8 @@ def rascunho_fechar_pedido(wa_id, bot_cfg, nome_identificado=None, confirmacao_e
             "nome_cliente": r.get("nome_cliente") or "Cliente",
             "observacao": r.get("observacao") or "Nenhuma",
             "pagamento_id": int(datetime.now().timestamp()),
-            "pontos_gerados": total_pontos,
+            # Fidelidade é só pelo app — pedido do bot não pontua (decisão do
+            # negócio), por isso nada de pontos_a_creditar aqui.
             "status": "PENDENTE_PREPARO",
             "telefone_cliente": str(wa_id),
             "usuario_id": usuario_id,
@@ -938,8 +939,6 @@ def rascunho_fechar_pedido(wa_id, bot_cfg, nome_identificado=None, confirmacao_e
                                          and r["tipo_entrega"] == "ENTREGA"),
         }
         batch.set(pedido_ref, dados_pedido)
-        if user_doc and total_pontos > 0:
-            batch.update(user_doc.reference, {"pontos": firestore.Increment(total_pontos)})
         batch.commit()
 
         # Rascunho vira "fechado": guarda o id pra idempotência e limpa o carrinho.
@@ -1328,7 +1327,7 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
             "itens": lista_itens_tsx,
             "nome_cliente": nome_cliente,
             "pagamento_id": int(datetime.now().timestamp()),
-            "pontos_gerados": total_pontos,
+            # Fidelidade é só pelo app — pedido do bot não pontua.
             "status": "PENDENTE_PREPARO",
             "telefone_cliente": str(wa_id),
             "usuario_id": usuario_id,
@@ -1337,10 +1336,6 @@ def registrar_pedido(wa_id: str, nome_cliente: str, itens, valor_total: float, o
             "taxa_entrega": taxa_entrega
         }
         batch.set(pedido_ref, dados_pedido)
-
-        if user_doc and total_pontos > 0:
-            batch.update(user_doc.reference, {"pontos": firestore.Increment(total_pontos)})
-
         batch.commit()
         return json.dumps({
             "status": "ok",

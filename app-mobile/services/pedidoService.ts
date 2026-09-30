@@ -112,9 +112,13 @@ export const finalizarPedido = async ({
         desconto_pontos: Number(Number(descontoPontos).toFixed(2)),
         valor_desconto: Number((Number(descontoCupom) + Number(descontoPontos)).toFixed(2)),
         cupom_codigo: cupomCodigo,
-        // Pago na entrega: os pontos entram quando a equipe conclui o pedido (o painel
-        // credita e marca pontos_creditados), igual ao PIX que credita na confirmação.
+        // Pago na entrega: crédito E débito de pontos entram juntos quando a equipe
+        // conclui o pedido (pedido-concluido.js), igual ao PIX que credita na
+        // confirmação. Debitar o resgate aqui, na criação, deixava o cliente sem
+        // os pontos pra sempre se o pedido fosse cancelado depois (cliente não
+        // estava em casa, endereço errado etc.) — nada devolvia esse saldo.
         pontos_a_creditar: Number(pontosACreditar) || 0,
+        pontos_resgatados: Number(pontosResgatados) || 0,
         // CPF do cliente (necessário pra emitir NFC-e não presencial); dinheiro
         // não emite nota automática, mas fica disponível pra emissão manual.
         cpf_cliente: String(cpf || '').replace(/\D/g, '') || null,
@@ -127,13 +131,6 @@ export const finalizarPedido = async ({
 
     try {
         await db.collection('pedidos').add(pedido);
-        // Resgate de fidelidade: debita os pontos utilizados
-        if (pontosResgatados > 0 && usuarioId) {
-            try {
-                await db.collection('usuarios_app').doc(usuarioId)
-                    .update({ pontos: firebase.firestore.FieldValue.increment(-pontosResgatados) });
-            } catch (e) { console.warn('Falha ao debitar pontos (entrega):', e); }
-        }
         setCarrinho([]);
         setAbaAtiva('pedidos');
         alert('Pedido enviado com sucesso!');

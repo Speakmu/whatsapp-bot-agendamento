@@ -2,10 +2,13 @@
 // (Pedidos, Cozinha/KDS, Entregas). Chame depois de gravar status CONCLUIDO:
 //   window.GestorChefPedidoConcluido(db, pedidoId)
 //
-// 1. Pontos de fidelidade do pedido do APP pago na entrega/dinheiro: o app grava
-//    pontos_a_creditar (só dos produtos marcados com pontos); aqui credita uma
-//    única vez (pontos_creditados evita duplicar). PIX é creditado pelo webhook
-//    e cartão já no ato.
+// 1. Pontos de fidelidade: SÓ pelo app (decisão do negócio — bot do WhatsApp
+//    não pontua). É AQUI, na conclusão manual, que fica o crédito (e o débito
+//    de um eventual resgate) do pedido do APP pago na entrega/dinheiro — PIX
+//    e cartão do app já creditam pelo webhook/no ato da aprovação, não passam
+//    por aqui (senão duplicava). Debitar/creditar só na conclusão (em vez de
+//    na criação do pedido) evita ficar com saldo errado se o pedido for
+//    cancelado depois. pontos_creditados evita fazer isso duas vezes.
 // 2. Bairro novo: o bot deixa em configuracoes/bot.bairros_pendentes_bot o bairro
 //    que o cliente confirmou ser da cidade. Só quando um pedido pra ele é
 //    concluído (entregue de verdade) ele entra na lista oficial de entrega.
@@ -15,13 +18,21 @@
     }
 
     async function creditarPontos(db, ref, p) {
-        const pontos = Number(p.pontos_a_creditar) || 0;
+        const origem = String(p.origem || '').toUpperCase();
         const pagoNaEntrega = /entrega|dinheiro/i.test(String(p.forma_pagamento || ''));
-        if (String(p.origem || '').toUpperCase() !== 'APP' || !pagoNaEntrega) return;
-        if (p.pontos_creditados || pontos <= 0 || !p.usuario_id) return;
+        const elegivel = origem === 'APP' && pagoNaEntrega;
+        if (!elegivel || p.pontos_creditados || !p.usuario_id) return;
+
+        const ganho = Number(p.pontos_a_creditar) || 0;
+        const resgatado = Number(p.pontos_resgatados) || 0;
+        if (ganho <= 0 && resgatado <= 0) return;
+
+        const saldo = ganho - resgatado;
         const batch = db.batch();
-        batch.update(db.collection('usuarios_app').doc(p.usuario_id), { pontos: firebase.firestore.FieldValue.increment(pontos) });
-        batch.update(ref, { pontos_creditados: true, pontos_gerados: pontos });
+        if (saldo !== 0) {
+            batch.update(db.collection('usuarios_app').doc(p.usuario_id), { pontos: firebase.firestore.FieldValue.increment(saldo) });
+        }
+        batch.update(ref, { pontos_creditados: true, pontos_gerados: ganho });
         await batch.commit();
     }
 
