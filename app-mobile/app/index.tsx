@@ -24,9 +24,10 @@ import {
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert, Dimensions, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform,
+  Alert, FlatList, Keyboard, KeyboardAvoidingView, Modal, Platform,
   ScrollView,
   StatusBar, StyleSheet, Text, TextInput, TouchableOpacity,
+  useWindowDimensions,
   View
 } from 'react-native';
 import {
@@ -162,6 +163,10 @@ export default function App() {
   );
 }
 const styles_none = { flex: 1 } as const;
+// Mesmo número usado pra medir a largura real de imagens que precisam de
+// tamanho exato em pixel (banner, carrossel) — tem que bater com o maxWidth
+// da moldura abaixo, senão a imagem mede a janela inteira em vez da moldura.
+const LARGURA_MAX_WEB = 480;
 const webStyles = StyleSheet.create({
   fundo: {
     flex: 1,
@@ -171,7 +176,7 @@ const webStyles = StyleSheet.create({
   moldura: {
     flex: 1,
     width: '100%',
-    maxWidth: 480,
+    maxWidth: LARGURA_MAX_WEB,
     backgroundColor: '#fff',
   },
 });
@@ -951,12 +956,13 @@ const IMG_TAMANHO_GRADE: Record<string, number> = { pequena: 90, media: 130, gra
 // Largura do card por quantidade de itens por linha (grade)
 const COL_LARGURA: Record<number, string> = { 2: '48%', 3: '31%', 4: '23%' };
 
-// Card do carrossel de promoções: quase full-bleed (só uma tira do próximo
-// card "espiando" na borda, como banner de app de delivery) — recomendação
-// de imagem no dashboard é 16:10, então a altura segue essa proporção pra
-// cortar o mínimo possível da arte enviada pelo lojista.
-const LARGURA_CARD_PROMOCAO = Dimensions.get('window').width - 45;
-const ALTURA_CARD_PROMOCAO = Math.round(LARGURA_CARD_PROMOCAO / 1.6);
+// Proporção do card do carrossel de promoções (16:10, a recomendação de
+// imagem no dashboard) — a largura/altura em pixel são calculadas dentro do
+// componente com useWindowDimensions (ver larguraBanner), não aqui: um
+// const de módulo com Dimensions.get('window') fica congelado no valor de
+// quando o JS carregou — no computador (moldura central de 480px), isso
+// travava no tamanho da janela inteira do navegador, não da moldura.
+const PROPORCAO_CARD_PROMOCAO = 1.6;
 
 // --- CARTÃO DE PRODUTO (usado na lista de resultados e nas vitrines de destaque) ---
 // React.memo + onAbrir/onAdicionar recebendo o item (em vez de closures novas por
@@ -1031,11 +1037,15 @@ const SecaoHome = React.memo(({
 }: HomeProps) => {
   const [produtoDetalhe, setProdutoDetalhe] = useState<any>(null);
   const [qtdDetalhe, setQtdDetalhe] = useState(1);
-  // Largura medida de verdade do container do banner, em pixels — no export
-  // estático pra web, "width: '100%'" na Image as vezes nao resolvia contra
-  // o pai (renderizava no tamanho original da imagem, sem escalar). Medindo
-  // com onLayout e passando um numero fixo elimina essa ambiguidade.
-  const [larguraBanner, setLarguraBanner] = useState(0);
+  // Largura do banner em pixels — width:'100%'/onLayout não bastavam: no
+  // computador (tela larga com a moldura central de 480px), a medição vinha
+  // com a largura da JANELA inteira, não da moldura, então a imagem renderizava
+  // gigante. useWindowDimensions + o mesmo teto de 480px da moldura garante
+  // que sempre bate com o espaço realmente visível, em qualquer tela.
+  const { width: larguraJanela } = useWindowDimensions();
+  const larguraBanner = Math.min(larguraJanela, LARGURA_MAX_WEB);
+  const larguraCardPromocao = larguraBanner - 45;
+  const alturaCardPromocao = Math.round(larguraCardPromocao / PROPORCAO_CARD_PROMOCAO);
 
   const abrirDetalhe = useCallback((item: any) => {
     setQtdDetalhe(1);
@@ -1147,19 +1157,14 @@ const SecaoHome = React.memo(({
           {/* Banner principal (imagem) — primeiro bloco da vitrine. Some quando
               há promoção ativa: só um dos dois aparece por vez. */}
           {mostrarVitrine && promocoes.length === 0 && !!heroUrl && (
-            <View
-              style={styles.heroBannerCaixa}
-              onLayout={(e) => setLarguraBanner(Math.round(e.nativeEvent.layout.width))}
-            >
-              {larguraBanner > 0 && (
-                <Image
-                  source={{ uri: heroUrl }}
-                  style={{ width: larguraBanner, height: 190 }}
-                  contentFit="cover"
-                  cachePolicy="memory-disk"
-                  transition={150}
-                />
-              )}
+            <View style={styles.heroBannerCaixa}>
+              <Image
+                source={{ uri: heroUrl }}
+                style={{ width: larguraBanner, height: 190 }}
+                contentFit="cover"
+                cachePolicy="memory-disk"
+                transition={150}
+              />
             </View>
           )}
 
@@ -1173,13 +1178,13 @@ const SecaoHome = React.memo(({
               horizontal
               showsHorizontalScrollIndicator={false}
               decelerationRate="fast"
-              snapToInterval={LARGURA_CARD_PROMOCAO + 12}
+              snapToInterval={larguraCardPromocao + 12}
               contentContainerStyle={{ paddingHorizontal: 15, paddingTop: 10, gap: 12 }}
             >
               {promocoes.map((promo: any) => (
-                <View key={promo.id} style={styles.cardPromocao}>
+                <View key={promo.id} style={[styles.cardPromocao, { width: larguraCardPromocao }]}>
                   {!!promo.imagemUrl && (
-                    <Image source={{ uri: promo.imagemUrl }} style={styles.fotoPromocao} contentFit="cover" />
+                    <Image source={{ uri: promo.imagemUrl }} style={[styles.fotoPromocao, { height: alturaCardPromocao }]} contentFit="cover" />
                   )}
                   <View style={styles.infoPromocao}>
                     <Text style={styles.tituloPromocao} numberOfLines={1}>{promo.titulo}</Text>
@@ -3250,7 +3255,6 @@ const styles = StyleSheet.create({
   },
   faixaDestaqueTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
   cardPromocao: {
-    width: LARGURA_CARD_PROMOCAO,
     borderRadius: 14,
     backgroundColor: '#fff',
     overflow: 'hidden',
@@ -3260,7 +3264,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 6,
   },
-  fotoPromocao: { width: '100%', height: ALTURA_CARD_PROMOCAO, backgroundColor: '#f0f0f0' },
+  fotoPromocao: { width: '100%', backgroundColor: '#f0f0f0' },
   infoPromocao: { padding: 12 },
   tituloPromocao: { fontSize: 15, fontWeight: '700', color: '#1a1a1a' },
   descricaoPromocao: { fontSize: 13, color: '#7f8c8d', marginTop: 3 },
