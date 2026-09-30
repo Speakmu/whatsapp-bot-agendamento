@@ -1031,6 +1031,11 @@ const SecaoHome = React.memo(({
 }: HomeProps) => {
   const [produtoDetalhe, setProdutoDetalhe] = useState<any>(null);
   const [qtdDetalhe, setQtdDetalhe] = useState(1);
+  // Largura medida de verdade do container do banner, em pixels — no export
+  // estático pra web, "width: '100%'" na Image as vezes nao resolvia contra
+  // o pai (renderizava no tamanho original da imagem, sem escalar). Medindo
+  // com onLayout e passando um numero fixo elimina essa ambiguidade.
+  const [larguraBanner, setLarguraBanner] = useState(0);
 
   const abrirDetalhe = useCallback((item: any) => {
     setQtdDetalhe(1);
@@ -1142,14 +1147,19 @@ const SecaoHome = React.memo(({
           {/* Banner principal (imagem) — primeiro bloco da vitrine. Some quando
               há promoção ativa: só um dos dois aparece por vez. */}
           {mostrarVitrine && promocoes.length === 0 && !!heroUrl && (
-            <View style={styles.heroBannerCaixa}>
-              <Image
-                source={{ uri: heroUrl }}
-                style={styles.heroBanner}
-                contentFit="cover"
-                cachePolicy="memory-disk"
-                transition={150}
-              />
+            <View
+              style={styles.heroBannerCaixa}
+              onLayout={(e) => setLarguraBanner(Math.round(e.nativeEvent.layout.width))}
+            >
+              {larguraBanner > 0 && (
+                <Image
+                  source={{ uri: heroUrl }}
+                  style={{ width: larguraBanner, height: 190 }}
+                  contentFit="cover"
+                  cachePolicy="memory-disk"
+                  transition={150}
+                />
+              )}
             </View>
           )}
 
