@@ -38,10 +38,94 @@ document.addEventListener('DOMContentLoaded', () => {
         "PRONTO_PARA_ENTREGA":{ status: "CONCLUIDO",          label: "🛵 Despachar",       cls: "btn-despachar" }
     };
 
-    const somNotificacao = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    const URL_SOM_ALERTA = 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3';
     let somAtivo = true;
-    let pedidosCache = [];        // últimos docs recebidos (para re-render do timer)
-    let idsConhecidos = new Set(); // controle de "novo pedido" para tocar som
+    let pedidosCache = [];             // últimos docs recebidos (para re-render do timer)
+    let idsConhecidosPedidos = new Set(); // ids já vistos (listener + poll de segurança)
+
+    // Navegadores bloqueiam áudio em página que ainda não recebeu nenhum
+    // clique/tecla (ex.: tela da cozinha deixada parada). O play() falha em
+    // silêncio e o pedido novo chega sem som. Isto avisa na tela e some ao
+    // primeiro clique.
+    function avisoSomBloqueado(mostrar) {
+        let el = document.getElementById('aviso-som-bloqueado');
+        if (!mostrar) { if (el) el.remove(); return; }
+        if (el) return;
+        el = document.createElement('div');
+        el.id = 'aviso-som-bloqueado';
+        el.textContent = '🔇 Som de pedido novo bloqueado pelo navegador — clique em qualquer lugar da tela para ativar';
+        el.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:99999;background:#c0392b;color:#fff;padding:10px 16px;border-radius:8px;font:600 14px sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.4);cursor:pointer;max-width:92vw;text-align:center;';
+        document.body.appendChild(el);
+    }
+    ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => avisoSomBloqueado(false), true));
+
+    // Bipe gerado pelo próprio navegador, usado quando o arquivo de som não
+    // carrega (rede caída etc.) — sem isso a tela ficava muda em silêncio.
+    function bipeReserva() {
+        try {
+            const ctx = window.__ctxAlertaSom || (window.__ctxAlertaSom = new (window.AudioContext || window.webkitAudioContext)());
+            if (ctx.state === 'suspended') ctx.resume();
+            if (ctx.state !== 'running') { avisoSomBloqueado(true); return; }
+            [0, 0.35].forEach(atraso => {
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'square'; osc.frequency.value = 880;
+                gain.gain.value = 0.4;
+                osc.connect(gain); gain.connect(ctx.destination);
+                osc.start(ctx.currentTime + atraso); osc.stop(ctx.currentTime + atraso + 0.25);
+            });
+        } catch (e) { console.warn('Bipe de reserva falhou (KDS):', e.message); }
+    }
+    // Um Audio NOVO a cada toque: reaproveitar um único elemento fazia o som
+    // "morrer" pra sempre depois de qualquer falha de rede/carregamento (o
+    // elemento fica em estado de erro e todo play() seguinte falha em silêncio).
+    function tocarAlertaSom() {
+        try {
+            const audio = new Audio(URL_SOM_ALERTA);
+            audio.addEventListener('error', bipeReserva, { once: true });
+            const p = audio.play();
+            if (p && p.catch) p.catch(err => {
+                if (err && err.name === 'NotAllowedError') avisoSomBloqueado(true);
+                else { console.warn('Alerta sonoro falhou (KDS), usando bipe:', err && err.message); bipeReserva(); }
+            });
+        } catch (e) { bipeReserva(); }
+    }
+
+    // Pedido chegava com a tela minimizada/em segundo plano (ex.: usando o
+    // app do iFood) e o navegador bloqueava o play() (NotAllowedError) por
+    // ainda não ter recebido nenhum clique — o som ficava mudo até o próximo
+    // pedido novo. Agora repete a tentativa sozinho a cada poucos segundos até
+    // alguém interagir com a tela (o que libera o autoplay) — só então para.
+    let alertaSomInterval = null;
+    function pararAlertaSom() {
+        if (alertaSomInterval) { clearInterval(alertaSomInterval); alertaSomInterval = null; }
+    }
+    function iniciarAlertaSom() {
+        if (!somAtivo) return;
+        tocarAlertaSom();
+        pararAlertaSom();
+        alertaSomInterval = setInterval(() => {
+            if (document.visibilityState === 'visible' && document.hasFocus()) {
+                pararAlertaSom();
+                return;
+            }
+            tocarAlertaSom();
+        }, 4000);
+    }
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && document.hasFocus()) pararAlertaSom();
+    });
+    window.addEventListener('focus', pararAlertaSom);
+
+    // O alarme repete até alguém ver a tela, MAS também para sozinho quando
+    // o(s) pedido(s) que o dispararam deixam de estar "novos" (avançaram de
+    // status) — senão continuava tocando por um pedido já resolvido.
+    const pedidosAlarmando = new Map();
+    function conferirAlarme(docs) {
+        const atual = new Map(docs.map(d => [d.id, (d.data() || {}).status]));
+        pedidosAlarmando.forEach((status, id) => { if (atual.get(id) !== status) pedidosAlarmando.delete(id); });
+        if (!pedidosAlarmando.size) pararAlertaSom();
+    }
 
     // ---- Relógio do cabeçalho ----
     const relogio = document.getElementById('relogio');
@@ -55,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
         somAtivo = !somAtivo;
         btnSom.textContent = somAtivo ? "🔔 Som: ON" : "🔕 Som: OFF";
         // tenta destravar o áudio na primeira interação
-        if (somAtivo) somNotificacao.play().then(() => somNotificacao.pause()).catch(() => {});
+        if (somAtivo) { const a = new Audio(URL_SOM_ALERTA); a.play().then(() => a.pause()).catch(() => {}); }
     });
 
     // ---- Autenticação ----
@@ -68,27 +152,60 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function iniciarListener() {
-        db.collection(COLECAO_PEDIDOS)
-            .where("status", "in", STATUS_MONITORADOS)
-            .onSnapshot(snapshot => {
-                // Detecta novos pedidos para tocar som
-                snapshot.docChanges().forEach(change => {
-                    if (change.type === "added" && !idsConhecidos.has(change.doc.id)) {
-                        if (somAtivo && !snapshot.metadata.fromCache) {
-                            somNotificacao.currentTime = 0;
-                            somNotificacao.play().catch(() => {});
+        // Toca som só a partir do segundo snapshot em diante — o primeiro
+        // sempre traz os pedidos já existentes (mesmo sem cache local), e
+        // cada um chega como docChange "added" só por ser a primeira vez
+        // que o listener os vê.
+        let primeiroSnapshot = true;
+
+        // Rede de segurança: se o listener em tempo real travar (aba
+        // congelada pelo navegador, conexão caída...), uma consulta simples
+        // a cada 30s acha pedido que a tela ainda não conhecia e toca o alerta.
+        let pollIniciado = false;
+        setInterval(async () => {
+            try {
+                const snap = await db.collection(COLECAO_PEDIDOS).where("status", "in", STATUS_MONITORADOS).get();
+                const novos = snap.docs.filter(d => !idsConhecidosPedidos.has(d.id));
+                snap.docs.forEach(d => idsConhecidosPedidos.add(d.id));
+                if (pollIniciado && novos.length) {
+                    console.log('Alerta pela verificação de segurança (KDS):', novos.length);
+                    novos.forEach(d => pedidosAlarmando.set(d.id, (d.data() || {}).status));
+                    iniciarAlertaSom();
+                }
+                conferirAlarme(snap.docs);
+                pollIniciado = true;
+            } catch (e) { console.warn('Verificação de pedidos novos (KDS):', e.message); }
+        }, 30000);
+
+        function ouvirPedidos() {
+            db.collection(COLECAO_PEDIDOS)
+                .where("status", "in", STATUS_MONITORADOS)
+                .onSnapshot(snapshot => {
+                    snapshot.forEach(doc => idsConhecidosPedidos.add(doc.id));
+
+                    if (!primeiroSnapshot) {
+                        const novosPedidos = snapshot.docChanges().filter(change => change.type === "added");
+                        if (novosPedidos.length) {
+                            novosPedidos.forEach(c => pedidosAlarmando.set(c.doc.id, (c.doc.data() || {}).status));
+                            iniciarAlertaSom();
                         }
                     }
-                });
+                    conferirAlarme(snapshot.docs);
+                    primeiroSnapshot = false;
 
-                pedidosCache = [];
-                idsConhecidos = new Set();
-                snapshot.forEach(doc => {
-                    idsConhecidos.add(doc.id);
-                    pedidosCache.push({ id: doc.id, ...doc.data() });
+                    pedidosCache = [];
+                    snapshot.forEach(doc => {
+                        pedidosCache.push({ id: doc.id, ...doc.data() });
+                    });
+                    render();
+                }, err => {
+                    console.error("Erro no Firestore (KDS):", err);
+                    // Antes o listener morria aqui e a tela ficava travada pra sempre.
+                    primeiroSnapshot = true; // a nova escuta traz tudo como "added" de novo
+                    setTimeout(ouvirPedidos, 5000);
                 });
-                render();
-            }, err => console.error("Erro no Firestore (KDS):", err));
+        }
+        ouvirPedidos();
     }
 
     // ---- Cálculo de tempo decorrido ----
