@@ -85,14 +85,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function listenNotes() {
-        const inicioHoje = new Date();
-        inicioHoje.setHours(0, 0, 0, 0);
+        // limit no servidor (nao filtro por "hoje"): um filtro de data aqui
+        // fazia a aba Documentos e o pareamento pedido->nota (notaFiscalPorPedido,
+        // usado na aba Emissao) esquecerem qualquer nota de dias anteriores —
+        // pedido com nota rejeitada/autorizada ontem voltava a mostrar "Emitir
+        // NFC-e" como se nunca tivesse sido tentado.
         db.collection('notas_fiscais')
-            .where('criado_em', '>=', inicioHoje)
+            .orderBy('criado_em', 'desc').limit(300)
             .onSnapshot(snap => {
                 state.notas = [];
                 snap.forEach(doc => state.notas.push({ id: doc.id, ...doc.data() }));
-                state.notas.sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
                 render();
             }, err => console.warn('notas_fiscais:', err.message));
     }
@@ -188,9 +190,21 @@ document.addEventListener('DOMContentLoaded', () => {
         bindActions();
     }
 
-    function counts() {
-        const base = { total: state.notas.length, autorizada: 0, rejeitada: 0, cancelada: 0, contingencia: 0, inutilizada: 0, processando: 0 };
-        state.notas.forEach(n => {
+    // state.notas agora traz as ultimas 300 (nao so as de hoje), mas os cartoes
+    // da Visao Geral continuam sendo do dia. Nota recem-criada ainda sem
+    // criado_em do servidor (escrita pendente) conta como de hoje.
+    function notasDeHoje() {
+        const inicioHoje = new Date();
+        inicioHoje.setHours(0, 0, 0, 0);
+        return state.notas.filter(n => {
+            const d = n.criado_em?.toDate?.();
+            return !d || d >= inicioHoje;
+        });
+    }
+
+    function counts(notas) {
+        const base = { total: notas.length, autorizada: 0, rejeitada: 0, cancelada: 0, contingencia: 0, inutilizada: 0, processando: 0 };
+        notas.forEach(n => {
             const s = String(n.status || '').toUpperCase();
             if (s === 'AUTORIZADA') base.autorizada++;
             else if (s === 'CANCELADA') base.cancelada++;
@@ -203,8 +217,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderOverview() {
-        const c = counts();
-        const total = state.notas.filter(n => n.status === 'AUTORIZADA').reduce((sum, n) => sum + Number(n.valor || 0), 0);
+        const hoje = notasDeHoje();
+        const c = counts(hoje);
+        const total = hoje.filter(n => n.status === 'AUTORIZADA').reduce((sum, n) => sum + Number(n.valor || 0), 0);
         return `
             <div class="grid cards">
                 ${metric('Documentos', c.total)}
@@ -327,8 +342,13 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const zip = new window.JSZip();
             comXml.forEach(n => {
-                const nome = (n.chave || `nNF-${n.nNF || n.id}`) + '-nfce.xml';
-                zip.file(nome, n.xml || n.xmlAssinado);
+                const base = n.chave || `nNF-${n.nNF || n.id}`;
+                zip.file(base + '-nfce.xml', n.xml || n.xmlAssinado);
+                // Evento de cancelamento (110111) — documento que prova o
+                // cancelamento perante a SEFAZ, separado da NF-e original.
+                if (n.cancelamento?.xmlEvento) {
+                    zip.file(base + '-cancelamento.xml', n.cancelamento.xmlEvento);
+                }
             });
             const blob = await zip.generateAsync({ type: 'blob' });
             const a = document.createElement('a');
@@ -474,6 +494,20 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<option value="">Selecione o produto no cardapio...</option>${opcoes}`;
     }
 
+    // Custo e unidade de um item NOVO no estoque, a partir da quantidade que o
+    // operador confirmou. O vUnCom da nota e por unidade comercial (ex.: R$ 37,20
+    // por PC = fardo de 12). Se o operador digitou outra quantidade (ex.: 24
+    // garrafas), o custo vira valor total da linha / quantidade digitada, e a
+    // unidade da nota (PC) deixa de valer, entao usa UN.
+    function custoEUnidadeNovoItem(it, qtd) {
+        const qCom = Number(it.qCom) || 0;
+        const vUn = Number(it.vUnCom) || 0;
+        if (!(qtd > 0) || !(qCom > 0) || Math.abs(qtd - qCom) < 1e-9) {
+            return { custo: vUn, unidade: it.uCom || 'UN' };
+        }
+        return { custo: Math.round((qCom * vUn / qtd) * 10000) / 10000, unidade: 'UN' };
+    }
+
     function linhaEntradaEstoque(d) {
         const linhasItens = d.itens.map((it, idx) => `<tr>
             <td>${esc(it.xProd || '-')}</td>
@@ -488,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </td>
             <td class="num"><input type="number" step="0.001" min="0" data-item-qtd="${idx}" value="${esc(it.qCom ?? '')}" style="width:90px"></td>
             <td>${esc(it.uCom || '-')}</td>
-            <td class="num">${it.vUnCom != null ? money(it.vUnCom) : '-'}</td>
+            <td class="num" data-item-custo="${idx}">${it.vUnCom != null ? money(it.vUnCom) : '-'}</td>
         </tr>`).join('');
         return `<tr><td colspan="7" style="background:#f8fafc">
             <div class="panel" style="margin:6px 0;box-shadow:none">
@@ -711,6 +745,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (selProduto) selProduto.style.display = ehInsumo ? 'none' : 'block';
             if (selInsumo) selInsumo.style.display = ehInsumo ? 'block' : 'none';
             if (novoNome) novoNome.style.display = (ehInsumo && selInsumo && selInsumo.value === '') ? 'block' : 'none';
+        });
+        // Mostra o custo unitario ja recalculado pela quantidade digitada (so vale
+        // pra item novo no estoque; item existente mantem o custo do cadastro).
+        document.querySelectorAll('[data-item-qtd]').forEach(inp => inp.oninput = () => {
+            const idx = inp.dataset.itemQtd;
+            const dfeId = inp.closest('.panel')?.querySelector('[data-dfe-confirmar]')?.dataset.dfeConfirmar;
+            const d = state.dfe.find(x => x.id === dfeId);
+            const it = d && d.itens && d.itens[idx];
+            const cel = document.querySelector(`[data-item-custo="${idx}"]`);
+            if (!it || !cel || it.vUnCom == null) return;
+            cel.textContent = money(custoEUnidadeNovoItem(it, parseFloat(inp.value)).custo);
         });
         document.querySelectorAll('[data-dfe-confirmar]').forEach(btn => btn.onclick = () => confirmarEntradaEstoque(btn));
 
@@ -1089,9 +1134,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Primeira entrada desse produto: cria o insumo e a ficha tecnica
                         // 1:1 que liga a venda no cardapio a baixa automatica de estoque.
                         const novoInsumoRef = db.collection('estoque_insumos').doc();
+                        const novo = custoEUnidadeNovoItem(it, qtd);
                         batch.set(novoInsumoRef, {
-                            nome: produto.nome, categoria: 'Produto revenda', unidade: it.uCom || 'UN',
-                            quantidade_atual: 0, estoque_minimo: 0, custo_unitario: it.vUnCom || 0,
+                            nome: produto.nome, categoria: 'Produto revenda', unidade: novo.unidade,
+                            quantidade_atual: 0, estoque_minimo: 0, custo_unitario: novo.custo,
                             criado_em: now, atualizado_em: now
                         });
                         batch.set(db.collection('fichas_tecnicas').doc(produtoId), {
@@ -1126,9 +1172,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         const nomeNovo = document.querySelector(`[data-item-novo-nome="${idx}"]`)?.value.trim();
                         if (!nomeNovo) throw new Error(`Informe o nome do novo insumo para "${it.xProd || 'item ' + (idx + 1)}".`);
                         const novoRef = db.collection('estoque_insumos').doc();
+                        const novo = custoEUnidadeNovoItem(it, qtd);
                         batch.set(novoRef, {
-                            nome: nomeNovo, categoria: '', unidade: it.uCom || 'UN',
-                            quantidade_atual: 0, estoque_minimo: 0, custo_unitario: it.vUnCom || 0,
+                            nome: nomeNovo, categoria: '', unidade: novo.unidade,
+                            quantidade_atual: 0, estoque_minimo: 0, custo_unitario: novo.custo,
                             criado_em: now, atualizado_em: now
                         });
                         insumoId = novoRef.id; insumoNome = nomeNovo; insumoAtual = 0;

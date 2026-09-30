@@ -189,6 +189,18 @@
         }
 
         const nNF = await proximoNumero();
+        // Entrega a domicilio: indPres=4 (NT 2020.006), com indIntermed=0
+        // (canal proprio, sem marketplace de terceiro) — só pro app (que
+        // captura CPF no cadastro do cliente). Pedido do app retirado no
+        // balcão continua presencial (indPres=1); usar só "origem===APP"
+        // marcava toda retirada pelo app como entrega e a SEFAZ rejeitava
+        // por falta de endereço do destinatário. Pedido do bot do WhatsApp
+        // (origem WHATSAPP) fica sempre em indPres=1 mesmo quando é entrega
+        // de verdade: o bot não coleta CPF do cliente, e a SEFAZ exige
+        // destinatário identificado em indPres=4 — usar '4' aqui faria toda
+        // entrega do WhatsApp ser rejeitada por falta de CPF, o que é pior
+        // que a imprecisão de reportar como presencial.
+        const entregaComCpf = pedido.origem === 'APP' && pedido.tipo_entrega === 'ENTREGA';
         const payload = {
             ambiente: cfg.ambiente || 'homologacao',
             serie: cfg.serie || 1,
@@ -204,10 +216,8 @@
             ...urlsPorAmbiente(cfg),
             aliquotaAproxTributos: Number(cfg.aliquotaAproxTributos) || 0,
             ibptToken: cfg.ibptToken || undefined,
-            // Venda pelo app/delivery: indPres=4 (NT 2020.006), com indIntermed=0
-            // (canal proprio, sem marketplace de terceiro). Balcao/mesa: presencial normal.
-            indPres: pedido.origem === 'APP' ? '4' : '1',
-            indIntermed: pedido.origem === 'APP' ? '0' : undefined,
+            indPres: entregaComCpf ? '4' : '1',
+            indIntermed: entregaComCpf ? '0' : undefined,
             payment: { tPag: mapTPag(pedido.forma_pagamento), vPag: Number(pedido.valor_total) || 0 },
             items: itensDoPedido(pedido, cfg),
             recipient: pedido.cpf_cliente ? {
@@ -578,7 +588,11 @@
         const cancelamento = {
             status: data.status || 'ERRO', cStat: data.cStat || null,
             motivo: data.motivo || data.error || null, protocolo: data.protocolo || null,
-            justificativa: just, em: firebase.firestore.FieldValue.serverTimestamp()
+            justificativa: just, em: firebase.firestore.FieldValue.serverTimestamp(),
+            // XML assinado do evento 110111 — sem isso o .zip do relatorio
+            // (exportarXmlsZip) so tinha a NF-e original, sem nada provando
+            // que ela foi cancelada perante a SEFAZ.
+            xmlEvento: data.xmlEvento || null
         };
         if (data.status === 'CANCELADA') {
             await notaRef.update({ status: 'CANCELADA', cancelamento });

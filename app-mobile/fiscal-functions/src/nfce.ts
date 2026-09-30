@@ -323,6 +323,20 @@ export async function gerarPreviaDanfe(req: AvulsaRequest): Promise<Buffer> {
 }
 
 export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Promise<AvulsaResult> {
+  // Entrega a domicílio (indPres=4) exige destinatário identificado por
+  // CPF/CNPJ — sem isso o <dest> nem chega a ser montado (ver montarInputNFe/
+  // buildXml, que descartam o bloco inteiro, endereço incluso, quando falta
+  // documento) e a SEFAZ rejeita com "sem o endereço do destinatário". Falha
+  // aqui, local e cedo, evita gastar um número de NF-e numa tentativa que já
+  // se sabe fadada à rejeição, e dá um motivo acionável (falta CPF no pedido)
+  // em vez do erro cru da SEFAZ.
+  if (req.indPres === '4' && !req.recipient?.cpf && !req.recipient?.cnpj) {
+    return {
+      status: 'REJEITADA',
+      motivo: 'CPF do cliente é obrigatório para NFC-e de entrega a domicílio — nenhum CPF foi informado no pedido.',
+    };
+  }
+
   const { input, cUF, uf, tpAmb } = await montarInputNFe(req);
   const cred = carregarCred(cert);
   const endpoints = getSefazEndpoints(uf, tpAmb === '1' ? 'PRODUCAO' : 'HOMOLOGACAO');

@@ -214,6 +214,11 @@ async function emitirParaPedidoComTravaAdquirida(pedidoId: string, pedido: any, 
   if (existentes.docs.some((d) => STATUS_NOTA_ATIVA.includes(d.data().status))) return;
 
   const nNF = await proximoNumero();
+  // Só o app captura CPF do cliente — o bot do WhatsApp (origem WHATSAPP)
+  // não coleta, então mesmo entrega de verdade fica em indPres=1 pra não
+  // ser rejeitada por falta de destinatário identificado. Ver comentário
+  // completo em dashboard/public/fiscal-client.js.
+  const entregaComCpf = pedido.origem === 'APP' && pedido.tipo_entrega === 'ENTREGA';
   const payload: AvulsaRequest = {
     ambiente: cfg.ambiente || 'homologacao',
     serie: cfg.serie || 1,
@@ -229,8 +234,8 @@ async function emitirParaPedidoComTravaAdquirida(pedidoId: string, pedido: any, 
     ...urlsPorAmbiente(cfg),
     aliquotaAproxTributos: Number(cfg.aliquotaAproxTributos) || 0,
     ibptToken: cfg.ibptToken || undefined,
-    indPres: pedido.origem === 'APP' ? '4' : '1',
-    indIntermed: pedido.origem === 'APP' ? '0' : undefined,
+    indPres: entregaComCpf ? '4' : '1',
+    indIntermed: entregaComCpf ? '0' : undefined,
     payment: { tPag: mapTPag(pedido.forma_pagamento), vPag: Number(pedido.valor_total) || 0 },
     items: itensDoPedido(pedido, cfg),
     recipient: pedido.cpf_cliente ? {

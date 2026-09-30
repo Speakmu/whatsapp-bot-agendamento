@@ -412,8 +412,20 @@ export class NfeXmlBuilder {
     icmsTot.ele('vTotTrib').txt(this.fmt2(t.vTotTrib));
 
     // ── transp ────────────────────────────────────────────
+    // Entrega a domicílio (indPres=4) tem transporte de verdade acontecendo —
+    // modFrete=9 (sem frete) nesse caso é inconsistente pra SEFAZ e rejeita
+    // com "NFC-e de entrega a domicílio sem dados do Transportador". Loja usa
+    // entrega própria (motoboy próprio, sem transportadora terceirizada), daí
+    // 0=frete por conta do emitente com o próprio CNPJ do emitente como
+    // transportador. Retirada/balcão (indPres=1) continua 9=sem frete.
     const transp = infNFe.ele('transp');
-    transp.ele('modFrete').txt('9'); // 9=sem frete
+    const entregaPropria = input.indPres === '4';
+    transp.ele('modFrete').txt(entregaPropria ? '0' : '9');
+    if (entregaPropria) {
+      const transporta = transp.ele('transporta');
+      transporta.ele('CNPJ').txt(input.emitter.cnpj.replace(/\D/g, ''));
+      transporta.ele('xNome').txt(this.sanitizeNfeText(input.emitter.xNome));
+    }
 
     // ── cobr / pag ────────────────────────────────────────
    // ── cobr / pag ────────────────────────────────────────
