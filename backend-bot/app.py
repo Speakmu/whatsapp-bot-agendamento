@@ -1803,6 +1803,39 @@ def _tokens_item(it):
     return {t for t in re.split(r"[^a-z0-9]+", nome) if len(t) >= 4 and t not in _PALAVRAS_GENERICAS_ITEM}
 
 
+def _item_citado(item, texto):
+    """O texto cita o item — pelo tipo (pastel/coxinhas...) ou por uma palavra do nome (presunto, catupiry)?"""
+    toks = set(re.split(r"[^a-z0-9]+", _normalizar_termo(texto or "")))
+    return _tipo_do_item_na_mensagem(item, texto) or bool(_tokens_item(item) & toks)
+
+
+_RE_MAIS_UM = re.compile(r"\b(mais|outr[oa]s?)\b")
+
+
+def _adicao_permitida(item, prompt, historico, rascunho):
+    """A IA só pode somar um item que o cliente pediu NESTA mensagem. Caso real
+    (01/10): a cada mensagem ("Thais", "E este", o endereço...) o gpt-4o-mini
+    readicionava o pedido inteiro — 3 coxinhas viraram 9, o total foi de R$ 51
+    pra R$ 197,50 e a cliente cancelou. Vale se a mensagem cita o item; ou, em
+    resposta curta ("sim", "a primeira", "mais uma"), se a última fala do bot
+    perguntou sobre ele."""
+    if _item_citado(item, prompt):
+        return True
+    m = _normalizar_termo(prompt or "").strip(".!?,; ")
+    if not m or len(m.split()) > 5:
+        return False
+    ultima_bot = next((x.get("content") or "" for x in reversed(historico or []) if x.get("role") == "assistant"), "")
+    ja_no_carrinho = any(i.get("id") == item.get("id") for i in rascunho.get("itens") or [])
+    if _RE_MAIS_UM.search(m) and "nada" not in m:
+        return ja_no_carrinho or _item_citado(item, ultima_bot)    # "mais 2 dessas"
+    return not ja_no_carrinho and "?" in ultima_bot and _item_citado(item, ultima_bot)
+
+
+_RE_CLIENTE_DISSE_QUE_ESTA_ERRADO = re.compile(
+    r"nao e isso|nao foi isso|nao e esse|nao e nada disso|esta errado|ta errado|tudo errado|\berrad[oa]s?\b|"
+    r"nao pedi|nao foi o que pedi|ta bugado|bugou")
+
+
 def _tipo_do_item_na_mensagem(item, mensagem):
     """A primeira palavra do nome do item (o tipo: pastel, coxinha, esfirra, coca...)
     aparece na mensagem? Compara pelo começo da palavra (pastel/pastéis)."""
@@ -2525,6 +2558,32 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     pediu_humano = bool(_RE_PEDIU_HUMANO.search(_normalizar_termo(prompt or "")))
     if pediu_humano:
         marcar_atencao(id_usuario, f"Cliente pediu pra falar com a equipe: \"{str(prompt)[:150]}\"", tipo="humano")
+    # Caso real (01/10): cliente respondeu "Não é isso não" / 🤦 ao resumo errado e a
+    # IA só piorou o carrinho a cada tentativa. Reclamação com carrinho montado →
+    # o servidor ESVAZIA os itens e pede a lista de novo (sem IA); o próximo envio
+    # entra limpo. "Não" sozinho depois de "posso fechar?" → pergunta o que mudar.
+    r_recl = obter_rascunho(id_usuario)
+    p_norm = _normalizar_termo(prompt or "").strip(".!?,; ")
+    resposta_fixa = None
+    if r_recl.get("itens") and not _itens_mencionados(prompt, carregar_cardapio()) and len(p_norm.split()) <= 8:
+        # "o endereço está errado" não é reclamação dos ITENS: não limpa o carrinho.
+        fala_de_outra_coisa = re.search(r"enderec|bairro|\brua\b|\bnome\b|pagament|troco|taxa|\bpix\b", p_norm)
+        if not fala_de_outra_coisa and (_RE_CLIENTE_DISSE_QUE_ESTA_ERRADO.search(p_norm) or "\U0001F926" in (prompt or "")):
+            r_recl.update({"itens": [], "resumo_visto_em": None})
+            _salvar_rascunho(id_usuario, r_recl)
+            resposta_fixa = ("Desculpe a confusão! 🙏 Limpei o pedido pra não errar de novo. "
+                             "Me manda de novo, por favor, só os itens e as quantidades?")
+            obs_fixa = "cliente_reclamou_carrinho_limpo"
+        elif p_norm in ("nao", "n", "nao pode", "ainda nao", "nao ainda") and \
+                _ultima_resposta_pediu_confirmacao(obter_historico_firestore(wa_id, limite=4)):
+            resposta_fixa = "Sem problema! O que você quer mudar no pedido?"
+            obs_fixa = "nao_ao_posso_fechar"
+    if resposta_fixa:
+        salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        salvar_historico_firestore(wa_id, "assistant", resposta_fixa, bot_cfg.get("max_historico_salvar"))
+        registrar_log_conversa(id_usuario, origem, prompt, resposta_fixa, "servidor", observacao=obs_fixa)
+        return resposta_fixa
+
     eventos_servidor = _resolver_endereco_sugerido(wa_id, id_usuario, prompt, bot_cfg)
     eventos_servidor += _resolver_bairro_pendente(wa_id, id_usuario, prompt, bot_cfg)
     eventos_servidor += _preencher_slots_obvios(id_usuario, prompt, bot_cfg)
@@ -2860,7 +2919,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         certo_ctx, _ = _resolver_variante_ambigua(it_pedido, cardapio_atual, " ".join(recentes + [prompt]))
                         if certo_ctx:
                             item_certo, opcoes_variante = certo_ctx, None
-                    if (retentativa_adicao_feita and it_pedido
+                    if it_pedido and not _adicao_permitida(it_pedido, prompt, historico_msgs, obter_rascunho(id_usuario)):
+                        resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg,
+                                                     aviso="NÃO somei: o cliente não pediu esse item NESTA mensagem (ele já está no "
+                                                           "pedido ou não foi citado agora). Não readicione itens — responda só ao "
+                                                           "que o cliente escreveu agora, usando o PEDIDO EM ANDAMENTO como está.")
+                    elif (retentativa_adicao_feita and it_pedido
                             and not _tipo_do_item_na_mensagem(it_pedido, " ".join([prompt] + [m.get("content") or "" for m in historico_msgs if m.get("role") == "user"][-2:]))):
                         # Caso real (28/09): na retentativa forçada a IA adicionou um
                         # "Pastel Frango Catupiry" pra quem escreveu "coxinha de frango

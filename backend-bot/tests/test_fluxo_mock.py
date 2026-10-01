@@ -1007,3 +1007,30 @@ def test_festa_nao_usa_telefone_do_cadastro(ambiente, monkeypatch):
     resp = _conversar(tel, ["oi", "Gostaria de encomendar 1 cento de mini salgados", "Qual o valor?"])
     for r in resp[1:]:
         assert "98807-5519" in r and "35999758057" not in r
+
+
+def test_ia_nao_readiciona_pedido_inteiro_a_cada_mensagem(ambiente, monkeypatch):
+    """Caso Thais (01/10): a cada mensagem ('Thais', o endereço...) a IA readicionava
+    o pedido inteiro — R$ 51 virou R$ 197,50 e a cliente cancelou."""
+    cx, pc = _codigo("coxinha de frango"), _codigo("pastel de carne")
+    de_novo = [("adicionar_item", {"item_id": cx, "quantidade": 3}), ("adicionar_item", {"item_id": pc, "quantidade": 1}), "ok"]
+    roteiro = {"quero 3 coxinha de frango e 1 pastel de carne": de_novo, "Thais": de_novo, "E este": de_novo,
+               "Rua Carlos Grau 152 San Genaro pagamento no pix": de_novo}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "553599598500"
+    _conversar(tel, ["oi", "quero 3 coxinha de frango e 1 pastel de carne", "Thais", "E este",
+                     "Rua Carlos Grau 152 San Genaro pagamento no pix"])
+    assert sorted(i["quantidade"] for i in bot.obter_rascunho(tel)["itens"]) == [1, 3]
+
+
+def test_cliente_reclama_do_resumo_limpa_o_carrinho(ambiente, monkeypatch):
+    cfg = bot.obter_config_bot()
+    tel = "553599598501"
+    bot.rascunho_adicionar_item(tel, _codigo("coxinha de frango"), 6, cfg)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
+    resp = _conversar(tel, ["oi", "Não é isso não"])
+    assert bot.obter_rascunho(tel)["itens"] == [] and "Limpei o pedido" in resp[-1]
+    # reclamação sobre o endereço não limpa os itens
+    bot.rascunho_adicionar_item(tel, _codigo("coxinha de frango"), 1, cfg)
+    _conversar(tel, ["o endereço está errado"])
+    assert len(bot.obter_rascunho(tel)["itens"]) == 1
