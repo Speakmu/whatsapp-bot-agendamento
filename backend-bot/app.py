@@ -99,6 +99,21 @@ BOT_CONFIG_DEFAULTS = {
                                      "fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp).")
 }
 
+def _params_do_modelo(modelo):
+    """Parâmetros extras por família de modelo. A família gpt-5 "raciocina" antes
+    de responder: no padrão fica lenta e cara pra atendimento; aqui o raciocínio
+    fica baixo. Os demais (gpt-4o, gpt-4.1...) não recebem nada."""
+    m = str(modelo or "")
+    if not m.startswith("gpt-5") or "chat" in m:
+        return {}
+    # gpt-5.4/5.5 (inclusive os mini): a OpenAI não aceita funções + raciocínio no
+    # /chat/completions ("Function tools with reasoning_effort are not supported")
+    # — só com raciocínio 'none'.
+    if m.startswith(("gpt-5.4", "gpt-5.5")):
+        return {"reasoning_effort": "none"}
+    return {"reasoning_effort": "low"}
+
+
 def obter_config_bot():
     cfg = dict(BOT_CONFIG_DEFAULTS)
     try:
@@ -2861,7 +2876,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 messages=messages,
                 tools=tools,
                 tool_choice=tool_choice_rodada,
-                timeout=60
+                timeout=60,
+                **_params_do_modelo(modelo_usado)
             )
             ck(f"depois chamada OpenAI #{rodada}")
             log_chamadas_ia += 1
@@ -3090,7 +3106,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 log_observacao = "limite_rodadas_ferramenta"
                 ck("antes chamada final sem ferramentas")
                 ultima = openai.chat.completions.create(
-                    model=modelo_usado, messages=messages, tools=tools, tool_choice="none", timeout=60
+                    model=modelo_usado, messages=messages, tools=tools, tool_choice="none", timeout=60,
+                    **_params_do_modelo(modelo_usado)
                 )
                 ck("depois chamada final sem ferramentas")
                 log_chamadas_ia += 1
