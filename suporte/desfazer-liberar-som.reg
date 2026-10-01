@@ -1,0 +1,7 @@
+Windows Registry Editor Version 5.00
+
+; Desfaz o liberar-som-painel-chrome.reg
+
+[-HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\AutoplayAllowlist]
+
+[-HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\AutoplayAllowlist]

@@ -20,9 +20,15 @@
             // e reabrir a aba manualmente — o SW antigo continuava no
             // controle da página até então. 'controllerchange' dispara
             // assim que a versão nova assume; recarrega sozinho uma vez.
+            // Só quando é ATUALIZAÇÃO (já havia uma versão no controle). Na
+            // primeira instalação — inclusive logo depois do botão "Atualizar
+            // sistema", que remove o Service Worker — a página já é a nova, e
+            // recarregar sozinho só servia pra perder o "clique" que libera o
+            // som dos pedidos no navegador.
+            const tinhaVersaoAnterior = !!navigator.serviceWorker.controller;
             let jaRecarregou = false;
             navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (jaRecarregou) return;
+                if (!tinhaVersaoAnterior || jaRecarregou) return;
                 jaRecarregou = true;
                 location.reload();
             });
@@ -50,6 +56,7 @@
     <iframe id="admin-frame" title="GestorChef"></iframe>
     <script src="/shell.js" defer></script>
     <script src="/admin-shell.js"></script>
+    <script src="/pedido-alerta.js"></script>
 </body>
 
 </html>

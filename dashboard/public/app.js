@@ -31,7 +31,10 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.appendChild(el);
     }
     ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => avisoSomBloqueado(false), true));
-    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) avisoSomBloqueado(true);
+    // Dentro do painel (iframe), quem toca o alarme é a moldura
+    // (pedido-alerta.js em admin.html) — aqui tocaria em dobro.
+    const alarmeNaMoldura = window.self !== window.top;
+    if (!alarmeNaMoldura && navigator.userActivation && !navigator.userActivation.hasBeenActive) avisoSomBloqueado(true);
 
     function pararAlertaSom() {
         if (alertaSomInterval) {
@@ -83,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!pedidosAlarmando.size) pararAlertaSom();
     }
     function iniciarAlertaSom() {
-        if (!cfgAlertaSom.ativo) return;
+        if (alarmeNaMoldura || !cfgAlertaSom.ativo) return;
         tocarAlertaSom();
         pararAlertaSom();
         alertaSomInterval = setInterval(() => {

@@ -23,7 +23,7 @@
 //   painel carrega esse SDK de novo (o shell e o iframe de dentro, cada um
 //   com seu próprio <script>), então essa troca sozinha já evita várias
 //   rodadas de rede desnecessárias por navegação.
-const CACHE = 'pdv-static-v8';
+const CACHE = 'pdv-static-v9';
 const GSTATIC_FIREBASE_PREFIX = 'https://www.gstatic.com/firebasejs/8.6.8/';
 
 // Pré-cache: sem isso, o Service Worker só guarda um arquivo depois que ele é
@@ -34,6 +34,7 @@ const GSTATIC_FIREBASE_PREFIX = 'https://www.gstatic.com/firebasejs/8.6.8/';
 const PRECACHE_URLS = [
     '/admin.html',
     '/admin-shell.js',
+    '/pedido-alerta.js',
     '/caixa.html',
     '/caixa.js',
     '/fiscal-client.js',

@@ -1,0 +1,14 @@
+Windows Registry Editor Version 5.00
+
+; Libera o som automatico (alarme de pedido novo) do painel GestorChef
+; sem precisar de clique na pagina. Vale para Chrome e Edge deste computador.
+; Aplicar: duplo clique > Sim > fechar TODAS as janelas do navegador e abrir de novo.
+; Conferir: chrome://policy deve listar AutoplayAllowlist.
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\AutoplayAllowlist]
+"1"="https://salgadinhos-lileamar.web.app"
+"2"="https://salgadinhos-lileamar.firebaseapp.com"
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Microsoft\Edge\AutoplayAllowlist]
+"1"="https://salgadinhos-lileamar.web.app"
+"2"="https://salgadinhos-lileamar.firebaseapp.com"

@@ -100,8 +100,11 @@ document.addEventListener('DOMContentLoaded', () => {
     function pararAlertaSom() {
         if (alertaSomInterval) { clearInterval(alertaSomInterval); alertaSomInterval = null; }
     }
+    // Dentro do painel (iframe), quem toca o alarme é a moldura
+    // (pedido-alerta.js em admin.html) — aqui tocaria em dobro.
+    const alarmeNaMoldura = window.self !== window.top;
     function iniciarAlertaSom() {
-        if (!somAtivo) return;
+        if (alarmeNaMoldura || !somAtivo) return;
         tocarAlertaSom();
         pararAlertaSom();
         alertaSomInterval = setInterval(() => {
@@ -138,6 +141,10 @@ document.addEventListener('DOMContentLoaded', () => {
     btnSom.addEventListener('click', () => {
         somAtivo = !somAtivo;
         btnSom.textContent = somAtivo ? "🔔 Som: ON" : "🔕 Som: OFF";
+        if (alarmeNaMoldura) {
+            try { if (window.top.GestorChefAlerta) window.top.GestorChefAlerta.silenciar(!somAtivo); } catch (e) { /* moldura indisponível */ }
+            return;
+        }
         // tenta destravar o áudio na primeira interação
         if (somAtivo) { const a = new Audio(URL_SOM_ALERTA); a.play().then(() => a.pause()).catch(() => {}); }
     });
