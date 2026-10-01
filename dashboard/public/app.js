@@ -368,21 +368,29 @@ document.addEventListener('DOMContentLoaded', () => {
             renderMenu(currentMenuView);
         });
 
-        btnAtivar.addEventListener('click', () => aplicarDisponibilidadeEmMassa(true));
-        btnPausar.addEventListener('click', () => aplicarDisponibilidadeEmMassa(false));
+        btnAtivar.addEventListener('click', () => aplicarDisponibilidadeEmMassa('disponivel', true));
+        btnPausar.addEventListener('click', () => aplicarDisponibilidadeEmMassa('disponivel', false));
+        // Só app/WhatsApp (disponivel_online), igual ao botão "Esgotar no
+        // App/Bot" de cada item: balcão, mesas e cozinha não são tocados.
+        document.getElementById('btn-bulk-esgotar-online')?.addEventListener('click', () => aplicarDisponibilidadeEmMassa('disponivel_online', false));
+        document.getElementById('btn-bulk-repor-online')?.addEventListener('click', () => aplicarDisponibilidadeEmMassa('disponivel_online', true));
     }
 
-    async function aplicarDisponibilidadeEmMassa(disponivel) {
+    const BOTOES_EM_MASSA = ['btn-bulk-ativar', 'btn-bulk-pausar', 'btn-bulk-esgotar-online', 'btn-bulk-repor-online'];
+    function habilitarBotoesEmMassa(habilitar) {
+        BOTOES_EM_MASSA.forEach(id => { const b = document.getElementById(id); if (b) b.disabled = !habilitar; });
+    }
+
+    async function aplicarDisponibilidadeEmMassa(campo, valor) {
         if (selectedMenuIds.size === 0) return;
-        const btnAtivar = document.getElementById('btn-bulk-ativar');
-        const btnPausar = document.getElementById('btn-bulk-pausar');
-        btnAtivar.disabled = true;
-        btnPausar.disabled = true;
+        if (campo === 'disponivel_online'
+            && !confirm(`${valor ? 'Repor' : 'Esgotar'} ${selectedMenuIds.size} item(ns) selecionado(s) no app/WhatsApp?`)) return;
+        habilitarBotoesEmMassa(false);
         try {
             const batch = db.batch();
             selectedMenuIds.forEach(id => {
                 batch.update(db.collection(COLECAO_CARDAPIO).doc(id), {
-                    disponivel: disponivel,
+                    [campo]: valor,
                     ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
                 });
             });
@@ -392,6 +400,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) {
             console.error("Erro ao atualizar disponibilidade em massa:", e);
             alert("Erro ao atualizar os itens selecionados.");
+            habilitarBotoesEmMassa(selectedMenuIds.size > 0);
         }
     }
 
@@ -444,8 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const count = selectedMenuIds.size;
         countLabel.textContent = `${count} selecionado(s)`;
-        btnAtivar.disabled = count === 0;
-        btnPausar.disabled = count === 0;
+        habilitarBotoesEmMassa(count > 0);
 
         const visibleIds = currentMenuView.map(i => i.id);
         const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedMenuIds.has(id));
