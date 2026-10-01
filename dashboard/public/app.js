@@ -267,9 +267,56 @@ document.addEventListener('DOMContentLoaded', () => {
     const selectedMenuIds = new Set();
     let currentMenuView = [];
 
+    // Preenche o <select> de categorias com as categorias que existem de
+    // verdade no cardápio agora — sem isso o filtro ficaria desatualizado
+    // toda vez que uma categoria nova fosse criada ou a última de uma
+    // categoria fosse removida/renomeada.
+    function renderFiltroCategoria(itens) {
+        const select = document.getElementById('filtro-categoria-menu');
+        if (!select) return;
+        const valorAtual = select.value;
+        const categorias = [...new Set(itens.map(i => i.categoria).filter(Boolean))].sort();
+        select.innerHTML = `<option value="">Todas as categorias</option>` +
+            categorias.map(cat => `<option value="${cat.replace(/"/g, '&quot;')}">${cat.replace(/_/g, ' ')}</option>`).join('');
+        // Mantém a categoria escolhida selecionada se ela ainda existir na lista
+        if (categorias.includes(valorAtual)) select.value = valorAtual;
+    }
+
+    // Aplica busca de texto + categoria + status, todos juntos — cada filtro
+    // some sozinho se estiver vazio/"todos", sem precisar resetar os outros.
+    function aplicarFiltrosMenu() {
+        const termo = (document.getElementById('search-menu')?.value || '').toLowerCase();
+        const categoria = document.getElementById('filtro-categoria-menu')?.value || '';
+        const status = document.getElementById('filtro-status-menu')?.value || '';
+
+        const filtrados = menuItems.filter(item => {
+            if (termo) {
+                const bate = String(item.nome_exibicao || '').toLowerCase().includes(termo) ||
+                    String(item.categoria || '').toLowerCase().includes(termo) ||
+                    String(item.ncm || '').includes(termo) ||
+                    String(item.cfop || '').includes(termo);
+                if (!bate) return false;
+            }
+            if (categoria && item.categoria !== categoria) return false;
+
+            const onlineDisponivel = item.disponivel_online !== false;
+            switch (status) {
+                case 'ativo': if (!item.disponivel) return false; break;
+                case 'pausado': if (item.disponivel) return false; break;
+                case 'online': if (!onlineDisponivel) return false; break;
+                case 'esgotado_online': if (onlineDisponivel) return false; break;
+                case 'sem_foto': if (item.imagem_url) return false; break;
+            }
+            return true;
+        });
+        renderMenu(filtrados);
+    }
+
     function startMenuListener() {
         const menuContainer = document.getElementById('menu-list-container');
         const searchInput = document.getElementById('search-menu');
+        const filtroCategoria = document.getElementById('filtro-categoria-menu');
+        const filtroStatus = document.getElementById('filtro-status-menu');
 
         db.collection(COLECAO_CARDAPIO).orderBy("categoria").onSnapshot(snapshot => {
             menuItems = [];
@@ -279,21 +326,14 @@ document.addEventListener('DOMContentLoaded', () => {
             // Remove da seleção itens que não existem mais
             const idsAtuais = new Set(menuItems.map(i => i.id));
             [...selectedMenuIds].forEach(id => { if (!idsAtuais.has(id)) selectedMenuIds.delete(id); });
-            renderMenu(menuItems);
+            renderFiltroCategoria(menuItems);
+            aplicarFiltrosMenu();
             renderCategoryToolbar(menuItems);
         });
 
-        // Filtro de pesquisa
-        searchInput.addEventListener('input', (e) => {
-            const termo = e.target.value.toLowerCase();
-            const filtrados = menuItems.filter(item =>
-                String(item.nome_exibicao || '').toLowerCase().includes(termo) ||
-                String(item.categoria || '').toLowerCase().includes(termo) ||
-                String(item.ncm || '').includes(termo) ||
-                String(item.cfop || '').includes(termo)
-            );
-            renderMenu(filtrados);
-        });
+        searchInput.addEventListener('input', aplicarFiltrosMenu);
+        filtroCategoria.addEventListener('change', aplicarFiltrosMenu);
+        filtroStatus.addEventListener('change', aplicarFiltrosMenu);
 
         setupBulkToolbar();
     }

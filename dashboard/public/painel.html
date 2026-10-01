@@ -177,10 +177,25 @@
 
                     <hr>
 
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin: 20px 0;">
-                        <h3>Itens no Card&aacute;pio</h3>
-                        <input type="text" id="search-menu" placeholder="Procurar sabor ou categoria..."
-                            style="padding: 10px; width: 300px; border-radius: 20px; border: 1px solid #ddd;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin: 20px 0; flex-wrap: wrap; gap: 10px;">
+                        <h3 style="margin: 0;">Itens no Card&aacute;pio</h3>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <select id="filtro-categoria-menu"
+                                style="padding: 10px; border-radius: 20px; border: 1px solid #ddd; background: #fff;">
+                                <option value="">Todas as categorias</option>
+                            </select>
+                            <select id="filtro-status-menu"
+                                style="padding: 10px; border-radius: 20px; border: 1px solid #ddd; background: #fff;">
+                                <option value="">Qualquer status</option>
+                                <option value="ativo">Dispon&iacute;vel (geral)</option>
+                                <option value="pausado">Pausado (geral)</option>
+                                <option value="online">Dispon&iacute;vel no App/Bot</option>
+                                <option value="esgotado_online">Esgotado no App/Bot</option>
+                                <option value="sem_foto">Sem foto</option>
+                            </select>
+                            <input type="text" id="search-menu" placeholder="Procurar sabor ou categoria..."
+                                style="padding: 10px; width: 260px; border-radius: 20px; border: 1px solid #ddd;">
+                        </div>
                     </div>
 
                     <div id="menu-bulk-toolbar"
