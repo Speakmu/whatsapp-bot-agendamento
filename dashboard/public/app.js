@@ -271,15 +271,29 @@ document.addEventListener('DOMContentLoaded', () => {
     // verdade no cardápio agora — sem isso o filtro ficaria desatualizado
     // toda vez que uma categoria nova fosse criada ou a última de uma
     // categoria fosse removida/renomeada.
+    // "Pastéis" existe só neste filtro: não é categoria gravada no item (no
+    // cadastro, app, Caixa e bot eles continuam em Salgados Fritos). Entra
+    // aqui todo item de Salgados Fritos com "pastel" no nome.
+    const FILTRO_PASTEIS = '__pasteis';
+    const CATEGORIA_DOS_PASTEIS = 'Salgados Fritos';
+    function ehPastel(item) {
+        if (item.categoria !== CATEGORIA_DOS_PASTEIS) return false;
+        const nome = String(item.nome_exibicao || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        return /\bpaste(l|is)\b/.test(nome);
+    }
+
     function renderFiltroCategoria(itens) {
         const select = document.getElementById('filtro-categoria-menu');
         if (!select) return;
         const valorAtual = select.value;
         const categorias = [...new Set(itens.map(i => i.categoria).filter(Boolean))].sort();
+        const temPastel = itens.some(ehPastel);
         select.innerHTML = `<option value="">Todas as categorias</option>` +
-            categorias.map(cat => `<option value="${cat.replace(/"/g, '&quot;')}">${cat.replace(/_/g, ' ')}</option>`).join('');
+            categorias.map(cat => `<option value="${cat.replace(/"/g, '&quot;')}">${cat.replace(/_/g, ' ')}</option>` +
+                (cat === CATEGORIA_DOS_PASTEIS && temPastel ? `<option value="${FILTRO_PASTEIS}">&nbsp;&nbsp;&nbsp;↳ Pastéis</option>` : '')
+            ).join('');
         // Mantém a categoria escolhida selecionada se ela ainda existir na lista
-        if (categorias.includes(valorAtual)) select.value = valorAtual;
+        if (categorias.includes(valorAtual) || (valorAtual === FILTRO_PASTEIS && temPastel)) select.value = valorAtual;
     }
 
     // Aplica busca de texto + categoria + status, todos juntos — cada filtro
@@ -297,7 +311,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     String(item.cfop || '').includes(termo);
                 if (!bate) return false;
             }
-            if (categoria && item.categoria !== categoria) return false;
+            if (categoria === FILTRO_PASTEIS) { if (!ehPastel(item)) return false; }
+            else if (categoria && item.categoria !== categoria) return false;
 
             const onlineDisponivel = item.disponivel_online !== false;
             switch (status) {
