@@ -991,3 +991,19 @@ def test_aviso_de_saida_vai_pra_conversa_existente(ambiente, monkeypatch):
     n = len(enviados)
     r = c.post("/notificar_pronto", json={"wa_id": "5535997000001", "nome": "X", "status": "saiu_entrega"})
     assert r.get_json()["status"] == "fora_janela_24h" and len(enviados) == n
+
+
+def test_festa_nao_usa_telefone_do_cadastro(ambiente, monkeypatch):
+    """Caso 01/10: cliente pediu 'cento de mini salgados' e depois 'Qual o valor?'; a IA deu
+    o telefone do cadastro do sistema (o da própria loja) em vez do aviso de festa."""
+    ambiente.collection("configuracoes").document("sistema").set({"telefone": "35999758057"}, merge=True)
+    ambiente.collection("configuracoes").document("bot").set(
+        {"aviso_encomenda_festa_ativo": True,
+         "aviso_encomenda_festa_texto": "Encomenda de festa: fale com a Loja 1, 3531-5342 ou 98807-5519."}, merge=True)
+    roteiro = {"Gostaria de encomendar 1 cento de mini salgados": ["Fale com a loja: 35999758057 (WhatsApp)."],
+               "Qual o valor?": ["O valor é negociado: ligue 35999758057."]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "553597275200"
+    resp = _conversar(tel, ["oi", "Gostaria de encomendar 1 cento de mini salgados", "Qual o valor?"])
+    for r in resp[1:]:
+        assert "98807-5519" in r and "35999758057" not in r
