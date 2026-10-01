@@ -122,6 +122,33 @@
                 clearInterval(alertaSomInterval);
                 alertaSomInterval = null;
             }
+            avisoPedidoNovo(false);
+        }
+        // O alarme repete até alguém clicar nesta faixa (que abre a tela de
+        // Pedidos) ou até o pedido ser aceito/cancelado. Antes parava sozinho
+        // assim que a aba estivesse na frente — com o painel já aberto na
+        // tela, tocava uma vez só e passava batido.
+        function avisoPedidoNovo(mostrar) {
+            let el = document.getElementById('aviso-pedido-novo');
+            if (!mostrar) { if (el) el.remove(); return; }
+            const qtd = pedidosAlarmando.size;
+            const texto = (qtd > 1 ? `🔔 ${qtd} pedidos novos!` : '🔔 Pedido novo!') + ' Clique aqui para ver';
+            if (!el) {
+                el = document.createElement('button');
+                el.id = 'aviso-pedido-novo';
+                el.type = 'button';
+                el.style.cssText = 'position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:99998;background:#e67e22;color:#fff;border:3px solid #fff;padding:14px 26px;border-radius:12px;font:700 18px sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.45);cursor:pointer;max-width:92vw;text-align:center;';
+                el.addEventListener('click', () => {
+                    registrar('alarme_confirmado_no_clique');
+                    // Já vistos: não podem segurar o alarme do próximo pedido.
+                    pedidosAlarmando.clear();
+                    pararAlertaSom();
+                    const link = document.querySelector('#app-sidebar .sb-item[data-href="/painel.html"]');
+                    if (link) link.click();
+                });
+                document.body.appendChild(el);
+            }
+            el.textContent = texto;
         }
         function registrarResultado(evento, extra) {
             if (resultadoRegistrado) return;
@@ -182,22 +209,10 @@
             resultadoRegistrado = false;
             tocouNesteAlarme = false;
             pararAlertaSom();
-            alertaSomInterval = setInterval(() => {
-                if (pararSeVisto()) return;
-                tocarAlertaSom();
-            }, cfg.intervalo_segundos * 1000);
+            alertaSomInterval = setInterval(tocarAlertaSom, cfg.intervalo_segundos * 1000);
+            avisoPedidoNovo(true);
             tocarAlertaSom();
         }
-        // "Visto" = a aba está na frente E o som chegou a tocar de verdade.
-        function pararSeVisto() {
-            if (tocouNesteAlarme && document.visibilityState === 'visible' && document.hasFocus()) {
-                pararAlertaSom();
-                return true;
-            }
-            return false;
-        }
-        document.addEventListener('visibilitychange', pararSeVisto);
-        window.addEventListener('focus', pararSeVisto);
 
         function pedidoNovo(docs, via) {
             const agora = Date.now();
