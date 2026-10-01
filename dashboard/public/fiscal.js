@@ -816,7 +816,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[data-item-insumo]').forEach(sel => sel.onchange = () => {
             const idx = sel.dataset.itemInsumo;
             const novoNome = document.querySelector(`[data-item-novo-nome="${idx}"]`);
-            if (novoNome) novoNome.style.display = sel.value === '' ? 'block' : 'none';
+            // So vale com "Insumo" escolhido: este select existe (escondido)
+            // tambem no modo "Produto do cardapio", e sem essa checagem o campo
+            // "Nome do novo insumo" aparecia solto embaixo do produto.
+            const ehInsumo = document.querySelector(`[data-item-tipo="${idx}"]`)?.value === 'insumo';
+            if (novoNome) novoNome.style.display = (ehInsumo && sel.value === '') ? 'block' : 'none';
         });
         document.querySelectorAll('[data-item-tipo]').forEach(sel => sel.onchange = () => {
             const idx = sel.dataset.itemTipo;
