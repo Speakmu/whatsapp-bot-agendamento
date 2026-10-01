@@ -595,6 +595,16 @@ def rascunho_adicionar_item(wa_id, item_id, quantidade, bot_cfg, cardapio=None):
     if it.get("disponivel") is False:
         return _resumo_rascunho(r, bot_cfg, status="erro",
                                 motivo=f"'{it.get('nome_exibicao') or it.get('nome')}' está ESGOTADO hoje — avise o cliente e ofereça outro item.")
+    # Teste de regressão (01/10): o gpt-4o-mini chamou adicionar_item com
+    # quantidade 0 pra um item parecido ("pastel de carne e queijo") que o
+    # cliente não pediu — o max(1, ...) abaixo transformava em 1 e o pedido
+    # fechou com item e valor a mais.
+    try:
+        if quantidade is not None and int(quantidade) < 1:
+            return _resumo_rascunho(r, bot_cfg, status="erro",
+                                    motivo="Quantidade 0: o cliente não pediu esse item. Não adicionei.")
+    except (TypeError, ValueError):
+        pass
     try:
         qtd = max(1, int(quantidade or 1))
     except (TypeError, ValueError):
@@ -3309,6 +3319,18 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             if len(fone_loja) >= 8 and fone_loja[-8:] in re.sub(r"\D", "", final_text or ""):
                 log_observacao = "festa_telefone_do_cadastro_trocado_pelo_aviso"
                 final_text = aviso_encomenda_festa
+
+        # Teste de regressão (01/10): com o pagamento "pix" registrado pelo servidor,
+        # a IA fechava o pedido sem NUNCA passar a chave PIX (3 de 4 modelos). Pedido
+        # em PIX: a chave aparece ao escolher o PIX e de novo ao registrar o pedido.
+        chave_pix_cfg = (bot_cfg.get("chave_pix") or "").strip()
+        if chave_pix_cfg and chave_pix_cfg not in (final_text or ""):
+            forma_pix = (rascunho_inicio_turno.get("forma_pagamento") == "PIX"
+                         or obter_rascunho(id_usuario).get("forma_pagamento") == "PIX")
+            ja_mostrou = any(chave_pix_cfg in (m.get("content") or "") for m in historico_msgs if m.get("role") == "assistant")
+            if forma_pix and (pedido_registrado_ok or not ja_mostrou):
+                final_text = (final_text or "") + f"\n\nChave PIX: {chave_pix_cfg}" + (
+                    " — é só pagar e mandar o comprovante por aqui. ✅" if pedido_registrado_ok else "")
 
         if pediu_humano and "equipe" not in _normalizar_termo(final_text or ""):
             log_observacao = "pediu_humano_texto_substituido"

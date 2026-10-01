@@ -165,7 +165,8 @@ CASOS = [
         # equipe depois confirmou que entrega. Bairro desconhecido = escalar, nunca negar.
         "nome": "bairro_desconhecido_nao_nega_sem_equipe",
         "mensagens": ["oi", "Vocês conseguem entregar alguns salgados aqui na Alpinia?"],
-        "espera": {"pedidos": 0, "resposta_contem": ["equipe"],
+        # (desde 28/09 o bot não chama mais a equipe: pergunta ao cliente o perímetro urbano)
+        "espera": {"pedidos": 0, "resposta_contem": ["perímetro urbano"],
                    "resposta_nao_contem": ["não conseguimos", "não entregamos", "infelizmente"]},
     },
     {
