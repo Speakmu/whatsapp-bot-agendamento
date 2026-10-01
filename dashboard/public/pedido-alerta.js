@@ -15,6 +15,9 @@
 (function () {
     if (window.self !== window.top) return;
 
+    // Vai em cada registro do alerta_log: mostra qual versão do alarme o
+    // painel daquele computador está rodando (aba aberta há dias = versão velha).
+    const VERSAO_ALERTA = '2026-10-01-faixa';
     const COLECAO_PEDIDOS = "pedidos";
     const STATUS_ATIVOS_PEDIDOS = ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"];
     // Enquanto o pedido estiver num destes, ainda é "novo" (ninguém aceitou).
@@ -59,6 +62,7 @@
                 const frame = document.getElementById('admin-frame');
                 dbPedidos.collection('alerta_log').add(Object.assign({
                     evento,
+                    versao: VERSAO_ALERTA,
                     em: firebase.firestore.FieldValue.serverTimestamp(),
                     hora_local: new Date().toISOString(),
                     sessao,
