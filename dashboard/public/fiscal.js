@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const auth = firebase.auth();
     const $ = (id) => document.getElementById(id);
 
+    const docFiltro = { busca: '', status: '', forma: '', de: '', ate: '', pagina: 1, porPagina: 20 };
     const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, relatorioMes: mesAtualStr() };
     let unsubRelatorio = null;
     const tabs = [
@@ -291,8 +292,73 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<table><tbody>${rows.map(([a, b, ok]) => `<tr><td>${esc(a)}</td><td>${esc(b)}</td><td><span class="badge ${ok ? 'b-ok' : 'b-warn'}">${ok ? 'OK' : 'Pendente'}</span></td></tr>`).join('')}</tbody></table>`;
     }
 
+    // Filtros e paginacao da aba Documentos (so no navegador, sobre state.notas).
+
+    function statusDaNota(n) { return String(n.status || '-').toUpperCase(); }
+    function formaDaNota(n) {
+        if (n.tipo === 'INUTILIZACAO') return '-';
+        return n.formaEmissao || (n.contingencia || statusDaNota(n) === 'CONTINGENCIA' ? 'CONTINGENCIA' : 'NORMAL');
+    }
+
+    function notasFiltradas() {
+        const f = docFiltro;
+        const busca = f.busca.trim().toLowerCase();
+        const de = f.de ? new Date(f.de + 'T00:00:00').getTime() : null;
+        const ate = f.ate ? new Date(f.ate + 'T23:59:59.999').getTime() : null;
+        return state.notas.filter(n => {
+            if (f.status && statusDaNota(n) !== f.status) return false;
+            if (f.forma && formaDaNota(n) !== f.forma) return false;
+            const ms = n.criado_em?.toMillis?.() ?? Date.now(); // escrita pendente = agora
+            if (de != null && ms < de) return false;
+            if (ate != null && ms > ate) return false;
+            if (busca) {
+                const alvo = [n.nNF, n.cliente, n.chave, n.pedido_id, n.motivo, n.protocolo].join(' ').toLowerCase();
+                if (!alvo.includes(busca)) return false;
+            }
+            return true;
+        });
+    }
+
     function renderDocuments() {
-        return `<div class="panel"><div class="panel-head"><h2>Documentos fiscais</h2><button class="btn" data-refresh-config>Atualizar config</button></div>${documentsTable(state.notas)}</div>`;
+        const f = docFiltro;
+        const statusOpts = ['AUTORIZADA', 'CANCELADA', 'REJEITADA', 'ERRO', 'ERRO_REDE', 'CONTINGENCIA', 'PROCESSANDO', 'INUTILIZADA'];
+        const opt = (v, atual, txt) => `<option value="${v}" ${atual === v ? 'selected' : ''}>${txt || v}</option>`;
+        return `<div class="panel"><div class="panel-head"><h2>Documentos fiscais</h2><button class="btn" data-refresh-config>Atualizar config</button></div>
+            <div class="actions" style="margin:0 0 12px;flex-wrap:wrap;gap:8px;align-items:flex-end">
+                <label class="sub" style="margin:0">Buscar <input type="search" id="doc-busca" placeholder="Numero, cliente, chave, pedido" value="${esc(f.busca)}"></label>
+                <label class="sub" style="margin:0">Status <select id="doc-status">${opt('', f.status, 'Todos')}${statusOpts.map(v => opt(v, f.status)).join('')}</select></label>
+                <label class="sub" style="margin:0">Emissao <select id="doc-forma">${opt('', f.forma, 'Todas')}${opt('NORMAL', f.forma, 'Normal')}${opt('CONTINGENCIA', f.forma, 'Contingencia')}</select></label>
+                <label class="sub" style="margin:0">De <input type="date" id="doc-de" value="${esc(f.de)}"></label>
+                <label class="sub" style="margin:0">Ate <input type="date" id="doc-ate" value="${esc(f.ate)}"></label>
+                <button class="btn" id="doc-limpar">Limpar filtros</button>
+            </div>
+            <div id="docs-lista">${renderListaDocumentos()}</div></div>`;
+    }
+
+    function renderListaDocumentos() {
+        const f = docFiltro;
+        const lista = notasFiltradas();
+        const totalPag = Math.max(1, Math.ceil(lista.length / f.porPagina));
+        if (f.pagina > totalPag) f.pagina = totalPag;
+        const ini = (f.pagina - 1) * f.porPagina;
+        const pagina = lista.slice(ini, ini + f.porPagina);
+        const pager = `<div class="actions" style="margin:12px 0 0;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
+            <span class="muted">${lista.length ? `${ini + 1}-${ini + pagina.length} de ${lista.length}` : '0 resultados'}${lista.length !== state.notas.length ? ` (${state.notas.length} carregados)` : ''}</span>
+            <span style="display:flex;gap:8px;align-items:center">
+                <label class="sub" style="margin:0">Por pagina <select id="doc-por-pagina">${[10, 20, 50, 100].map(v => `<option value="${v}" ${f.porPagina === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+                <button class="btn" data-doc-pag="-1" ${f.pagina <= 1 ? 'disabled' : ''}>&lsaquo; Anterior</button>
+                <span class="muted">Pagina ${f.pagina} de ${totalPag}</span>
+                <button class="btn" data-doc-pag="1" ${f.pagina >= totalPag ? 'disabled' : ''}>Proxima &rsaquo;</button>
+            </span></div>`;
+        return documentsTable(pagina) + pager;
+    }
+
+    // Atualiza so a lista (sem recriar os campos de filtro, pra nao perder o foco da busca).
+    function atualizarListaDocumentos() {
+        const alvo = $('docs-lista');
+        if (!alvo) return;
+        alvo.innerHTML = renderListaDocumentos();
+        bindActions();
     }
 
     function documentsTable(notas) {
@@ -782,6 +848,21 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('[data-imprimir]').forEach(btn => btn.onclick = () => imprimirDanfe(notaPorId(btn.dataset.imprimir)));
         document.querySelectorAll('[data-transmitir]').forEach(btn => btn.onclick = () => transmitir(btn));
         document.querySelectorAll('[data-cancelar]').forEach(btn => btn.onclick = () => cancelar(btn));
+        const docBind = (id, campo, evento) => {
+            const el = $(id);
+            if (!el) return;
+            el[evento] = () => { docFiltro[campo] = el.value; docFiltro.pagina = 1; atualizarListaDocumentos(); };
+        };
+        docBind('doc-busca', 'busca', 'oninput');
+        docBind('doc-status', 'status', 'onchange');
+        docBind('doc-forma', 'forma', 'onchange');
+        docBind('doc-de', 'de', 'onchange');
+        docBind('doc-ate', 'ate', 'onchange');
+        const docLimpar = $('doc-limpar');
+        if (docLimpar) docLimpar.onclick = () => { Object.assign(docFiltro, { busca: '', status: '', forma: '', de: '', ate: '', pagina: 1 }); render(); };
+        const docPorPag = $('doc-por-pagina');
+        if (docPorPag) docPorPag.onchange = () => { docFiltro.porPagina = Number(docPorPag.value) || 20; docFiltro.pagina = 1; atualizarListaDocumentos(); };
+        document.querySelectorAll('[data-doc-pag]').forEach(btn => btn.onclick = () => { docFiltro.pagina += Number(btn.dataset.docPag); atualizarListaDocumentos(); });
         const inut = $('btn-inutilizar-range');
         if (inut) inut.onclick = inutilizar;
         const syncDfe = $('btn-sync-dfe');
