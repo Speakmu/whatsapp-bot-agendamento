@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import {
   emitirNfceAvulsa, AvulsaRequest, AvulsaResult,
   transmitirNfceContingencia, CertInput,
+  consultarNfcePorChave, chaveNormalCalculada,
 } from './nfce';
 import { carregarCertificado } from './cert-store';
 
@@ -361,6 +362,30 @@ async function recuperarNotasProcessandoTravadas(cfg: any, cert: CertInput): Pro
       continue;
     }
     if (!d.pedido_id) continue;
+
+    // Antes de reabrir: a tentativa pode ter sido AUTORIZADA mesmo sem a resposta
+    // chegar aqui (a chave só é gravada no fim). Recalcula a chave e consulta a
+    // SEFAZ — se já estiver autorizada, adota o protocolo em vez de emitir uma
+    // segunda nota (duplicada) pra mesma venda.
+    try {
+      const chave = chaveNormalCalculada({
+        uf: cfg.uf, cnpj: cfg.cnpj, serie: Number(d.serie) || 1, nNF: Number(d.nNF),
+        seed: `pedido-${d.pedido_id}`, quando: new Date(criadoEm),
+      });
+      const c = await consultarNfcePorChave({ ambiente: d.ambiente || cfg.ambiente || 'homologacao', uf: cfg.uf, chave }, cert);
+      if (c.cStat === '100' && c.nProt) {
+        await doc.ref.update({
+          status: 'AUTORIZADA', chave, protocolo: c.nProt, cStat: '100',
+          motivo: 'Autorizado o uso da NF-e (conciliada: resposta da SEFAZ não chegou)',
+          formaEmissao: 'NORMAL', payload_pendente: admin.firestore.FieldValue.delete(),
+        });
+        console.log(`[retry fiscal] nota ${doc.id} já estava autorizada na SEFAZ (${chave}) — conciliada, sem reemitir.`);
+        continue;
+      }
+    } catch (err: any) {
+      console.warn(`[retry fiscal] nota ${doc.id}: consulta prévia falhou (${err?.message || err}) — não reemito neste ciclo.`);
+      continue; // sem confirmar na SEFAZ, é mais seguro esperar o próximo ciclo do que arriscar duplicar
+    }
 
     try {
       // Tira o registro velho do caminho (não fica mais em STATUS_NOTA_ATIVA)

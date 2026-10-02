@@ -353,6 +353,18 @@ function motivoComDetalhe(result: any): string | undefined {
   return `${base} | resposta: ${texto}`;
 }
 
+// Chave de acesso (44 dígitos) de uma emissão NORMAL (tpEmis=1), recalculada a
+// partir dos dados do registro — a mesma que emitirNfceAvulsa gerou (cNF vem do
+// seed). Serve pra consultar a SEFAZ sobre uma tentativa que não chegou a
+// gravar a chave localmente.
+export function chaveNormalCalculada(p: { uf: string; cnpj: string; serie: number; nNF: number; seed: string; quando: Date }): string {
+  const cUF = UF_CODIGO[p.uf.toUpperCase()];
+  const brt = new Date(p.quando.getTime() - 3 * 3600 * 1000);
+  const aamm = String(brt.getUTCFullYear()).slice(2) + String(brt.getUTCMonth() + 1).padStart(2, '0');
+  const c43 = `${cUF}${aamm}${p.cnpj.replace(/\D/g, '').padStart(14, '0')}65${String(p.serie).padStart(3, '0')}${String(p.nNF).padStart(9, '0')}1${builder.generateCNF(p.seed)}`;
+  return c43 + builder.calcDV(c43);
+}
+
 export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Promise<AvulsaResult> {
   // Entrega a domicílio (indPres=4) exige destinatário identificado por
   // CPF/CNPJ — sem isso o <dest> nem chega a ser montado (ver montarInputNFe/
@@ -436,7 +448,24 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
           : undefined,
       };
     } catch (err: any) {
-      // Falha de comunicação com a SEFAZ → cai para contingência (se permitida)
+      // Falha de comunicação com a SEFAZ → cai para contingência (se permitida).
+      // Antes disso, consulta a chave: timeout/queda na RESPOSTA não quer dizer que
+      // a SEFAZ não recebeu — a nota pode ter sido autorizada, e emitir outra em
+      // contingência no mesmo número duplicaria a NFC-e da venda.
+      try {
+        const c = await transport.consultaProtocolo(chave44, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF);
+        if (c.cStat === '100' && c.nProt) {
+          return {
+            status: 'AUTORIZADA',
+            chave: chave44,
+            protocolo: c.nProt,
+            cStat: '100',
+            motivo: 'Autorizado o uso da NF-e (confirmada por consulta após falha na resposta)',
+            xml: signedXml,
+            danfeBase64: await gerarDanfeBase64(signedXml, { accessKey: chave44, protocol: c.nProt, receivedAt: c.dhRecbto }),
+          };
+        }
+      } catch { /* sem consulta também → segue o fluxo */ }
       if (!permitirCont) throw err;
     }
   }
