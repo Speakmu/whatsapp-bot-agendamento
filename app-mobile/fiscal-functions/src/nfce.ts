@@ -322,6 +322,37 @@ export async function gerarPreviaDanfe(req: AvulsaRequest): Promise<Buffer> {
   return pdf;
 }
 
+// Duplicidade (cStat 204): a SEFAZ já tem uma NFC-e com essa chave — o caso
+// típico é a primeira tentativa ter sido autorizada e a resposta se perder
+// (timeout/queda), e o retry regerar a MESMA chave (cNF vem do id do pedido).
+// Em vez de gravar REJEITADA numa venda que tem nota válida, consulta a chave
+// e, se estiver autorizada (100), adota o protocolo da autorização original.
+async function conciliarDuplicidade(
+  result: any, chave44: string, endpoints: any, cred: any, tpAmb: '1' | '2', cUF: string,
+): Promise<any> {
+  if (result.cStat !== '204' || !chave44) return result;
+  try {
+    const c = await transport.consultaProtocolo(chave44, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF);
+    if (c.cStat === '100' && c.nProt) {
+      return { ...result, cStat: '100', xMotivo: 'Autorizado o uso da NF-e (conciliada após duplicidade)', nProt: c.nProt, dhRecbto: c.dhRecbto };
+    }
+    console.warn(`[nfce] duplicidade ${chave44}: consulta retornou ${c.cStat} ${c.xMotivo}`);
+  } catch (err: any) {
+    console.warn(`[nfce] duplicidade ${chave44}: falha na consulta:`, err?.message || err);
+  }
+  return result;
+}
+
+// Falha de schema (cStat 215): a SEFAZ às vezes manda o detalhe só no corpo
+// da resposta. Anexa um trecho ao motivo pra dar pra diagnosticar o campo.
+function motivoComDetalhe(result: any): string | undefined {
+  const base = result.xMotivo ?? undefined;
+  if (result.cStat !== '215' || !result.rawResponse) return base;
+  const texto = String(result.rawResponse).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 500);
+  console.error(`[nfce] schema 215 — resposta SEFAZ: ${texto}`);
+  return `${base} | resposta: ${texto}`;
+}
+
 export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Promise<AvulsaResult> {
   // Entrega a domicílio (indPres=4) exige destinatário identificado por
   // CPF/CNPJ — sem isso o <dest> nem chega a ser montado (ver montarInputNFe/
@@ -391,13 +422,14 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
         }
       }
 
+      result = await conciliarDuplicidade(result, chave44, endpoints, cred, tpAmb, cUF);
       const autorizada = result.cStat === '100';
       return {
         status: autorizada ? 'AUTORIZADA' : 'REJEITADA',
         chave: chave44,
         protocolo: result.nProt,
         cStat: result.cStat ?? undefined,
-        motivo: result.xMotivo ?? undefined,
+        motivo: motivoComDetalhe(result),
         xml: signedXml,
         danfeBase64: autorizada
           ? await gerarDanfeBase64(signedXml, { accessKey: chave44, protocol: result.nProt, receivedAt: result.dhRecbto })
@@ -466,12 +498,14 @@ export async function transmitirNfceContingencia(
     }
   }
 
+  const chaveCont = (req.xmlAssinado.match(/<infNFe[^>]*Id="NFe(\d{44})"/) || [])[1] || '';
+  result = await conciliarDuplicidade(result, chaveCont, endpoints, cred, tpAmb, cUF);
   const autorizada = result.cStat === '100';
   return {
     status: autorizada ? 'AUTORIZADA' : 'REJEITADA',
     protocolo: result.nProt,
     cStat: result.cStat ?? undefined,
-    motivo: result.xMotivo ?? undefined,
+    motivo: motivoComDetalhe(result),
     xml: req.xmlAssinado,
     danfeBase64: autorizada
       ? await gerarDanfeBase64(req.xmlAssinado, { protocol: result.nProt, receivedAt: result.dhRecbto })
