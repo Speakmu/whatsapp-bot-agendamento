@@ -331,6 +331,8 @@
             // XML assinado enviado (ou tentado) — sempre grava, mesmo em rejeicao,
             // para dar pra baixar e depurar o motivo da rejeicao.
             xml: data.xml || null,
+            // nfeProc = NFe + protocolo da SEFAZ (XML de distribuição p/ contabilidade).
+            xmlProc: data.xmlProc || null,
             // Histórico permanente de como a nota nasceu — nunca é sobrescrito depois
             // (diferente de "contingencia", que indica só se ainda esta pendente de transmissao).
             formaEmissao: emContingencia ? 'CONTINGENCIA' : 'NORMAL',
@@ -554,6 +556,7 @@
                 status: 'AUTORIZADA', protocolo: data.protocolo || null, cStat: data.cStat || null,
                 motivo: null, contingencia: false, xmlAssinado: null,
                 danfeBase64: data.danfeBase64 || nota.danfeBase64 || null,
+                xmlProc: data.xmlProc || null,
                 transmitida_em: firebase.firestore.FieldValue.serverTimestamp()
             });
             return data;

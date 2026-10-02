@@ -191,6 +191,7 @@ async function gravarResultado(ref: admin.firestore.DocumentReference, data: Avu
     motivo: data.motivo || null,
     danfeBase64: data.danfeBase64 || null,
     xml: data.xml || null,
+    xmlProc: data.xmlProc || null,
     formaEmissao: emContingencia ? 'CONTINGENCIA' : 'NORMAL',
     contingencia: !!data.contingencia,
     xmlAssinado: emContingencia ? (data.xml || null) : null,
@@ -318,6 +319,7 @@ async function transmitirNotaEmContingencia(
         contingencia: false,
         xmlAssinado: null,
         danfeBase64: resultado.danfeBase64 || nota.danfeBase64 || null,
+        xmlProc: resultado.xmlProc || null,
         transmitida_em: admin.firestore.FieldValue.serverTimestamp(),
       });
     } else if (resultado.cStat) {

@@ -11,6 +11,7 @@
 // ============================================================
 import * as admin from 'firebase-admin';
 import { CertInput, consultarNfcePorChave, chaveNormalCalculada } from './nfce';
+import { nfeProcDe } from './xml-proc';
 
 function db(): admin.firestore.Firestore {
   if (!admin.apps.length) admin.initializeApp();
@@ -56,6 +57,7 @@ export async function conciliarNotasDoPedido(
           status: 'AUTORIZADA', chave, protocolo: r.nProt, cStat: '100',
           motivo: 'Autorizado o uso da NF-e (conciliada com a SEFAZ antes de nova emissão)',
           formaEmissao: 'NORMAL', contingencia: false,
+          ...(nfeProcDe(n.xml || n.xmlAssinado, r.rawResponse) ? { xmlProc: nfeProcDe(n.xml || n.xmlAssinado, r.rawResponse) } : {}),
           payload_pendente: admin.firestore.FieldValue.delete(),
         });
         console.log(`[conciliar] pedido ${pedidoId}: nota ${n.nNF} já estava AUTORIZADA na SEFAZ (${chave}) — não emite outra.`);

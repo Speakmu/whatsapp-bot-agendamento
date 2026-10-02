@@ -12,6 +12,7 @@ import { SefazTransport } from './engine/sefaz-transport.service';
 import { getDistribuicaoDFeEndpoint, getSefazEndpoints } from './engine/sefaz-endpoints';
 import { DanfeNfceService } from './engine/danfe-nfce.service';
 import { obterAliquotaIBPT } from './ibpt-store';
+import { nfeProcDe, extrairProtNFe, montarNfeProc, extrairEventosCancelamento } from './xml-proc';
 
 const builder = new NfeXmlBuilder();
 const signer = new NfeXmlSigner();
@@ -114,6 +115,7 @@ export interface AvulsaResult {
   cStat?: string;
   motivo?: string;
   xml?: string;
+  xmlProc?: string;         // nfeProc (NFe + protocolo) — XML de distribuição p/ contabilidade
   danfeBase64?: string;
   contingencia?: boolean;   // true quando emitida offline (tpEmis=9), pendente de transmissão
 }
@@ -334,7 +336,7 @@ async function conciliarDuplicidade(
   try {
     const c = await transport.consultaProtocolo(chave44, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF);
     if (c.cStat === '100' && c.nProt) {
-      return { ...result, cStat: '100', xMotivo: 'Autorizado o uso da NF-e (conciliada após duplicidade)', nProt: c.nProt, dhRecbto: c.dhRecbto };
+      return { ...result, cStat: '100', xMotivo: 'Autorizado o uso da NF-e (conciliada após duplicidade)', nProt: c.nProt, dhRecbto: c.dhRecbto, rawResponse: c.rawResponse };
     }
     console.warn(`[nfce] duplicidade ${chave44}: consulta retornou ${c.cStat} ${c.xMotivo}`);
   } catch (err: any) {
@@ -443,6 +445,7 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
         cStat: result.cStat ?? undefined,
         motivo: motivoComDetalhe(result),
         xml: signedXml,
+        xmlProc: autorizada ? nfeProcDe(signedXml, result.rawResponse) : undefined,
         danfeBase64: autorizada
           ? await gerarDanfeBase64(signedXml, { accessKey: chave44, protocol: result.nProt, receivedAt: result.dhRecbto })
           : undefined,
@@ -462,6 +465,7 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
             cStat: '100',
             motivo: 'Autorizado o uso da NF-e (confirmada por consulta após falha na resposta)',
             xml: signedXml,
+            xmlProc: nfeProcDe(signedXml, c.rawResponse),
             danfeBase64: await gerarDanfeBase64(signedXml, { accessKey: chave44, protocol: c.nProt, receivedAt: c.dhRecbto }),
           };
         }
@@ -536,6 +540,7 @@ export async function transmitirNfceContingencia(
     cStat: result.cStat ?? undefined,
     motivo: motivoComDetalhe(result),
     xml: req.xmlAssinado,
+    xmlProc: autorizada ? nfeProcDe(req.xmlAssinado, result.rawResponse) : undefined,
     danfeBase64: autorizada
       ? await gerarDanfeBase64(req.xmlAssinado, { protocol: result.nProt, receivedAt: result.dhRecbto })
       : undefined,
@@ -557,6 +562,19 @@ export async function consultarNfcePorChave(req: ConsultaRequest, cert: CertInpu
   const cred = carregarCred(cert);
   const endpoints = getSefazEndpoints(uf, tpAmb === '1' ? 'PRODUCAO' : 'HOMOLOGACAO');
   return transport.consultaProtocolo(chave, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF);
+}
+
+// XMLs de distribuição de uma nota já existente: junta o <NFe> guardado com o
+// protNFe devolvido pela SEFAZ na consulta, e traz os eventos de cancelamento.
+export async function xmlsParaContabilidade(req: ConsultaRequest & { xml?: string }, cert: CertInput) {
+  const r = await consultarNfcePorChave(req, cert);
+  const prot = extrairProtNFe(r.rawResponse);
+  return {
+    cStat: r.cStat,
+    protocolo: r.nProt,
+    xmlProc: montarNfeProc(req.xml, prot),
+    eventosCancelamento: extrairEventosCancelamento(r.rawResponse),
+  };
 }
 
 // ============================================================

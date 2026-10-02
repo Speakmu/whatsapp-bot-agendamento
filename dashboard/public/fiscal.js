@@ -389,7 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const validas = notasDoMes.filter(n => n.tipo !== 'INUTILIZACAO' && (n.status === 'AUTORIZADA' || n.status === 'CONTINGENCIA'));
         const canceladas = notasDoMes.filter(n => n.status === 'CANCELADA');
         const totalFaturado = validas.reduce((s, n) => s + Number(n.valor || 0), 0);
-        const comXml = notasDoMes.filter(n => n.xml || n.xmlAssinado);
+        const comXml = notasValidasParaContabilidade(notasDoMes).filter(n => n.xmlProc || n.xml || n.xmlAssinado);
 
         return `<div class="panel">
             <div class="panel-head">
@@ -412,20 +412,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // CSV com os campos que a contabilidade costuma pedir pra conciliar as
     // vendas do periodo (numero, serie, chave, datas, valores, status).
+    // So documentos validos fiscalmente (autorizadas/canceladas) entram no relatorio
+    // da contabilidade — ERRO/REJEITADA/contingencia nao transmitida nao existem na SEFAZ.
+    function notasValidasParaContabilidade(notas) {
+        return notas.filter(n => n.tipo !== 'INUTILIZACAO' && ['AUTORIZADA', 'CANCELADA'].includes(String(n.status || '').toUpperCase()));
+    }
+
     function exportarRelatorioCsv(notas, mes) {
         const cols = ['Numero', 'Serie', 'Chave', 'Status', 'Forma emissao', 'Cliente', 'Valor', 'Data emissao', 'Protocolo'];
-        const linhas = notas.map(n => [
+        const inut = notas.filter(n => n.tipo === 'INUTILIZACAO' && n.status === 'INUTILIZADA');
+        const linhas = [...notasValidasParaContabilidade(notas), ...inut].map(n => [
             n.tipo === 'INUTILIZACAO' ? `Inut. ${n.nNFIni}-${n.nNFFin}` : (n.nNF ?? ''),
             n.serie ?? '',
-            n.chave || '',
+            { texto: n.chave || '' },
             n.status || '',
             n.formaEmissao || (n.contingencia ? 'CONTINGENCIA' : 'NORMAL'),
             n.cliente || '',
             n.valor != null ? String(n.valor).replace('.', ',') : '',
             n.criado_em?.toDate ? n.criado_em.toDate().toLocaleString('pt-BR') : '',
-            n.protocolo || ''
+            { texto: n.protocolo || '' }
         ]);
-        const escCsv = (v) => `"${String(v).replace(/"/g, '""')}"`;
+        // Chave (44 digitos) e protocolo (15) precisam ir como TEXTO: o Excel os
+        // converte para notacao cientifica (3,12609E+43) e perde os digitos.
+        const escCsv = (v) => (v && typeof v === 'object')
+            ? (v.texto ? `"=""${v.texto}"""` : '""')
+            : `"${String(v).replace(/"/g, '""')}"`;
         const csv = '﻿' + [cols, ...linhas].map(l => l.map(escCsv).join(';')).join('\r\n');
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
         const a = document.createElement('a');
@@ -440,20 +451,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // espera pra importar num sistema de escrituracao (SPED etc.).
     async function exportarXmlsZip(notas, mes, btn) {
         if (!window.JSZip) { alert('Biblioteca de .zip nao carregou (sem internet?). Tente novamente.'); return; }
-        const comXml = notas.filter(n => n.xml || n.xmlAssinado);
-        if (!comXml.length) return;
+        // So AUTORIZADA/CANCELADA (ERRO/REJEITADA nunca existiram na SEFAZ). O arquivo
+        // e o nfeProc (NFe + protocolo); sem ele a nota entra marcada SEM-PROTOCOLO.
+        const validas = notasValidasParaContabilidade(notas).filter(n => n.xmlProc || n.xml || n.xmlAssinado);
+        if (!validas.length) return;
         const textoOriginal = btn ? btn.textContent : '';
         if (btn) { btn.disabled = true; btn.textContent = 'Gerando .zip...'; }
         try {
             const zip = new window.JSZip();
-            comXml.forEach(n => {
+            let semProtocolo = 0;
+            validas.forEach(n => {
                 const base = n.chave || `nNF-${n.nNF || n.id}`;
-                zip.file(base + '-nfce.xml', n.xml || n.xmlAssinado);
-                // Evento de cancelamento (110111) — documento que prova o
-                // cancelamento perante a SEFAZ, separado da NF-e original.
-                if (n.cancelamento?.xmlEvento) {
-                    zip.file(base + '-cancelamento.xml', n.cancelamento.xmlEvento);
-                }
+                if (n.xmlProc) zip.file(base + '-procNFe.xml', n.xmlProc);
+                else { semProtocolo++; zip.file(base + '-SEM-PROTOCOLO.xml', n.xml || n.xmlAssinado); }
+                // Evento de cancelamento (110111) — prova do cancelamento perante a SEFAZ.
+                const ev = n.cancelamento?.xmlProcEvento || n.cancelamento?.xmlEvento;
+                if (ev) zip.file(base + '-cancelamento.xml', ev);
+                else if (n.status === 'CANCELADA') zip.file(base + '-SEM-EVENTO-CANCELAMENTO.txt', 'XML do evento de cancelamento nao disponivel.');
             });
             const blob = await zip.generateAsync({ type: 'blob' });
             const a = document.createElement('a');
@@ -461,6 +475,7 @@ document.addEventListener('DOMContentLoaded', () => {
             a.download = `xmls-nfce-${mes}.zip`;
             a.click();
             URL.revokeObjectURL(a.href);
+            if (semProtocolo) alert(`${semProtocolo} XML(s) ficaram sem protocolo (arquivos "-SEM-PROTOCOLO.xml"). Avise o suporte antes de enviar para a contabilidade.`);
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
         }
@@ -1436,7 +1451,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function baixarXml(nota) {
-        const xml = nota?.xml || nota?.xmlAssinado;
+        const xml = nota?.xmlProc || nota?.xml || nota?.xmlAssinado;
         if (!xml) return;
         const blob = new Blob([xml], { type: 'application/xml' });
         const a = document.createElement('a');

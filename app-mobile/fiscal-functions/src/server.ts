@@ -26,7 +26,7 @@ import {
   processarXmlAvulso,
   validarCertificado, CertInput,
   obterValidadeCertificado,
-  consultarNfcePorChave, ConsultaRequest,
+  consultarNfcePorChave, ConsultaRequest, xmlsParaContabilidade,
 } from './nfce';
 import { carregarCertificado, salvarCertificado, existeCertificado } from './cert-store';
 import { prewarmAliquotas } from './ibpt-store';
@@ -272,6 +272,20 @@ app.post('/fiscal/nfce/conciliar-pedido', auth, async (req, res) => {
     res.json(await conciliarNotasDoPedido(pedidoId, cert));
   } catch (err: any) {
     console.error('[conciliar-pedido] erro:', err?.message || err);
+    res.status(500).json({ error: err?.message || String(err) });
+  }
+});
+
+// XML de distribuição (nfeProc) e eventos de cancelamento de uma nota existente.
+app.post('/fiscal/nfce/xml-proc', auth, async (req, res) => {
+  try {
+    const payload = req.body as ConsultaRequest & { xml?: string };
+    if (!payload?.chave) return res.status(400).json({ error: 'Chave ausente.' });
+    if (!payload?.uf) return res.status(400).json({ error: 'UF ausente.' });
+    const cert = await exigirCert(res); if (!cert) return;
+    res.json(await xmlsParaContabilidade(payload, cert));
+  } catch (err: any) {
+    console.error('[xml-proc] erro:', err?.message || err);
     res.status(500).json({ error: err?.message || String(err) });
   }
 });

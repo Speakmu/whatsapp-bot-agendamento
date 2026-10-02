@@ -41,6 +41,8 @@ export interface SefazCancelResult {
 }
 
 export interface SefazConsultaResult {
+  /** Raw SOAP response XML (traz protNFe e eventos) */
+  rawResponse?: string;
   cStat: string;
   xMotivo: string;
   nProt?: string;
@@ -678,7 +680,7 @@ export class SefazTransport {
     const nProt = (infProtXml ? this.extractTag(infProtXml, 'nProt') : null) ?? undefined;
     const dhRecbto = (infProtXml ? this.extractTag(infProtXml, 'dhRecbto') : null) ?? undefined;
     const chNFe = (infProtXml ? this.extractTag(infProtXml, 'chNFe') : null) ?? undefined;
-    return { cStat, xMotivo, nProt, dhRecbto, chNFe };
+    return { rawResponse: soapXml, cStat, xMotivo, nProt, dhRecbto, chNFe };
   }
 
   private parseStatusResponse(soapXml: string): SefazStatusResult {
