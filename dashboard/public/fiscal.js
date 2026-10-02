@@ -426,7 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
             n.serie ?? '',
             { texto: n.chave || '' },
             n.status || '',
-            n.formaEmissao || (n.contingencia ? 'CONTINGENCIA' : 'NORMAL'),
+            n.tipo === 'INUTILIZACAO' ? '' : (n.formaEmissao || (n.contingencia ? 'CONTINGENCIA' : 'NORMAL')),
             n.cliente || '',
             n.valor != null ? String(n.valor).replace('.', ',') : '',
             n.criado_em?.toDate ? n.criado_em.toDate().toLocaleString('pt-BR') : '',
