@@ -514,6 +514,23 @@ export async function transmitirNfceContingencia(
 }
 
 // ============================================================
+//  CONSULTA de situação por chave (NFeConsultaProtocolo4) — somente leitura.
+//  Usada para conciliar notas que ficaram REJEITADA por duplicidade (204).
+// ============================================================
+export interface ConsultaRequest { ambiente: 'homologacao' | 'producao'; uf: string; chave: string; }
+export async function consultarNfcePorChave(req: ConsultaRequest, cert: CertInput) {
+  const chave = String(req.chave || '').replace(/\D/g, '');
+  if (chave.length !== 44) throw new Error('Chave inválida (44 dígitos).');
+  const tpAmb: '1' | '2' = req.ambiente === 'producao' ? '1' : '2';
+  const uf = req.uf.toUpperCase();
+  const cUF = UF_CODIGO[uf];
+  if (!cUF) throw new Error(`UF inválida: ${uf}`);
+  const cred = carregarCred(cert);
+  const endpoints = getSefazEndpoints(uf, tpAmb === '1' ? 'PRODUCAO' : 'HOMOLOGACAO');
+  return transport.consultaProtocolo(chave, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF);
+}
+
+// ============================================================
 //  CANCELAMENTO (evento 110111 — RecepcaoEvento4)
 // ============================================================
 export interface CancelRequest {

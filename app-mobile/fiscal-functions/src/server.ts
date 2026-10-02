@@ -7,6 +7,7 @@
 //    POST /fiscal/nfce/cancelar   -> cancela (evento 110111)
 //    POST /fiscal/nfce/inutilizar -> inutiliza faixa de numeração
 //    POST /fiscal/nfce/transmitir -> transmite NFC-e de contingência
+//    POST /fiscal/nfce/consultar  -> consulta situação por chave (somente leitura)
 //  Autenticação: header Authorization: Bearer <API_KEY>
 //  Certificado: enviado por /fiscal/certificado (Firestore) OU arquivo CERT_PATH.
 //  Senha: SEMPRE via variável de ambiente CERT_PASSWORD.
@@ -25,6 +26,7 @@ import {
   processarXmlAvulso,
   validarCertificado, CertInput,
   obterValidadeCertificado,
+  consultarNfcePorChave, ConsultaRequest,
 } from './nfce';
 import { carregarCertificado, salvarCertificado, existeCertificado } from './cert-store';
 import { prewarmAliquotas } from './ibpt-store';
@@ -241,6 +243,20 @@ app.post('/fiscal/nfce/inutilizar', auth, async (req, res) => {
     res.status(result.status === 'INUTILIZADA' ? 200 : 422).json(result);
   } catch (err: any) {
     console.error('[NFC-e inutilizar] erro:', err?.message || err);
+    res.status(500).json({ status: 'ERRO', error: err?.message || String(err) });
+  }
+});
+
+app.post('/fiscal/nfce/consultar', auth, async (req, res) => {
+  try {
+    const payload = req.body as ConsultaRequest;
+    if (!payload?.chave) return res.status(400).json({ error: 'Chave ausente.' });
+    if (!payload?.uf) return res.status(400).json({ error: 'UF ausente.' });
+    const cert = await exigirCert(res); if (!cert) return;
+    const r = await consultarNfcePorChave(payload, cert);
+    res.json({ cStat: r.cStat, xMotivo: r.xMotivo, nProt: r.nProt, dhRecbto: r.dhRecbto, chNFe: r.chNFe });
+  } catch (err: any) {
+    console.error('[NFC-e consultar] erro:', err?.message || err);
     res.status(500).json({ status: 'ERRO', error: err?.message || String(err) });
   }
 });
