@@ -1804,6 +1804,21 @@ _PALAVRAS_PAGAMENTO = {"PIX": ("pix",),
                        "CARTAO": ("cartao", "credito", "debito", "maquininha", "maquina")}
 
 
+def _forma_pagamento_na_frase(m):
+    """Frase curta de escolha de pagamento ("vai ser pix", "pode ser no cartão",
+    "dinheiro mesmo"): devolve a forma, ou None se citar mais de uma, perguntar
+    ou negar. Caso real (02/10): "Vai ser pix" não era reconhecido (só a palavra
+    solta), o bot disse "ótima escolha, PIX" sem registrar, e o "sim" seguinte foi
+    recusado por falta de pagamento — o cliente teve que confirmar três vezes."""
+    if not m or len(m) > 50 or "?" in m:
+        return None
+    toks = set(re.split(r"[^a-z0-9]+", _normalizar_termo(m)))
+    if toks & {"nao", "sem", "nunca", "troca", "trocar", "mudar"}:
+        return None
+    achadas = [forma for forma, palavras in _PALAVRAS_PAGAMENTO.items() if toks & set(palavras)]
+    return achadas[0] if len(achadas) == 1 else None
+
+
 def _cliente_mencionou_pagamento(forma, mensagem_atual, historico):
     """A forma de pagamento apareceu em alguma fala do CLIENTE? O gpt-4o-mini
     chamava definir_pagamento("DINHEIRO") sem o cliente ter dito nada — o
@@ -2139,7 +2154,7 @@ def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
     r = obter_rascunho(wa_id)
     if not r.get("itens"):
         return eventos
-    if len(m) > 30 and not _RE_PARECE_ENDERECO.match(m):
+    if len(m) > 30 and not _RE_PARECE_ENDERECO.match(m) and not _forma_pagamento_na_frase(m):
         return eventos
     if _RE_SLOT_RETIRADA.match(m):
         res = rascunho_definir_entrega(wa_id, "RETIRADA", None, None, bot_cfg)
@@ -2147,8 +2162,9 @@ def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
     elif _RE_SLOT_ENTREGA.match(m) and r.get("tipo_entrega") != "ENTREGA":
         res = rascunho_definir_entrega(wa_id, "ENTREGA", None, None, bot_cfg)
         eventos.append({"nome": "definir_entrega[servidor]", "args": {"tipo": "ENTREGA"}, "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})
-    elif _RE_SLOT_PAGAMENTO.match(m):
-        forma = _RE_SLOT_PAGAMENTO.match(m).group(2)
+    elif _RE_SLOT_PAGAMENTO.match(m) or (_forma_pagamento_na_frase(m)
+                                         and not _itens_mencionados(mensagem, carregar_cardapio())):
+        forma = _RE_SLOT_PAGAMENTO.match(m).group(2) if _RE_SLOT_PAGAMENTO.match(m) else _forma_pagamento_na_frase(m)
         res = rascunho_definir_pagamento(wa_id, forma, bot_cfg)
         if res.get("status") == "ok":
             eventos.append({"nome": "definir_pagamento[servidor]", "args": {"forma": forma}, "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})

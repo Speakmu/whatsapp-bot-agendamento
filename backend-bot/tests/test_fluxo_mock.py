@@ -1034,3 +1034,24 @@ def test_cliente_reclama_do_resumo_limpa_o_carrinho(ambiente, monkeypatch):
     bot.rascunho_adicionar_item(tel, _codigo("coxinha de frango"), 1, cfg)
     _conversar(tel, ["o endereço está errado"])
     assert len(bot.obter_rascunho(tel)["itens"]) == 1
+
+
+def test_vai_ser_pix_registra_pagamento_e_sim_fecha(ambiente, monkeypatch):
+    """Caso Taíssa (02/10): "Vai ser pix" não registrava o PIX (só a palavra solta), o bot
+    dizia "ótima escolha" e o "sim" seguinte era recusado: o cliente confirmou 3 vezes."""
+    cfg = bot.obter_config_bot()
+    tel = "553597260180"
+    bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
+    bot.rascunho_definir_entrega(tel, "RETIRADA", None, None, cfg)
+    roteiro = {"Vai ser pix": ["Ótima escolha! Confere o pedido? Posso fechar?"], "Sim": (("fechar_pedido", {}), "Fechado!")}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    _conversar(tel, ["oi", "Vai ser pix"])
+    assert bot.obter_rascunho(tel)["forma_pagamento"] == "PIX"
+    _conversar(tel, ["Sim"])
+    assert len(_pedidos(ambiente, tel)) == 1
+
+
+def test_forma_pagamento_na_frase():
+    f = lambda t: bot._forma_pagamento_na_frase(bot._normalizar_termo(t))
+    assert f("pode ser no cartão") == "CARTAO" and f("dinheiro mesmo") == "DINHEIRO"
+    assert f("pix ou cartão") is None and f("não quero pix") is None and f("pode ser pix?") is None
