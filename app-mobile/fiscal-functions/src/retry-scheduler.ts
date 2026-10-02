@@ -22,6 +22,7 @@ import {
   consultarNfcePorChave, chaveNormalCalculada,
 } from './nfce';
 import { carregarCertificado } from './cert-store';
+import { conciliarNotasDoPedido, auditarDuplicidades } from './conciliar';
 
 function db(): admin.firestore.Firestore {
   if (!admin.apps.length) admin.initializeApp();
@@ -213,6 +214,11 @@ async function emitirParaPedido(pedidoId: string, pedido: any, cfg: any, cert: C
 async function emitirParaPedidoComTravaAdquirida(pedidoId: string, pedido: any, cfg: any, cert: CertInput): Promise<void> {
   const existentes = await db().collection('notas_fiscais').where('pedido_id', '==', pedidoId).get();
   if (existentes.docs.some((d) => STATUS_NOTA_ATIVA.includes(d.data().status))) return;
+
+  // Antes de reservar número novo: uma tentativa anterior em ERRO/REJEITADA pode
+  // ter sido autorizada pela SEFAZ sem a resposta chegar. Se a consulta falhar,
+  // lança — o pedido continua pendente e é tentado de novo no próximo ciclo.
+  if ((await conciliarNotasDoPedido(pedidoId, cert)).autorizada) return;
 
   const nNF = await proximoNumero();
   // Só o app captura CPF do cliente — o bot do WhatsApp (origem WHATSAPP)
@@ -446,6 +452,8 @@ export async function retentarPendenciasFiscais(): Promise<void> {
     await transmitirNotaEmContingencia(doc, cfg, cert)
       .catch((err) => console.error(`[retry fiscal] nota ${doc.id} (CONTINGENCIA):`, err?.message || err));
   }
+
+  await auditarDuplicidades().catch((err) => console.error('[retry fiscal] auditoria de duplicidade falhou:', err?.message || err));
 
   console.log('[retry fiscal] ciclo concluído.');
 }

@@ -30,6 +30,7 @@ import {
 } from './nfce';
 import { carregarCertificado, salvarCertificado, existeCertificado } from './cert-store';
 import { prewarmAliquotas } from './ibpt-store';
+import { conciliarNotasDoPedido } from './conciliar';
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const API_KEY = process.env.API_KEY || '';
@@ -258,6 +259,20 @@ app.post('/fiscal/nfce/consultar', auth, async (req, res) => {
   } catch (err: any) {
     console.error('[NFC-e consultar] erro:', err?.message || err);
     res.status(500).json({ status: 'ERRO', error: err?.message || String(err) });
+  }
+});
+
+// Antes de o painel pedir um número novo para um pedido que já tem nota em
+// ERRO/REJEITADA: confere na SEFAZ se alguma tentativa anterior foi autorizada.
+app.post('/fiscal/nfce/conciliar-pedido', auth, async (req, res) => {
+  try {
+    const pedidoId = String(req.body?.pedido_id || '');
+    if (!pedidoId) return res.status(400).json({ error: 'pedido_id ausente.' });
+    const cert = await exigirCert(res); if (!cert) return;
+    res.json(await conciliarNotasDoPedido(pedidoId, cert));
+  } catch (err: any) {
+    console.error('[conciliar-pedido] erro:', err?.message || err);
+    res.status(500).json({ error: err?.message || String(err) });
   }
 });
 

@@ -188,6 +188,27 @@
             return { id: ativa.id, status: d.status, nNF: d.nNF, serie: d.serie };
         }
 
+        // Já houve tentativa que terminou em ERRO/REJEITADA? Ela pode ter sido
+        // AUTORIZADA pela SEFAZ sem a resposta chegar aqui — pedir número novo
+        // duplicaria a NFC-e da venda. Confere na SEFAZ antes; se não der pra
+        // confirmar, NÃO emite (melhor falhar agora do que duplicar).
+        const falhas = existentes.docs.filter(doc => ['ERRO', 'REJEITADA'].includes(doc.data().status) && doc.data().nNF);
+        if (falhas.length) {
+            let conc;
+            try {
+                const r = await fetch(`${cfg.url}/fiscal/nfce/conciliar-pedido`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { 'Authorization': `Bearer ${cfg.apiKey}` } : {}) },
+                    body: JSON.stringify({ pedido_id: pedidoId })
+                });
+                conc = await r.json();
+                if (!r.ok) throw new Error(conc.error || `HTTP ${r.status}`);
+            } catch (err) {
+                throw new Error('Não foi possível confirmar na SEFAZ se a tentativa anterior foi autorizada (' + err.message + '). Tente novamente em instantes.');
+            }
+            if (conc.autorizada) return { id: conc.id, status: 'AUTORIZADA', nNF: conc.nNF, serie: cfg.serie || 1 };
+        }
+
         const nNF = await proximoNumero();
         // Entrega a domicilio: indPres=4 (NT 2020.006), com indIntermed=0
         // (canal proprio, sem marketplace de terceiro) — só pro app (que
