@@ -8,10 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const $ = (id) => document.getElementById(id);
 
     const DOC_BOT = db.collection('configuracoes').doc('bot');
+    const CLIENTE = window.__CLIENT_CONFIG__ || {};
+    if (CLIENTE.linkAppWeb) $('bot-link-app').placeholder = CLIENTE.linkAppWeb;
+    if (CLIENTE.nomeEmpresa) $('bot-nome-empresa').placeholder = CLIENTE.nomeEmpresa;
     const BOT_DEFAULTS = {
         ativo: true,
         nome_atendente: 'Sofia',
-        nome_empresa: 'Lileamar Salgados',
+        nome_empresa: CLIENTE.nomeEmpresa || '',
         chave_pix: '', // sem chave de exemplo: campo vazio força o cliente a configurar a chave real
         modelo: 'gpt-4o',
         mensagem_inicial: 'Ola! Como posso ajudar?',

@@ -11,7 +11,7 @@
 
     const arquivoAtual = (location.pathname.split('/').pop() || 'home.html').toLowerCase();
     const isAdminShell = arquivoAtual === 'admin.html';
-    const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
+    const ADMIN_EMAIL = String((window.__CLIENT_CONFIG__ || {}).adminEmail || '').trim().toLowerCase();
     // Acesso de suporte (mesmo e-mail da categoria "Suporte" em
     // configuracoes.js/firestore.rules): acesso total, igual admin.
     const VENDOR_ADMIN_EMAIL = 'contato.seusuportetec@gmail.com';

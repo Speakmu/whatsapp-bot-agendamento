@@ -16,12 +16,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const DOC_BOT = db.collection('configuracoes').doc('bot');
     const DOC_ALERTA_SOM = db.collection('configuracoes').doc('alerta_som');
     const COL_USUARIOS = db.collection('usuarios_admin');
-    const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
+    const ADMIN_EMAIL = String((window.__CLIENT_CONFIG__ || {}).adminEmail || '').trim().toLowerCase();
     // Acesso de suporte (Murilo/fornecedor do sistema) — igual em todo cliente que
     // roda este mesmo código. Acesso total e protegido: nem o admin do cliente
     // consegue editar ou remover esse login (reforçado no firestore.rules, não só
     // aqui na tela).
     const SUPORTE_EMAIL = 'contato.seusuportetec@gmail.com';
+    if ($('u-admin-principal')) $('u-admin-principal').textContent = 'O admin principal é ' + ADMIN_EMAIL + '.';
     const MODULOS = ['pedidos', 'kds', 'mesas', 'entregas', 'caixa', 'bi', 'financeiro', 'fiscal', 'relatorios', 'estoque', 'fichas', 'cardapio', 'marketing', 'bot', 'mensalidade', 'configuracoes'];
     const NOMES_MODULOS = {
         pedidos: 'Pedidos',
@@ -222,13 +223,13 @@ document.addEventListener('DOMContentLoaded', () => {
         $('campo-teste-stone').style.display = stone ? 'block' : 'none';
     }
 
-    const CRIAR_COBRANCA_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaStone";
-    const CONFIGURAR_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/configurarStoneConnect";
-    // Em outro projeto/cliente, trocar salgadinhos-lileamar pelo id do projeto Firebase dele.
-    const CONFIGURAR_IFOOD_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/configurarIfood";
-    const IFOOD_WEBHOOK_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/ifoodWebhook/ifood/webhook";
-    const IFOOD_HEALTH_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/ifoodWebhook/ifood/health";
-    const CRIAR_USUARIO_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarUsuarioAdmin";
+    const FUNCTIONS_BASE_URL = (window.__CLIENT_CONFIG__ || {}).functionsBaseUrl;
+    const CRIAR_COBRANCA_STONE_URL = FUNCTIONS_BASE_URL + "/criarCobrancaStone";
+    const CONFIGURAR_STONE_URL = FUNCTIONS_BASE_URL + "/configurarStoneConnect";
+    const CONFIGURAR_IFOOD_URL = FUNCTIONS_BASE_URL + "/configurarIfood";
+    const IFOOD_WEBHOOK_URL = FUNCTIONS_BASE_URL + "/ifoodWebhook/ifood/webhook";
+    const IFOOD_HEALTH_URL = FUNCTIONS_BASE_URL + "/ifoodWebhook/ifood/health";
+    const CRIAR_USUARIO_URL = FUNCTIONS_BASE_URL + "/criarUsuarioAdmin";
 
     async function authHeaders() {
         if (!usuarioAtual) throw new Error('Sessao expirada. Entre novamente no sistema.');

@@ -10,7 +10,7 @@
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.6.8/firebase-auth.js"></script>
-    <script src="/firebase-config.js"></script>
+    <script src="/firebase-config.js?v=2"></script>
     <script src="/emu.js"></script>
 
     <link rel="stylesheet" href="/shell.css">
@@ -54,7 +54,7 @@
             <label class="check-line"><input id="bot-divulgar-app" type="checkbox"> Bot divulga o app pro cliente (convidar a baixar / lembrar pontos) &mdash; deixe desmarcado se o app ainda n&atilde;o est&aacute; dispon&iacute;vel</label>
             <div class="campo">
                 <label>Link do app (enviado pelo bot quando a op&ccedil;&atilde;o acima estiver ativa)</label>
-                <input id="bot-link-app" placeholder="https://lileamar-app-web.web.app">
+                <input id="bot-link-app" placeholder="https://">
                 <small>Sem link aqui, o bot NÃO fala do app pro cliente mesmo com a op&ccedil;&atilde;o acima marcada &mdash; ele nunca inventa "baixe na Play Store" se n&atilde;o for esse link.</small>
             </div>
             <div class="campo">
@@ -64,7 +64,7 @@
             </div>
             <div class="grid2">
                 <div class="campo"><label>Nome da IA</label><input id="bot-nome-atendente" placeholder="Sofia"></div>
-                <div class="campo"><label>Nome da empresa no bot</label><input id="bot-nome-empresa" placeholder="Lileamar Salgados"></div>
+                <div class="campo"><label>Nome da empresa no bot</label><input id="bot-nome-empresa"></div>
                 <div class="campo"><label>Chave PIX informada pelo bot</label><input id="bot-chave-pix" placeholder="Chave PIX"></div>
                 <div class="campo" id="campo-bot-modelo">
                     <label>Modelo de IA</label>

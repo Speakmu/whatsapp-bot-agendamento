@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const COL_PEDIDOS = "pedidos";
     const COL_ENTREGADORES = "entregadores";
-    const BOT_BASE_URL = "https://whatsapp-bot-agendamento-353057562610.us-central1.run.app";
+    const BOT_BASE_URL = (window.__CLIENT_CONFIG__ || {}).botBaseUrl || "";
 
     const $ = (id) => document.getElementById(id);
     const escapeHtml = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c =>

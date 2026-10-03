@@ -491,10 +491,11 @@ document.addEventListener('DOMContentLoaded', () => {
         flash(`${rotulo} cancelada.`);
     }
     // URLs das Cloud Functions que criam a cobrança na maquininha (Point ou Stone).
-    // Mesmo projeto/região das outras functions (WEBHOOK_URL não é acessível aqui,
-    // então repetimos o padrão fixo). O provedor ativo vem de configuracoes/pagamentos.
-    const CRIAR_COBRANCA_POINT_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaPoint";
-    const CRIAR_COBRANCA_STONE_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/criarCobrancaStone";
+    // Mesmo projeto/região das outras functions — a base vem de firebase-config.js.
+    // O provedor ativo vem de configuracoes/pagamentos.
+    const FUNCTIONS_BASE_URL = (window.__CLIENT_CONFIG__ || {}).functionsBaseUrl;
+    const CRIAR_COBRANCA_POINT_URL = FUNCTIONS_BASE_URL + "/criarCobrancaPoint";
+    const CRIAR_COBRANCA_STONE_URL = FUNCTIONS_BASE_URL + "/criarCobrancaStone";
     let provedorPagamentoCartao = "mercadopago";
     let maquininhaAtiva = true;
     db.collection('configuracoes').doc('pagamentos').onSnapshot(snap => {

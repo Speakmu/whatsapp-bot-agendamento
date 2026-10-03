@@ -5,6 +5,7 @@ import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { clientConfig } from "./clientConfig.js";
 
 initializeApp();
 const db = getFirestore();
@@ -13,7 +14,7 @@ const db = getFirestore();
 // Configure com: firebase functions:secrets:set MERCADOPAGO_ACCESS_TOKEN
 const MERCADOPAGO_ACCESS_TOKEN = defineSecret("MERCADOPAGO_ACCESS_TOKEN");
 
-const GESTORCHEF_ADMIN_EMAIL = "lileamarloja04@gmail.com";
+const GESTORCHEF_ADMIN_EMAIL = clientConfig.adminEmail;
 
 async function exigirUsuario(req) {
     const header = String(req.headers.authorization || '');
@@ -49,8 +50,10 @@ async function exigirAdminGenerico(req) {
     return token;
 }
 
-// URL fixa da função de webhook abaixo (região padrão us-central1, mesmo projeto).
-const WEBHOOK_URL = "https://us-central1-salgadinhos-lileamar.cloudfunctions.net/mercadoPagoWebhook";
+// URL da função de webhook abaixo (região padrão us-central1, mesmo projeto).
+// O id do projeto vem do próprio ambiente da function — nada a trocar por cliente.
+const PROJECT_ID = process.env.GCLOUD_PROJECT || JSON.parse(process.env.FIREBASE_CONFIG || "{}").projectId;
+const WEBHOOK_URL = `https://us-central1-${PROJECT_ID}.cloudfunctions.net/mercadoPagoWebhook`;
 
 export const processarPagamentoDireto = onRequest(
     { secrets: [MERCADOPAGO_ACCESS_TOKEN] },
@@ -492,7 +495,7 @@ export const criarCobrancaStone = onRequest(
                     quantity: 1,
                     code: externalReference,
                 }],
-                customer: { name: 'Cliente balcão', email: 'balcao@salgadinhoslileamar.com.br' },
+                customer: { name: 'Cliente balcão', email: clientConfig.emailClienteBalcao },
                 poi_payment_settings: {
                     payment_setup: { type: 'credit_card', installments: 1, installment_type: 'merchant' },
                     devices_serial_number: [serial],

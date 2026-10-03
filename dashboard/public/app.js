@@ -169,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const COLECAO_CARDAPIO = "cardapio";
     const COLECAO_ENTREGADORES = "entregadores";
     // Backend real do bot, agora no Cloud Run (migrado do Render).
-    const ngrokUrl = "https://whatsapp-bot-agendamento-353057562610.us-central1.run.app";
+    const ngrokUrl = (window.__CLIENT_CONFIG__ || {}).botBaseUrl || "";
     const STATUS_ATIVOS_PEDIDOS = ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"];
     const STATUS_NAO_FATURA = new Set(["CANCELADO", "AGUARDANDO_PAGAMENTO", "AGUARDANDO_PIX"]);
     const moneyBR = (v) => "R$ " + (Number(v) || 0).toFixed(2).replace('.', ',');

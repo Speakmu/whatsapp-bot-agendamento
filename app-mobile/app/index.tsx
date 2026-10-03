@@ -80,7 +80,7 @@ const db = firebase.firestore();
 const dbModular = getFirestore(firebase.app() as any); // <--- ADICIONE ISTO PARA O CÓDIGO NOVO
 const BRAND_GREEN = '#174e2a';
 const BRAND_WHITE = '#ffffff';
-const BRAND_NAME = 'Lileamar Salgados';
+const BRAND_NAME = clientConfig.nomeLoja;
 // CPF reservado só pros revisores da App Store/Play Store testarem o fluxo de
 // pagamento sem custo financeiro — o Mercado Pago está em produção de
 // verdade, sem sandbox. Pedidos com esse CPF pulam o gateway e são
@@ -88,7 +88,7 @@ const BRAND_NAME = 'Lileamar Salgados';
 // Nunca dispara nota fiscal (forma_pagamento marcada como dinheiro, que o
 // painel já sabe pular da fila de emissão automática).
 const CPF_REVISOR_LOJAS = '11111111111';
-const BRAND_LOGO = require('../assets/images/lileamar-logo.jpeg');
+const BRAND_LOGO = clientConfig.logo;
 
 // Identifica o payment_method_id (visa/master/...) pelo prefixo do número —
 // o endpoint payment_methods/search?bin= do Mercado Pago não filtra de
@@ -1345,7 +1345,7 @@ interface PerfilProps {
   setTelefone: (tel: string) => void;
 }
 
-const URL_POLITICA_PRIVACIDADE = 'https://lileamar-app-web.web.app/privacidade.html';
+const URL_POLITICA_PRIVACIDADE = clientConfig.urlPoliticaPrivacidade;
 
 const SecaoPerfil = ({ nome, telefone, endereco, usuarioId, onSair, onExcluirConta, setNome, setTelefone, cpf, setCpf, pontosPerfil, valorPorPonto = 0, corMarca = BRAND_GREEN }: any) => {
   const [editando, setEditando] = useState(false);

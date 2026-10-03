@@ -50,6 +50,24 @@ Runbook de implantação de um cliente novo, do zero até o go-live. Componentes
 >
 > A URL da Cloud Function de pagamento no app é derivada automaticamente do `projectId`
 > (não precisa mexer). O **bot** usa o JSON do Admin SDK (passo 1.5), não o `firebaseConfig`.
+>
+> **Demais valores do cliente (e-mail do admin, URL do bot, nome/logo da loja):** nenhuma tela
+> ou function tem valor de cliente fixo no código. Ao implantar, revisar só estes arquivos:
+>
+> | Arquivo | O que trocar |
+> |---|---|
+> | `dashboard/public/firebase-config.js` | `__FIREBASE_CONFIG__` e `__CLIENT_CONFIG__` (e-mail do admin, URL do bot, nome da loja, link do app web) |
+> | `dashboard/firestore.rules` | `emailAdminCliente()` no topo do arquivo |
+> | `dashboard/.firebaserc` e `app-mobile/.firebaserc` | id do projeto (e o site de hosting do app web) |
+> | `app-mobile/firebaseConfig.ts` | `firebaseConfig` |
+> | `app-mobile/clientConfig.ts` | nome e logo da loja, política de privacidade, e-mail e chave pública do Mercado Pago |
+> | `app-mobile/functions/clientConfig.js` | e-mail do admin e e-mail do cliente de balcão (Stone) |
+> | `app-mobile/app.json`, `google-services.json`, `public/` | nome, pacote e ícones do app; textos de privacidade |
+>
+> O e-mail do admin aparece em três lugares (painel, regras e functions) porque as regras e as
+> functions não enxergam o arquivo do painel — os três têm que ser iguais. As URLs das Cloud
+> Functions saem do id do projeto e não precisam ser editadas. O nome da empresa usado pelo bot
+> é o salvo no painel (Bot → Configurações).
 
 ---
 

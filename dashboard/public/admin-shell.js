@@ -7,7 +7,7 @@
         'bot-chat.html', 'bot-config.html', 'mensalidades.html',
         'configuracoes.html'
     ]);
-    const ADMIN_EMAIL = 'lileamarloja04@gmail.com';
+    const ADMIN_EMAIL = String((window.__CLIENT_CONFIG__ || {}).adminEmail || '').trim().toLowerCase();
     // Acesso de suporte (mesmo e-mail tratado como "Suporte" na tela de
     // Usuários — configuracoes.js/firestore.rules): acesso total a todos os
     // módulos, incondicional (não passa pelo filtro de exibição do admin

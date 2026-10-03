@@ -14,6 +14,16 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    // ===== ÚNICO LUGAR A TROCAR POR CLIENTE NESTE ARQUIVO =====
+    // Admin principal da loja — o mesmo e-mail de adminEmail em
+    // public/firebase-config.js e em app-mobile/functions/clientConfig.js.
+    function emailAdminCliente() {
+      return "lileamarloja04@gmail.com";
+    }
+    // Suporte (fornecedor do sistema): igual em todo cliente, não trocar.
+    function emailSuporte() {
+      return "contato.seusuportetec@gmail.com";
+    }
 
     // Cardápio: leitura pública; escrita só logado
     match /cardapio/{item} {
@@ -96,18 +106,18 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null
         && request.auth.token.email != null
-        && request.auth.token.email == "contato.seusuportetec@gmail.com";
+        && request.auth.token.email == emailSuporte();
     }
     match /usuarios_admin/{id} {
       allow get: if request.auth != null
         && request.auth.token.email != null
-        && (request.auth.token.email == "lileamarloja04@gmail.com"
-          || request.auth.token.email == "contato.seusuportetec@gmail.com"
+        && (request.auth.token.email == emailAdminCliente()
+          || request.auth.token.email == emailSuporte()
           || id == request.auth.token.email);
       allow list: if request.auth != null
         && request.auth.token.email != null
-        && (request.auth.token.email == "lileamarloja04@gmail.com"
-          || request.auth.token.email == "contato.seusuportetec@gmail.com");
+        && (request.auth.token.email == emailAdminCliente()
+          || request.auth.token.email == emailSuporte());
       // Suporte cria seu próprio registro na primeira vez (self-heal, igual o
       // admin já faz) e o admin do cliente também pode criar (caso o admin
       // abra a tela antes do suporte logar uma vez). Depois de criado, só
@@ -116,14 +126,14 @@ service cloud.firestore {
       // no nível de dado o que a tela de Configurações já impede na interface.
       allow create: if request.auth != null
         && request.auth.token.email != null
-        && (request.auth.token.email == "lileamarloja04@gmail.com"
-          || request.auth.token.email == "contato.seusuportetec@gmail.com");
+        && (request.auth.token.email == emailAdminCliente()
+          || request.auth.token.email == emailSuporte());
       allow update, delete: if request.auth != null
         && request.auth.token.email != null
         && (
-          request.auth.token.email == "contato.seusuportetec@gmail.com"
-          || (request.auth.token.email == "lileamarloja04@gmail.com"
-            && id != "contato.seusuportetec@gmail.com")
+          request.auth.token.email == emailSuporte()
+          || (request.auth.token.email == emailAdminCliente()
+            && id != emailSuporte())
         );
     }
     // Diagnóstico do alerta sonoro de pedido novo (pedido-alerta.js grava
