@@ -187,7 +187,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // estoque de uma nota voltava pras sugestoes automaticas no meio do
     // preenchimento, e o operador confirmava sem perceber (ex.: Tampico 450 ml
     // ligado ao produto de 250 ml).
-    const CAMPOS_ENTRADA = ['item-tipo', 'item-produto', 'item-insumo', 'item-novo-nome', 'item-qtd'];
+    const CAMPOS_ENTRADA = ['item-tipo', 'item-produto', 'item-insumo', 'item-novo-nome', 'item-prod-nome', 'item-prod-categoria', 'item-qtd'];
+    // Valor do select de produto que significa "cadastrar um produto novo".
+    const PRODUTO_NOVO = '__novo__';
     function capturarFormEntrada() {
         if (!state.dfeExpandido) return null;
         const valores = {};
@@ -211,7 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
             el.value = valor;
         });
         // Reaplica visibilidade dos selects e o custo recalculado.
-        document.querySelectorAll('[data-item-tipo],[data-item-insumo]').forEach(el => el.onchange && el.onchange());
+        document.querySelectorAll('[data-item-tipo],[data-item-insumo],[data-item-produto]').forEach(el => el.onchange && el.onchange());
         document.querySelectorAll('[data-item-qtd]').forEach(el => el.oninput && el.oninput());
         if (salvo.foco) {
             const [campo, idx] = salvo.foco.split(':');
@@ -787,7 +789,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const opcoes = state.produtos.map(p =>
             `<option value="${esc(p.id)}" ${match && match.id === p.id ? 'selected' : ''}>${esc(p.nome || p.name || p.id)}</option>`
         ).join('');
-        return `<option value="">Selecione o produto no cardapio...</option>${opcoes}`;
+        return `<option value="">Selecione o produto no cardapio...</option><option value="${PRODUTO_NOVO}">+ Cadastrar produto novo</option>${opcoes}`;
+    }
+
+    // Categorias pro produto novo: as que ja existem no cardapio.
+    function opcoesCategorias() {
+        const cats = [...new Set(state.produtos.map(p => p.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        return `<option value="">Categoria...</option>${cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}`;
     }
 
     // Custo e unidade de um item NOVO no estoque, a partir da quantidade que o
@@ -813,6 +821,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     <option value="insumo">Insumo (ingrediente)</option>
                 </select>
                 <select data-item-produto="${idx}">${opcoesProdutos(it.xProd)}</select>
+                <div data-item-prod-novo="${idx}" style="display:none;margin-top:4px">
+                    <input type="text" data-item-prod-nome="${idx}" placeholder="Nome do produto no cardapio" value="${esc(it.xProd || '')}">
+                    <select data-item-prod-categoria="${idx}" style="margin-top:4px">${opcoesCategorias()}</select>
+                    <small class="muted" style="display:block;margin-top:4px">Entra no estoque agora e fica oculto do caixa, do app e do bot, sem preco, ate a loja completar o cadastro no Cardapio.</small>
+                </div>
                 <select data-item-insumo="${idx}" style="display:none">${opcoesInsumos(it.xProd)}</select>
                 <input type="text" data-item-novo-nome="${idx}" placeholder="Nome do novo insumo" value="${esc(it.xProd || '')}" style="margin-top:4px;display:none">
             </td>
@@ -1078,10 +1091,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const selProduto = document.querySelector(`[data-item-produto="${idx}"]`);
             const selInsumo = document.querySelector(`[data-item-insumo="${idx}"]`);
             const novoNome = document.querySelector(`[data-item-novo-nome="${idx}"]`);
+            const prodNovo = document.querySelector(`[data-item-prod-novo="${idx}"]`);
             const ehInsumo = sel.value === 'insumo';
             if (selProduto) selProduto.style.display = ehInsumo ? 'none' : 'block';
             if (selInsumo) selInsumo.style.display = ehInsumo ? 'block' : 'none';
             if (novoNome) novoNome.style.display = (ehInsumo && selInsumo && selInsumo.value === '') ? 'block' : 'none';
+            if (prodNovo) prodNovo.style.display = (!ehInsumo && selProduto && selProduto.value === PRODUTO_NOVO) ? 'block' : 'none';
+        });
+        document.querySelectorAll('[data-item-produto]').forEach(sel => sel.onchange = () => {
+            const idx = sel.dataset.itemProduto;
+            const prodNovo = document.querySelector(`[data-item-prod-novo="${idx}"]`);
+            const ehProduto = document.querySelector(`[data-item-tipo="${idx}"]`)?.value !== 'insumo';
+            if (prodNovo) prodNovo.style.display = (ehProduto && sel.value === PRODUTO_NOVO) ? 'block' : 'none';
         });
         // Mostra o custo unitario ja recalculado pela quantidade digitada (so vale
         // pra item novo no estoque; item existente mantem o custo do cadastro).
@@ -1453,9 +1474,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const destinos = {};
         d.itens.forEach((it, idx) => {
             const tipo = document.querySelector(`[data-item-tipo="${idx}"]`)?.value || 'produto';
-            const alvo = tipo === 'produto'
+            let alvo = tipo === 'produto'
                 ? document.querySelector(`[data-item-produto="${idx}"]`)?.value
                 : document.querySelector(`[data-item-insumo="${idx}"]`)?.value;
+            if (alvo === PRODUTO_NOVO) alvo = 'novo:' + normalizarNome(document.querySelector(`[data-item-prod-nome="${idx}"]`)?.value);
             if (!alvo) return;
             (destinos[tipo + ':' + alvo] = destinos[tipo + ':' + alvo] || []).push(it.xProd || `item ${idx + 1}`);
         });
@@ -1474,6 +1496,12 @@ document.addEventListener('DOMContentLoaded', () => {
             // saldo do primeiro (produto/insumo existente).
             const saldoNoLote = {};
             const insumoCriadoPorProduto = {};
+            // Produto novo ja criado nesta nota, por nome (dois itens da nota no
+            // mesmo produto novo nao podem virar dois cadastros).
+            const produtoNovoPorNome = {};
+            // Insumos que receberam entrada: no fim, produto pausado sozinho por
+            // falta de estoque volta a ficar disponivel.
+            const insumosRepostos = new Set();
             d.itens.forEach((it, idx) => {
                 const qtd = parseFloat(document.querySelector(`[data-item-qtd="${idx}"]`)?.value);
                 if (!(qtd > 0)) throw new Error(`Informe uma quantidade valida para "${it.xProd || 'item ' + (idx + 1)}".`);
@@ -1482,9 +1510,49 @@ document.addEventListener('DOMContentLoaded', () => {
                 let insumoId, insumoNome, insumoAtual, motivoExtra = '';
 
                 if (tipo === 'produto') {
-                    const produtoId = document.querySelector(`[data-item-produto="${idx}"]`)?.value;
+                    let produtoId = document.querySelector(`[data-item-produto="${idx}"]`)?.value;
                     if (!produtoId) throw new Error(`Selecione o produto do cardapio para "${it.xProd || 'item ' + (idx + 1)}" (ou troque pra "Insumo").`);
-                    const produto = state.produtos.find(p => p.id === produtoId);
+                    let produto;
+                    if (produtoId === PRODUTO_NOVO) {
+                        // Cadastro do produto a partir da nota. Nasce SEM preco e
+                        // indisponivel em tudo (caixa, mesas, totem, app e bot leem
+                        // "disponivel"), ate a loja completar foto, descricao e preco
+                        // no Cardapio.
+                        const nomeNovo = String(document.querySelector(`[data-item-prod-nome="${idx}"]`)?.value || '').trim();
+                        const categoria = document.querySelector(`[data-item-prod-categoria="${idx}"]`)?.value || '';
+                        if (!nomeNovo) throw new Error(`Informe o nome do produto novo para "${it.xProd || 'item ' + (idx + 1)}".`);
+                        if (!categoria) throw new Error(`Escolha a categoria do produto novo "${nomeNovo}".`);
+                        const chaveNome = normalizarNome(nomeNovo);
+                        const jaExiste = state.produtos.find(p => normalizarNome(p.nome_exibicao || p.nome) === chaveNome);
+                        if (jaExiste) throw new Error(`Ja existe no cardapio um produto chamado "${jaExiste.nome_exibicao || jaExiste.nome}". Selecione-o na lista em vez de cadastrar de novo.`);
+                        if (produtoNovoPorNome[chaveNome]) {
+                            produto = produtoNovoPorNome[chaveNome];
+                        } else {
+                            const novoProdutoRef = db.collection('cardapio').doc();
+                            produto = { id: novoProdutoRef.id, nome: nomeNovo, apelidos: [] };
+                            batch.set(novoProdutoRef, {
+                                nome: nomeNovo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+                                nome_exibicao: nomeNovo,
+                                categoria,
+                                preco: 0,
+                                ingredientes: '',
+                                disponivel: false,
+                                disponivel_online: false,
+                                cadastro_pendente: true,
+                                pontos_fidelidade: 0,
+                                ncm: it.ncm || '', cfop: '', csosn: '', cst: '', origem: '',
+                                custo_unitario: custoEUnidadeNovoItem(it, qtd).custo,
+                                criado_pela_nota: d.chave || d.nsu || null,
+                                criado_por: operador,
+                                criado_em: now,
+                                ultima_atualizacao: now
+                            });
+                            produtoNovoPorNome[chaveNome] = produto;
+                        }
+                        produtoId = produto.id;
+                    } else {
+                        produto = state.produtos.find(p => p.id === produtoId);
+                    }
                     if (!produto) throw new Error('Produto selecionado nao encontrado.');
 
                     if (insumoCriadoPorProduto[produtoId]) {
@@ -1508,7 +1576,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             produto_nome: produto.nome, itens: [{ insumo_id: novoInsumoRef.id, quantidade: 1 }],
                             atualizado_em: now
                         });
-                        batch.update(db.collection('cardapio').doc(produtoId), { insumo_vinculado_id: novoInsumoRef.id });
+                        // set+merge (nao update): o produto pode ter sido criado neste mesmo lote.
+                        batch.set(db.collection('cardapio').doc(produtoId), { insumo_vinculado_id: novoInsumoRef.id }, { merge: true });
                         insumoId = novoInsumoRef.id; insumoNome = produto.nome; insumoAtual = 0;
                         insumoCriadoPorProduto[produtoId] = novoInsumoRef.id;
                         motivoExtra = ' (produto novo no estoque)';
@@ -1519,7 +1588,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const jaConhecido = nomeNota === normalizarNome(produto.nome)
                         || (produto.apelidos || []).some(a => normalizarNome(a) === nomeNota);
                     if (it.xProd && !jaConhecido) {
-                        batch.update(db.collection('cardapio').doc(produtoId), { apelidos: firebase.firestore.FieldValue.arrayUnion(it.xProd) });
+                        batch.set(db.collection('cardapio').doc(produtoId), { apelidos: firebase.firestore.FieldValue.arrayUnion(it.xProd) }, { merge: true });
                     }
                 } else {
                     const selInsumoId = document.querySelector(`[data-item-insumo="${idx}"]`)?.value;
@@ -1550,11 +1619,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const novoSaldo = (insumoId in saldoNoLote ? saldoNoLote[insumoId] : insumoAtual) + qtd;
                 saldoNoLote[insumoId] = novoSaldo;
+                if (novoSaldo > 0) insumosRepostos.add(insumoId);
                 batch.set(db.collection('estoque_insumos').doc(insumoId), { quantidade_atual: novoSaldo, atualizado_em: now }, { merge: true });
                 batch.set(db.collection('estoque_movimentos').doc(), {
                     insumo_id: insumoId, insumo_nome: insumoNome, tipo: 'ENTRADA',
                     quantidade: qtd, saldo_resultante: novoSaldo,
                     motivo: `Entrada NF ${d.chave || d.nsu}${motivoExtra}`, operador, data: now
+                });
+            });
+
+            // Produto que a baixa automatica pausou por estoque zerado
+            // (desativado_motivo) volta a ficar disponivel quando a nota repoe o
+            // estoque dele. Pausado a mao ou com cadastro pendente nao e mexido.
+            state.produtos.forEach(p => {
+                if (p.disponivel !== false || !p.desativado_motivo || p.cadastro_pendente) return;
+                if (!p.insumo_vinculado_id || !insumosRepostos.has(p.insumo_vinculado_id)) return;
+                batch.update(db.collection('cardapio').doc(p.id), {
+                    disponivel: true,
+                    desativado_motivo: firebase.firestore.FieldValue.delete(),
+                    desativado_automaticamente_em: firebase.firestore.FieldValue.delete(),
+                    reativado_automaticamente_em: now,
+                    ultima_atualizacao: now
                 });
             });
 
@@ -1566,8 +1651,11 @@ document.addEventListener('DOMContentLoaded', () => {
             state.dfeExpandido = null;
             render();
         } catch (err) {
-            if (msg) msg.textContent = err.message;
-            else alert(err.message);
+            // A tela pode ter sido redesenhada enquanto o servidor respondia (o
+            // elemento "msg" de antes ja nao esta mais na pagina): procura de novo.
+            const alvo = $(`dfe-entrada-msg-${dfeId}`);
+            if (alvo && alvo.isConnected) alvo.textContent = err.message;
+            else alert('Nao foi possivel confirmar a entrada: ' + err.message);
         }
     }
 

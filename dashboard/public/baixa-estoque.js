@@ -17,7 +17,10 @@
     const COL_MOVS = "estoque_movimentos";
     const COL_FICHAS = "fichas_tecnicas";
 
-    const norm = (s) => String(s == null ? '' : s).trim().toLowerCase();
+    // Sem acento e sem diferenca de maiuscula: a ficha guarda o nome interno do
+    // produto ("pao de queijo") e a venda traz o nome exibido ("Pão de Queijo").
+    const norm = (s) => String(s == null ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .trim().toLowerCase().replace(/\s+/g, ' ');
 
     // Itens agrupados do app/bot vêm com o nome prefixado ("3x Coxinha") — tira
     // o prefixo pra bater com o nome cadastrado na ficha técnica ("Coxinha").
@@ -50,7 +53,24 @@
         return 1;
     }
 
+    // A venda de balcao e gravada sem esperar o servidor (pra funcionar offline),
+    // e a baixa roda logo em seguida: quando a transacao chega ao servidor antes
+    // do pedido, ele "nao existe" ainda. Nao e erro — tenta de novo em instantes.
+    const PEDIDO_NAO_SINCRONIZADO = "pedido ainda nao sincronizado";
+    const ESPERAS_MS = [1500, 4000, 9000];
+    const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+
     async function baixarDoPedido(db, pedidoId) {
+        let r = await tentarBaixa(db, pedidoId);
+        for (const ms of ESPERAS_MS) {
+            if (r.ok || r.motivo !== PEDIDO_NAO_SINCRONIZADO) break;
+            await esperar(ms);
+            r = await tentarBaixa(db, pedidoId);
+        }
+        return r;
+    }
+
+    async function tentarBaixa(db, pedidoId) {
         if (!db || !pedidoId) return { ok: false, motivo: "parametros" };
         const FieldValue = firebase.firestore.FieldValue;
         const pedidoRef = db.collection(COL_PEDIDOS).doc(pedidoId);
@@ -58,7 +78,7 @@
         // 1) Leitura rápida: pedido já baixado?
         let pedidoSnap;
         try { pedidoSnap = await pedidoRef.get(); } catch (e) { return { ok: false, motivo: e.message }; }
-        if (!pedidoSnap.exists) return { ok: false, motivo: "pedido inexistente" };
+        if (!pedidoSnap.exists) return { ok: false, motivo: PEDIDO_NAO_SINCRONIZADO };
         const pedido = pedidoSnap.data();
         if (pedido.estoque_baixado) return { ok: false, motivo: "ja baixado" };
 
@@ -109,6 +129,7 @@
         try {
             const resultado = await db.runTransaction(async (txn) => {
                 const pSnap = await txn.get(pedidoRef);
+                if (!pSnap.exists) return { ok: false, motivo: PEDIDO_NAO_SINCRONIZADO };
                 if (pSnap.data().estoque_baixado) return { ok: false, motivo: "corrida: ja baixado" };
 
                 const refs = insumoIds.map(id => db.collection(COL_INSUMOS).doc(id));
@@ -168,5 +189,55 @@
         }
     }
 
-    window.GestorChefEstoque = { baixarDoPedido };
+    // ---- Rede de seguranca: vendas concluidas que ficaram sem baixa ----
+    // A baixa acima roda uma vez, no navegador de quem concluiu a venda. Se a
+    // aba fechar, a conexao cair ou a pagina for trocada antes de terminar,
+    // ninguem tentava de novo — em set/out de 2026, 1 em cada 4 vendas de balcao
+    // ficou sem sair do estoque. Esta varredura refaz as que faltaram. E segura
+    // pra rodar em varias telas ao mesmo tempo: a transacao so baixa uma vez
+    // por pedido (estoque_baixado).
+    const JANELA_VARREDURA_MS = 6 * 60 * 60 * 1000;   // so vendas das ultimas 6h
+    const CARENCIA_MS = 60 * 1000;                    // da tempo pra baixa normal
+    const INTERVALO_VARREDURA_MS = 10 * 60 * 1000;
+    let varrendo = false;
+
+    async function reprocessarPendentes(db) {
+        if (!db || varrendo) return { processados: 0 };
+        varrendo = true;
+        let processados = 0;
+        try {
+            const agora = Date.now();
+            const snap = await db.collection(COL_PEDIDOS)
+                .where("status", "==", "CONCLUIDO")
+                .where("hora_pedido", ">=", new Date(agora - JANELA_VARREDURA_MS))
+                .orderBy("hora_pedido", "desc").limit(150).get();
+            for (const doc of snap.docs) {
+                const p = doc.data();
+                if (p.estoque_baixado) continue;
+                const hora = p.hora_pedido && p.hora_pedido.toMillis ? p.hora_pedido.toMillis() : 0;
+                if (!hora || agora - hora < CARENCIA_MS) continue;
+                const r = await tentarBaixa(db, doc.id);
+                if (r.ok) processados++;
+            }
+        } catch (e) {
+            console.warn("Varredura de baixa de estoque:", e.message);
+        } finally {
+            varrendo = false;
+        }
+        return { processados };
+    }
+
+    function varrerSeLogado() {
+        try {
+            if (!window.firebase || !firebase.apps.length || !firebase.auth || !firebase.auth().currentUser) return;
+            reprocessarPendentes(firebase.firestore());
+        } catch (e) { /* pagina sem Firebase pronto ainda */ }
+    }
+    if (typeof window !== "undefined") {
+        setTimeout(varrerSeLogado, 20000);
+        setInterval(varrerSeLogado, INTERVALO_VARREDURA_MS);
+        window.addEventListener("online", () => setTimeout(varrerSeLogado, 5000));
+    }
+
+    window.GestorChefEstoque = { baixarDoPedido, reprocessarPendentes };
 })();

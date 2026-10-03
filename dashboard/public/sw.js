@@ -99,6 +99,13 @@ self.addEventListener('fetch', (event) => {
         || url.includes('cloudfunctions.net')
         || url.includes('/__/')) return;
 
+    // Emuladores do Firebase (ambiente de teste local, em outra porta de
+    // localhost): mesma regra das chamadas de dados acima. Interceptar as
+    // conexoes de streaming do emulador do Firestore travava as gravacoes.
+    const destino = new URL(url);
+    if (destino.origin !== self.location.origin
+        && (destino.hostname === 'localhost' || destino.hostname === '127.0.0.1')) return;
+
     // SDK do Firebase (URL com versão presa): serve do cache na hora se já
     // tiver, sem nem tentar a rede primeiro — não tem "versão mais nova"
     // possível pra essa URL específica.

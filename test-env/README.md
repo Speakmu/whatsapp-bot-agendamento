@@ -55,6 +55,23 @@ Para parar: feche a janela do emulador (Windows) ou `Ctrl+C` (Mac/Linux).
 
 ---
 
+## 📦 Teste do estoque (nota de entrada, produto novo e baixa na venda)
+
+Abre as telas de verdade num navegador, contra o emulador, e confere: a nota de entrada
+repõe o estoque, o produto cadastrado pela nota nasce oculto e sem preço, a venda dá baixa,
+vendas que ficaram sem baixa são reprocessadas e o produto só é liberado com preço.
+
+```bash
+cd test-env
+npm install        # 1ª vez
+npm run test:estoque
+```
+
+> No Windows o emulador do Firestore (java) às vezes continua aberto depois do teste e a
+> próxima execução falha com "port taken". Feche o processo `java.exe` do emulador e rode de novo.
+
+---
+
 ## ⚡ Teste automático (1 comando)
 
 Sobe o emulador, semeia e confere tudo — e desliga sozinho ao final:

@@ -537,7 +537,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pedido = {
             origem: "BALCAO",
             nome_cliente: nomeClienteAtual(),
-            itens: carrinho.map(c => ({ nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
+            itens: carrinho.map(c => ({ id: c.id, nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
             valor_total: total,
             forma_pagamento: formaPagamento,
             status: enviarCozinha ? "PENDENTE_PREPARO" : "CONCLUIDO",
@@ -648,7 +648,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pedido = {
             origem: "BALCAO",
             nome_cliente: nomeClienteAtual(),
-            itens: carrinho.map(c => ({ nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
+            itens: carrinho.map(c => ({ id: c.id, nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
             valor_total: total,
             forma_pagamento: formaPagamento,
             status: "AGUARDANDO_CARTAO",

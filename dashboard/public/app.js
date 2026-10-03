@@ -320,6 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'pausado': if (item.disponivel) return false; break;
                 case 'online': if (!onlineDisponivel) return false; break;
                 case 'esgotado_online': if (onlineDisponivel) return false; break;
+                case 'pendente': if (!cadastroPendente(item)) return false; break;
                 case 'sem_foto': if (item.imagem_url) return false; break;
             }
             return true;
@@ -388,13 +389,18 @@ document.addEventListener('DOMContentLoaded', () => {
         habilitarBotoesEmMassa(false);
         try {
             const batch = db.batch();
+            let semPreco = 0;
             selectedMenuIds.forEach(id => {
+                const item = menuItems.find(i => i.id === id);
+                // Liberar (geral ou online) exige preco de venda.
+                if (valor === true && item && semPrecoDeVenda(item)) { semPreco++; return; }
                 batch.update(db.collection(COLECAO_CARDAPIO).doc(id), {
                     [campo]: valor,
                     ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
                 });
             });
             await batch.commit();
+            if (semPreco) alert(`${semPreco} item(ns) sem preço de venda não foram liberados. Defina o preço em Editar.`);
             selectedMenuIds.clear();
             // O onSnapshot atualiza a lista automaticamente
         } catch (e) {
@@ -432,6 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const batch = db.batch();
             itensCategoria.forEach(item => {
+                if (disponivelOnline && semPrecoDeVenda(item)) return; // sem preco nao vai pro app/bot
                 batch.update(db.collection(COLECAO_CARDAPIO).doc(item.id), {
                     disponivel_online: disponivelOnline,
                     ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
@@ -467,6 +474,13 @@ document.addEventListener('DOMContentLoaded', () => {
         atualizarToolbarSelecao();
     };
 
+    // Produto criado pela contabilidade a partir de uma nota de entrada (Fiscal >
+    // Notas recebidas): nasce sem preco e indisponivel em tudo, esperando a loja
+    // completar foto, descricao e preco. Sem preco nao pode ser ativado.
+    function cadastroPendente(item) { return item.cadastro_pendente === true; }
+    function semPrecoDeVenda(item) { return !(Number(item.preco) > 0); }
+    const AVISO_SEM_PRECO = 'Defina o preço de venda (botão Editar) antes de liberar este item.';
+
     // 3. Função para desenhar os cards na tela
     function renderMenu(itens) {
         const container = document.getElementById('menu-list-container');
@@ -494,10 +508,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${isChecked ? 'checked' : ''} style="margin-top:4px;">
                     <div>
                         <strong class="menu-item-name">${item.nome_exibicao}</strong>
-                        <small class="menu-item-category">${item.categoria.replace('_', ' ')}</small>
+                        <small class="menu-item-category">${String(item.categoria || '').replace('_', ' ')}</small>
+                        ${cadastroPendente(item) ? '<small style="display:inline-block;margin-top:4px;background:#fff3cd;border:1px solid #f0c36d;color:#7a5200;border-radius:999px;padding:2px 8px;font-weight:700;">Cadastro pendente — veio de nota de entrada</small>' : ''}
                     </div>
                 </div>
-                <span class="menu-item-price">R$ ${item.preco.toFixed(2)}</span>
+                <span class="menu-item-price">${semPrecoDeVenda(item) ? 'Sem preço' : 'R$ ' + Number(item.preco).toFixed(2)}</span>
             </div>
             <p class="menu-item-desc">${item.ingredientes || 'Sem descricao cadastrada.'}</p>
             <div class="menu-item-tags">
@@ -621,6 +636,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 productMessage.textContent = 'Preencha os campos obrigatórios.';
                 return;
             }
+            if (disponivel && !(preco > 0)) {
+                productMessage.style.color = '#e74c3c';
+                productMessage.textContent = 'Informe o preço de venda para deixar o item disponível (ou desmarque "disponível" para salvar sem preço).';
+                return;
+            }
 
             productMessage.style.color = '#3498db';
             productMessage.textContent = 'Processando...';
@@ -661,6 +681,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Se não, o Firestore não alterará o campo imagem_url já existente na edição.
                 if (imageUrl) {
                     productData.imagem_url = imageUrl;
+                }
+
+                // Produto que veio de nota de entrada: com preco definido o cadastro
+                // deixa de ser pendente, e ao ficar disponivel passa a aparecer
+                // tambem no app/bot (nasceu oculto la).
+                const itemEditado = editingId ? menuItems.find(i => i.id === editingId) : null;
+                if (itemEditado && cadastroPendente(itemEditado) && preco > 0) {
+                    productData.cadastro_pendente = false;
+                    if (disponivel) productData.disponivel_online = true;
                 }
 
                 if (editingId) {
@@ -721,10 +750,15 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     // Funções Auxiliares (Excluir e Pausar)
     window.toggleDisponibilidade = async (id, statusAtual) => {
+        const item = menuItems.find(i => i.id === id);
+        if (!statusAtual && item && semPrecoDeVenda(item)) { alert(AVISO_SEM_PRECO); return; }
         try {
             // Importante: statusAtual vem do HTML como true/false
             await db.collection("cardapio").doc(id).update({
                 disponivel: !statusAtual,
+                // Decisao manual vale mais que a pausa automatica por estoque.
+                desativado_motivo: firebase.firestore.FieldValue.delete(),
+                desativado_automaticamente_em: firebase.firestore.FieldValue.delete(),
                 ultima_atualizacao: firebase.firestore.FieldValue.serverTimestamp()
             });
             // O onSnapshot cuida de atualizar a lista na tela automaticamente
@@ -735,6 +769,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     window.toggleDisponibilidadeOnline = async (id, statusAtual) => {
+        const item = menuItems.find(i => i.id === id);
+        if (!statusAtual && item && semPrecoDeVenda(item)) { alert(AVISO_SEM_PRECO); return; }
         try {
             // statusAtual vem do HTML como true/false. Esse campo não afeta
             // balcão/mesas/KDS — só o que o app e o bot do WhatsApp mostram

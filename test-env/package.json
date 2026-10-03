@@ -7,6 +7,7 @@
     "seed": "node seed.js",
     "sim": "node simulator.js",
     "verify": "node verify.js",
+    "test:estoque": "firebase --project salgadinhos-lileamar --config ../dashboard/firebase.json emulators:exec --only firestore,auth,hosting \"node teste-estoque.js\"",
     "test:emu": "firebase --project pizzain-40973 --config ../dashboard/firebase.json emulators:exec --only firestore,auth \"node verify.js\"",
     "demo": "firebase --project pizzain-40973 --config ../dashboard/firebase.json emulators:start",
     "demo:persist": "firebase --project pizzain-40973 --config ../dashboard/firebase.json emulators:start --import=./emulator-data --export-on-exit=./emulator-data",
@@ -21,6 +22,7 @@
     "firebase-admin": "^12.0.0"
   },
   "devDependencies": {
-    "firebase-tools": "^13.0.0"
+    "firebase-tools": "^13.0.0",
+    "playwright-core": "^1.63.0"
   }
 }
