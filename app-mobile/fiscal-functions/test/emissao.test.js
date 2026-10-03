@@ -71,6 +71,23 @@ test('rejeição de verdade (ex.: 539) continua sendo rejeição', async () => {
   assert.equal(res.transitorio, undefined);
 });
 
+test('homologação: descrição do item sai com o aviso obrigatório inteiro', async () => {
+  sefazFalsa({ authorize: (xml) => protocolo('x'.repeat(44), digestDe(xml)) });
+  const res = await emitirNfceAvulsa(pedidoDeTeste(), certDeTeste());
+  // cortado em 60 caracteres a SEFAZ rejeita com 373
+  assert.ok(res.xml.includes('<xProd>NOTA FISCAL EMITIDA EM AMBIENTE DE HOMOLOGACAO - SEM VALOR FISCAL</xProd>'));
+});
+
+test('produção: nome do produto vai como cadastrado (até 120 caracteres)', async () => {
+  sefazFalsa({ authorize: (xml) => protocolo('x'.repeat(44), digestDe(xml)) });
+  const nome = 'Combo Festa 100 salgadinhos sortidos com refrigerante 2 litros e molho da casa';
+  const req = pedidoDeTeste({ ambiente: 'producao' });
+  req.items[0].xProd = nome;
+  const res = await emitirNfceAvulsa(req, certDeTeste());
+  assert.ok(res.xml.includes('<tpAmb>1</tpAmb>'));
+  assert.ok(res.xml.includes(`<xProd>${nome}</xProd>`));
+});
+
 // ------------------------------------------------------------ contingência
 
 test('SEFAZ fora do ar: gera contingência com QR Code offline válido no schema', async () => {

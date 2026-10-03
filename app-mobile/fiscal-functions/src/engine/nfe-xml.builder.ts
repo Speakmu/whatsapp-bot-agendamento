@@ -348,7 +348,9 @@ export class NfeXmlBuilder {
       const prod = det.ele('prod');
       prod.ele('cProd').txt(item.cProd);
       prod.ele('cEAN').txt(item.cEAN ?? 'SEM GTIN');
-      prod.ele('xProd').txt(this.sanitizeNfeText(item.xProd));
+      // xProd aceita até 120 caracteres no schema. O corte padrão (60) truncava o
+      // aviso obrigatório de homologação (67) e a SEFAZ rejeitava com 373.
+      prod.ele('xProd').txt(this.sanitizeNfeText(item.xProd, 120));
       prod.ele('NCM').txt(item.ncm.replace(/\D/g, ''));
       if (item.cest) prod.ele('CEST').txt(item.cest.replace(/\D/g, ''));
       prod.ele('CFOP').txt(item.cfop);
