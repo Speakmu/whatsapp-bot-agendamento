@@ -8,6 +8,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const $ = (id) => document.getElementById(id);
 
     const docFiltro = { busca: '', status: '', forma: '', de: '', ate: '', pagina: 1, porPagina: 20 };
+    // Emissao e Notas recebidas: mesmos filtros/paginacao no navegador, sobre o
+    // que ja esta carregado (state.pedidos / state.dfe).
+    const emiFiltro = { busca: '', situacao: '', pagamento: '', de: '', ate: '', pagina: 1, porPagina: 20 };
+    const dfeFiltro = { busca: '', tipo: '', estoque: '', de: '', ate: '', pagina: 1, porPagina: 20 };
+    const listas = {
+        emi: { filtro: emiFiltro, alvo: 'emi-lista', render: () => renderListaEmissao() },
+        dfe: { filtro: dfeFiltro, alvo: 'dfe-lista', render: () => renderListaDfe() }
+    };
     const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, relatorioMes: mesAtualStr() };
     let unsubRelatorio = null;
     const tabs = [
@@ -295,6 +303,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Filtros e paginacao da aba Documentos (so no navegador, sobre state.notas).
 
     function statusDaNota(n) { return String(n.status || '-').toUpperCase(); }
+    // A SEFAZ devolve o mesmo texto do modelo 55 ("Autorizado o uso da NF-e")
+    // tambem para o modelo 65. Tudo em notas_fiscais e NFC-e, entao a tela
+    // mostra o nome certo; o texto gravado na nota fica como a SEFAZ mandou.
+    function motivoDaNota(n) { return String(n.motivo || '').replace(/\bNF-e\b/g, 'NFC-e'); }
     function formaDaNota(n) {
         if (n.tipo === 'INUTILIZACAO') return '-';
         return n.formaEmissao || (n.contingencia || statusDaNota(n) === 'CONTINGENCIA' ? 'CONTINGENCIA' : 'NORMAL');
@@ -376,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (status === 'CONTINGENCIA') actions.push(`<button class="btn primary" data-transmitir="${n.id}">Transmitir</button>`);
             if (status === 'AUTORIZADA' && n.chave && n.protocolo) actions.push(`<button class="btn danger" data-cancelar="${n.id}">Cancelar</button>`);
             const pedidoRef = n.pedido_id ? `#${esc(String(n.pedido_id).slice(0, 6))}` : '-';
-            return `<tr><td>${esc(num)}</td><td>${pedidoRef}</td><td><span class="badge ${cls}">${esc(status)}</span>${n.motivo ? `<br><span class="muted">${esc(n.motivo)}</span>` : ''}</td><td>${esc(forma)}</td><td>${esc(n.cliente || '-')}</td><td class="chave">${esc(n.chave || (n.tipo === 'INUTILIZACAO' ? 'Inutilizacao de numeracao' : '-'))}</td><td class="num">${n.valor != null ? money(n.valor) : '-'}</td><td>${dateTxt(n.criado_em)}</td><td class="num">${actions.join(' ') || '<span class="muted">-</span>'}</td></tr>`;
+            return `<tr><td>${esc(num)}</td><td>${pedidoRef}</td><td><span class="badge ${cls}">${esc(status)}</span>${n.motivo ? `<br><span class="muted">${esc(motivoDaNota(n))}</span>` : ''}</td><td>${esc(forma)}</td><td>${esc(n.cliente || '-')}</td><td class="chave">${esc(n.chave || (n.tipo === 'INUTILIZACAO' ? 'Inutilizacao de numeracao' : '-'))}</td><td class="num">${n.valor != null ? money(n.valor) : '-'}</td><td>${dateTxt(n.criado_em)}</td><td class="num">${actions.join(' ') || '<span class="muted">-</span>'}</td></tr>`;
         }).join('')}</tbody></table>`;
     }
 
@@ -401,7 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>
             <div class="grid cards" style="margin-bottom:16px">
-                ${metric('NF-e emitidas', validas.length)}
+                ${metric('NFC-e emitidas', validas.length)}
                 ${metric('Valor faturado', money(totalFaturado))}
                 ${metric('Canceladas', canceladas.length)}
                 ${metric('XMLs disponiveis', comXml.length)}
@@ -481,6 +493,39 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // ---- Filtros e paginacao das abas Emissao e Notas recebidas ----
+    function fatiarPagina(lista, f) {
+        const totalPag = Math.max(1, Math.ceil(lista.length / f.porPagina));
+        f.pagina = Math.min(Math.max(1, f.pagina), totalPag);
+        const ini = (f.pagina - 1) * f.porPagina;
+        return { itens: lista.slice(ini, ini + f.porPagina), ini, totalPag };
+    }
+
+    function pagerHtml(chave, lista, pag, carregados, rotuloCarregados) {
+        const f = listas[chave].filtro;
+        return `<div class="actions" style="margin:12px 0 0;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
+            <span class="muted">${lista.length ? `${pag.ini + 1}-${pag.ini + pag.itens.length} de ${lista.length}` : '0 resultados'}${lista.length !== carregados ? ` (${carregados} ${rotuloCarregados})` : ''}</span>
+            <span style="display:flex;gap:8px;align-items:center">
+                <label class="sub" style="margin:0">Por pagina <select data-lista-por-pagina="${chave}">${[10, 20, 50, 100].map(v => `<option value="${v}" ${f.porPagina === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+                <button class="btn" data-lista-pag="${chave}:-1" ${f.pagina <= 1 ? 'disabled' : ''}>&lsaquo; Anterior</button>
+                <span class="muted">Pagina ${f.pagina} de ${pag.totalPag}</span>
+                <button class="btn" data-lista-pag="${chave}:1" ${f.pagina >= pag.totalPag ? 'disabled' : ''}>Proxima &rsaquo;</button>
+            </span></div>`;
+    }
+
+    // Redesenha so a lista (sem recriar os campos de filtro, pra nao perder o
+    // foco da busca), preservando o formulario de entrada de estoque aberto.
+    function atualizarLista(chave) {
+        const alvo = $(listas[chave].alvo);
+        if (!alvo) return;
+        const formEntrada = capturarFormEntrada();
+        alvo.innerHTML = listas[chave].render();
+        bindActions();
+        restaurarFormEntrada(formEntrada);
+    }
+
+    const optFiltro = (v, atual, txt) => `<option value="${esc(v)}" ${atual === v ? 'selected' : ''}>${esc(txt || v)}</option>`;
+
     function notaFiscalPorPedido() {
         // state.notas ja vem ordenado do mais recente pro mais antigo (listenNotes),
         // entao a primeira ocorrencia por pedido_id e sempre a tentativa mais atual.
@@ -491,14 +536,63 @@ document.addEventListener('DOMContentLoaded', () => {
         return map;
     }
 
+    // Situacao fiscal da venda, a partir do status da nota mais recente dela.
+    function situacaoFiscal(st) {
+        if (st === 'AUTORIZADA' || st === 'CONTINGENCIA') return 'EMITIDA';
+        if (st === 'PROCESSANDO' || st === 'ERRO_REDE') return 'PENDENTE';
+        if (st === 'REJEITADA' || st === 'ERRO') return 'FALHA';
+        if (st === 'CANCELADA' || st === 'INUTILIZADA') return 'CANCELADA';
+        return 'SEM_NOTA';
+    }
+
+    function pedidosFiltrados(notaPorPedido) {
+        const f = emiFiltro;
+        const busca = f.busca.trim().toLowerCase();
+        const de = f.de ? new Date(f.de + 'T00:00:00').getTime() : null;
+        const ate = f.ate ? new Date(f.ate + 'T23:59:59.999').getTime() : null;
+        return state.pedidos.filter(p => {
+            const nota = notaPorPedido[p.id];
+            if (f.situacao && situacaoFiscal(nota ? statusDaNota(nota) : null) !== f.situacao) return false;
+            if (f.pagamento && String(p.forma_pagamento || '-') !== f.pagamento) return false;
+            const ms = p.hora_pedido?.toMillis?.() ?? null;
+            if (de != null && (ms == null || ms < de)) return false;
+            if (ate != null && (ms == null || ms > ate)) return false;
+            if (busca) {
+                const alvo = [p.id, p.nome_cliente, p.forma_pagamento, nota?.nNF].join(' ').toLowerCase();
+                if (!alvo.includes(busca)) return false;
+            }
+            return true;
+        });
+    }
+
     function renderIssuance() {
-        const notaPorPedido = notaFiscalPorPedido();
         if (!state.pedidos.length) return '<div class="panel"><h2>Emissao NFC-e</h2><div class="empty">Nenhuma venda concluida recente.</div></div>';
-        return `<div class="panel"><div class="panel-head"><h2>Emitir NFC-e por venda concluida</h2></div><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Pagamento</th><th class="num">Valor</th><th>Data</th><th class="num">Acao</th></tr></thead><tbody>${state.pedidos.map(p => {
+        const f = emiFiltro;
+        const pagamentos = [...new Set(state.pedidos.map(p => String(p.forma_pagamento || '-')))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        const situacoes = [['SEM_NOTA', 'Sem nota'], ['EMITIDA', 'Emitida'], ['PENDENTE', 'Em processamento'], ['FALHA', 'Com falha'], ['CANCELADA', 'Nota cancelada']];
+        return `<div class="panel"><div class="panel-head"><h2>Emitir NFC-e por venda concluida</h2></div>
+            <div class="actions" style="margin:0 0 12px;flex-wrap:wrap;gap:8px;align-items:flex-end">
+                <label class="sub" style="margin:0">Buscar <input type="search" data-lista-filtro="emi:busca" placeholder="Pedido, cliente, numero da nota" value="${esc(f.busca)}"></label>
+                <label class="sub" style="margin:0">Situacao <select data-lista-filtro="emi:situacao">${optFiltro('', f.situacao, 'Todas')}${situacoes.map(([v, t]) => optFiltro(v, f.situacao, t)).join('')}</select></label>
+                <label class="sub" style="margin:0">Pagamento <select data-lista-filtro="emi:pagamento">${optFiltro('', f.pagamento, 'Todos')}${pagamentos.map(v => optFiltro(v, f.pagamento)).join('')}</select></label>
+                <label class="sub" style="margin:0">De <input type="date" data-lista-filtro="emi:de" value="${esc(f.de)}"></label>
+                <label class="sub" style="margin:0">Ate <input type="date" data-lista-filtro="emi:ate" value="${esc(f.ate)}"></label>
+                <button class="btn" data-lista-limpar="emi">Limpar filtros</button>
+            </div>
+            <div id="emi-lista">${renderListaEmissao()}</div></div>`;
+    }
+
+    function renderListaEmissao() {
+        const notaPorPedido = notaFiscalPorPedido();
+        const lista = pedidosFiltrados(notaPorPedido);
+        const pag = fatiarPagina(lista, emiFiltro);
+        const pager = pagerHtml('emi', lista, pag, state.pedidos.length, 'vendas carregadas');
+        if (!lista.length) return '<div class="empty">Nenhuma venda encontrada com esses filtros.</div>' + pager;
+        return `<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Pagamento</th><th class="num">Valor</th><th>Data</th><th class="num">Acao</th></tr></thead><tbody>${pag.itens.map(p => {
             const nota = notaPorPedido[p.id];
             const st = nota ? String(nota.status || '').toUpperCase() : null;
             let acao;
-            // AUTORIZADA/CONTINGENCIA/PROCESSANDO = NF-e valida ou em curso, bloqueia
+            // AUTORIZADA/CONTINGENCIA/PROCESSANDO = NFC-e valida ou em curso, bloqueia
             // cancelar a venda por aqui (cancele a nota primeiro). CANCELADA/INUTILIZADA
             // significam que a nota ja nao vale mais fiscalmente, entao a venda pode
             // ser cancelada normalmente.
@@ -510,13 +604,13 @@ document.addEventListener('DOMContentLoaded', () => {
             else if (st === 'PROCESSANDO') acao = '<span class="badge b-warn">Processando...</span>';
             else if (st === 'ERRO_REDE') acao = '<span class="badge b-warn">Aguardando conexão (reenvia sozinho)</span>';
             else if (st === 'REJEITADA' || st === 'ERRO') {
-                acao = `<button class="btn primary" data-emitir="${p.id}">Retry</button><br><span class="muted" style="font-size:.76rem">Tentativa anterior falhou: ${esc(nota.motivo || st)}</span>`;
+                acao = `<button class="btn primary" data-emitir="${p.id}">Retry</button><br><span class="muted" style="font-size:.76rem">Tentativa anterior falhou: ${esc(motivoDaNota(nota) || st)}</span>`;
             } else if (st === 'CANCELADA' || st === 'INUTILIZADA') {
-                acao = `<span class="badge b-muted">NF-e cancelada</span><br><button class="btn primary" data-emitir="${p.id}" style="margin-top:6px">Emitir nova NFC-e</button>`;
+                acao = `<span class="badge b-muted">NFC-e cancelada</span><br><button class="btn primary" data-emitir="${p.id}" style="margin-top:6px">Emitir nova NFC-e</button>`;
             } else acao = `<button class="btn primary" data-emitir="${p.id}">Emitir NFC-e</button>`;
-            acao += `<br><button class="btn danger" data-cancelar-venda="${p.id}" ${nfEmitida ? 'disabled title="NF-e já emitida — cancele a nota antes de cancelar a venda."' : ''} style="margin-top:6px">Cancelar venda</button>`;
+            acao += `<br><button class="btn danger" data-cancelar-venda="${p.id}" ${nfEmitida ? 'disabled title="NFC-e já emitida — cancele a nota antes de cancelar a venda."' : ''} style="margin-top:6px">Cancelar venda</button>`;
             return `<tr><td>#${esc(String(p.id).slice(0, 6))}</td><td>${esc(p.nome_cliente || 'Cliente')}</td><td>${esc(p.forma_pagamento || '-')}</td><td class="num">${money(p.valor_total)}</td><td>${dateTxt(p.hora_pedido)}</td><td class="num">${acao}</td></tr>`;
-        }).join('')}</tbody></table></div>`;
+        }).join('')}</tbody></table>` + pager;
     }
 
     function renderInutilization() {
@@ -537,13 +631,52 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>
             <p class="sub" id="dfe-import-msg" style="margin-top:-6px"></p>
-            ${dfeTable()}
+            ${state.dfe.length ? `<div class="actions" style="margin:0 0 12px;flex-wrap:wrap;gap:8px;align-items:flex-end">
+                <label class="sub" style="margin:0">Buscar <input type="search" data-lista-filtro="dfe:busca" placeholder="Emitente, CNPJ, chave, NSU" value="${esc(dfeFiltro.busca)}"></label>
+                <label class="sub" style="margin:0">Tipo <select data-lista-filtro="dfe:tipo">${optFiltro('', dfeFiltro.tipo, 'Todos')}${optFiltro('COMPLETA', dfeFiltro.tipo, 'Nota completa')}${optFiltro('RESUMO', dfeFiltro.tipo, 'Resumo')}</select></label>
+                <label class="sub" style="margin:0">Estoque <select data-lista-filtro="dfe:estoque">${optFiltro('', dfeFiltro.estoque, 'Todos')}${optFiltro('PENDENTE', dfeFiltro.estoque, 'Entrada pendente')}${optFiltro('OK', dfeFiltro.estoque, 'Entrada OK')}${optFiltro('SEM_ITENS', dfeFiltro.estoque, 'Sem itens')}</select></label>
+                <label class="sub" style="margin:0">Emissao de <input type="date" data-lista-filtro="dfe:de" value="${esc(dfeFiltro.de)}"></label>
+                <label class="sub" style="margin:0">Ate <input type="date" data-lista-filtro="dfe:ate" value="${esc(dfeFiltro.ate)}"></label>
+                <button class="btn" data-lista-limpar="dfe">Limpar filtros</button>
+            </div>` : ''}
+            <div id="dfe-lista">${renderListaDfe()}</div>
         </div>`;
     }
 
-    function dfeTable() {
+    function estoqueDoDfe(d) {
+        if (d.entrada_confirmada) return 'OK';
+        return Array.isArray(d.itens) && d.itens.length > 0 ? 'PENDENTE' : 'SEM_ITENS';
+    }
+
+    function dfeFiltrados() {
+        const f = dfeFiltro;
+        const busca = f.busca.trim().toLowerCase();
+        return state.dfe.filter(d => {
+            if (f.tipo && (d.resumo ? 'RESUMO' : 'COMPLETA') !== f.tipo) return false;
+            if (f.estoque && estoqueDoDfe(d) !== f.estoque) return false;
+            // dhEmi vem do XML como texto ISO (2026-09-01T10:00:00-03:00): o dia sao os 10 primeiros caracteres.
+            const dia = String(d.dhEmi || '').slice(0, 10);
+            if (f.de && (!dia || dia < f.de)) return false;
+            if (f.ate && (!dia || dia > f.ate)) return false;
+            if (busca) {
+                const alvo = [d.nsu, d.chave, d.emitente, d.cnpjEmitente].join(' ').toLowerCase();
+                if (!alvo.includes(busca)) return false;
+            }
+            return true;
+        });
+    }
+
+    function renderListaDfe() {
         if (!state.dfe.length) return '<div class="empty">Nenhuma nota recebida sincronizada.</div>';
-        return `<table><thead><tr><th>NSU</th><th>Chave</th><th>Emitente</th><th class="num">Valor</th><th>Emissao</th><th>Schema</th><th class="num">Estoque</th></tr></thead><tbody>${state.dfe.map(d => {
+        const lista = dfeFiltrados();
+        const pag = fatiarPagina(lista, dfeFiltro);
+        const pager = pagerHtml('dfe', lista, pag, state.dfe.length, 'notas carregadas');
+        if (!lista.length) return '<div class="empty">Nenhuma nota recebida encontrada com esses filtros.</div>' + pager;
+        return dfeTable(pag.itens) + pager;
+    }
+
+    function dfeTable(docs) {
+        return `<table><thead><tr><th>NSU</th><th>Chave</th><th>Emitente</th><th class="num">Valor</th><th>Emissao</th><th>Schema</th><th class="num">Estoque</th></tr></thead><tbody>${docs.map(d => {
             const temItens = Array.isArray(d.itens) && d.itens.length > 0;
             let acaoEstoque;
             if (d.entrada_confirmada) acaoEstoque = '<span class="badge b-ok">Entrada OK</span>';
@@ -878,6 +1011,28 @@ document.addEventListener('DOMContentLoaded', () => {
         const docPorPag = $('doc-por-pagina');
         if (docPorPag) docPorPag.onchange = () => { docFiltro.porPagina = Number(docPorPag.value) || 20; docFiltro.pagina = 1; atualizarListaDocumentos(); };
         document.querySelectorAll('[data-doc-pag]').forEach(btn => btn.onclick = () => { docFiltro.pagina += Number(btn.dataset.docPag); atualizarListaDocumentos(); });
+        document.querySelectorAll('[data-lista-filtro]').forEach(el => {
+            const [chave, campo] = el.dataset.listaFiltro.split(':');
+            const f = listas[chave].filtro;
+            el[el.type === 'search' ? 'oninput' : 'onchange'] = () => { f[campo] = el.value; f.pagina = 1; atualizarLista(chave); };
+        });
+        document.querySelectorAll('[data-lista-limpar]').forEach(btn => btn.onclick = () => {
+            const f = listas[btn.dataset.listaLimpar].filtro;
+            Object.keys(f).forEach(k => { if (k !== 'pagina' && k !== 'porPagina') f[k] = ''; });
+            f.pagina = 1;
+            render();
+        });
+        document.querySelectorAll('[data-lista-por-pagina]').forEach(sel => sel.onchange = () => {
+            const f = listas[sel.dataset.listaPorPagina].filtro;
+            f.porPagina = Number(sel.value) || 20;
+            f.pagina = 1;
+            atualizarLista(sel.dataset.listaPorPagina);
+        });
+        document.querySelectorAll('[data-lista-pag]').forEach(btn => btn.onclick = () => {
+            const [chave, passo] = btn.dataset.listaPag.split(':');
+            listas[chave].filtro.pagina += Number(passo);
+            atualizarLista(chave);
+        });
         const inut = $('btn-inutilizar-range');
         if (inut) inut.onclick = inutilizar;
         const syncDfe = $('btn-sync-dfe');
@@ -1187,7 +1342,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const nota = notaFiscalPorPedido()[id];
         const st = nota ? String(nota.status || '').toUpperCase() : null;
         if (st === 'AUTORIZADA' || st === 'CONTINGENCIA' || st === 'PROCESSANDO') {
-            alert('Esta venda tem uma NF-e ativa — cancele a nota fiscal antes de cancelar a venda.');
+            alert('Esta venda tem uma NFC-e ativa — cancele a nota fiscal antes de cancelar a venda.');
             return;
         }
         if (!confirm(`Cancelar a venda #${String(id).slice(0, 6)} (${money(pedido.valor_total)})? Isso não pode ser desfeito.`)) return;
