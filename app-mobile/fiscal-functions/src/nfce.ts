@@ -13,6 +13,7 @@ import { getDistribuicaoDFeEndpoint, getSefazEndpoints } from './engine/sefaz-en
 import { DanfeNfceService } from './engine/danfe-nfce.service';
 import { obterAliquotaIBPT } from './ibpt-store';
 import { nfeProcDe, extrairProtNFe, montarNfeProc, extrairEventosCancelamento } from './xml-proc';
+import { cStatTransitorio, servicoParalisado, digestDoXml, xmlAutorizado } from './regras-fiscais';
 
 const builder = new NfeXmlBuilder();
 const signer = new NfeXmlSigner();
@@ -106,6 +107,16 @@ export interface AvulsaRequest {
   //  - forcar: emite direto em contingência, sem tentar a SEFAZ
   //  - xJust: justificativa (15..256 caracteres)
   contingencia?: { permitir?: boolean; forcar?: boolean; xJust?: string };
+  // Id do documento em notas_fiscais (quando a emissão é de um pedido): o XML
+  // assinado de cada envio é guardado nele antes de transmitir (xml-enviado.ts).
+  notaId?: string;
+}
+
+// Onde guardar/buscar os XMLs assinados de uma nota. Opcional: sem ele (prévia,
+// testes, emissão sem nota no banco) a emissão funciona igual, só não guarda.
+export interface RegistroXmlEnviado {
+  guardar(xml: string): Promise<void>;
+  candidatos(): Promise<string[]>;
 }
 
 export interface AvulsaResult {
@@ -118,6 +129,10 @@ export interface AvulsaResult {
   xmlProc?: string;         // nfeProc (NFe + protocolo) — XML de distribuição p/ contabilidade
   danfeBase64?: string;
   contingencia?: boolean;   // true quando emitida offline (tpEmis=9), pendente de transmissão
+  // true = a SEFAZ não deu um veredito (lote em processamento, serviço
+  // paralisado, duplicidade que não deu pra conferir). NÃO é rejeição: quem
+  // chama deve tentar de novo com a MESMA nota, nunca abrir número novo.
+  transitorio?: boolean;
 }
 
 async function gerarDanfeBase64(
@@ -142,7 +157,7 @@ function brtIso(d: Date): string {
 }
 function nowBRT(): string { return brtIso(new Date()); }
 
-function gerarQrCode(chave44: string, tpAmb: '1' | '2', cscId: string, csc: string, qrBaseUrl: string): string {
+export function gerarQrCode(chave44: string, tpAmb: '1' | '2', cscId: string, csc: string, qrBaseUrl: string): string {
   // cIdToken vai SEM zeros à esquerda (ex: "1", não "000001") — comparado com uma
   // NFC-e real autorizada em MG, o zero-padding quebra o pattern do schema e causa
   // rejeição "Falha no Schema XML do lote de NFe".
@@ -153,6 +168,37 @@ function gerarQrCode(chave44: string, tpAmb: '1' | '2', cscId: string, csc: stri
   // Pipe literal (sem URL-encoding) é o formato aceito pela SEFAZ — confirmado
   // comparando com uma NFC-e real autorizada.
   return `${qrBaseUrl}${sep}p=${dadosBase}|${hash}`;
+}
+
+// QR Code da NFC-e emitida em CONTINGÊNCIA OFFLINE (tpEmis=9). O formato é
+// outro: como a nota ainda não está na SEFAZ quando o consumidor lê o código,
+// ele carrega dia da emissão, valor total e o digest da assinatura. O schema da
+// SEFAZ amarra o formato ao tpEmis da chave — mandar o QR Code "online" numa
+// chave de contingência dá "215 Falha no schema XML" (foi o que rejeitou todas
+// as contingências até out/2026).
+//   p = chave|2|tpAmb|dia|vNF|digVal|cIdToken|hash
+//   digVal = DigestValue da assinatura (texto base64) convertido pra hexadecimal
+//   hash   = SHA-1 dos 7 parâmetros + CSC
+export function gerarQrCodeOffline(
+  chave44: string, tpAmb: '1' | '2', cscId: string, csc: string, qrBaseUrl: string,
+  nota: { dhEmi: string; vNF: number; digestValue: string },
+): string {
+  const cIdToken = String(parseInt(cscId, 10) || 0);
+  const dia = nota.dhEmi.slice(8, 10);
+  const vNF = (Number(nota.vNF) || 0).toFixed(2);
+  const digVal = Buffer.from(nota.digestValue, 'utf8').toString('hex');
+  const dadosBase = `${chave44}|2|${tpAmb}|${dia}|${vNF}|${digVal}|${cIdToken}`;
+  const hash = crypto.createHash('sha1').update(dadosBase + csc).digest('hex').toUpperCase();
+  const sep = qrBaseUrl.includes('?') ? '&' : '?';
+  return `${qrBaseUrl}${sep}p=${dadosBase}|${hash}`;
+}
+
+// Troca o conteúdo de <qrCode> num XML já assinado. É seguro: a assinatura
+// cobre só o <infNFe>, e o <infNFeSupl> (onde mora o QR Code) fica fora dele.
+function trocarQrCode(signedXml: string, qrCode: string): string {
+  const esc = qrCode.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  if (!/<qrCode>[\s\S]*?<\/qrCode>/.test(signedXml)) throw new Error('XML assinado sem <qrCode> — não é possível montar a contingência.');
+  return signedXml.replace(/<qrCode>[\s\S]*?<\/qrCode>/, () => `<qrCode>${esc}</qrCode>`);
 }
 
 // Responsável técnico (NT 2018.005) — mesmo em toda nota, de todo cliente:
@@ -341,8 +387,33 @@ async function conciliarDuplicidade(
     console.warn(`[nfce] duplicidade ${chave44}: consulta retornou ${c.cStat} ${c.xMotivo}`);
   } catch (err: any) {
     console.warn(`[nfce] duplicidade ${chave44}: falha na consulta:`, err?.message || err);
+    // A chave existe na SEFAZ mas não deu pra saber em que situação: não é
+    // rejeição, é "tente de novo" (ver AvulsaResult.transitorio).
+    return { ...result, consultaFalhou: true };
   }
   return result;
+}
+
+function semVeredito(result: any): boolean {
+  return cStatTransitorio(result.cStat) || (result.cStat === '204' && result.consultaFalhou === true);
+}
+
+// XML que a SEFAZ de fato autorizou: o desta tentativa, se o digest bater com o
+// do protocolo; senão um dos envios anteriores guardados na nota. undefined =
+// não temos o XML autorizado (nunca devolve um XML que não bate).
+async function xmlQueFoiAutorizado(signedXml: string, soap: string | undefined, registro?: RegistroXmlEnviado): Promise<string | undefined> {
+  const direto = xmlAutorizado([signedXml], soap);
+  if (direto) return direto;
+  if (!registro) return undefined;
+  try { return xmlAutorizado(await registro.candidatos(), soap); } catch { return undefined; }
+}
+
+const AVISO_XML_INDISPONIVEL = ' — XML autorizado não está guardado (a autorização foi de um envio anterior); cupom gerado com os dados desta tentativa.';
+
+// DANFE de uma nota reconhecida como autorizada depois (conciliação), pra ela
+// não ficar sem cupom imprimível.
+export async function danfeDeNotaAutorizada(xml: string, chave: string, protocolo?: string, dhRecbto?: string): Promise<string | undefined> {
+  return gerarDanfeBase64(xml, { accessKey: chave, protocol: protocolo, receivedAt: dhRecbto });
 }
 
 // Falha de schema (cStat 215): a SEFAZ às vezes manda o detalhe só no corpo
@@ -367,7 +438,7 @@ export function chaveNormalCalculada(p: { uf: string; cnpj: string; serie: numbe
   return c43 + builder.calcDV(c43);
 }
 
-export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Promise<AvulsaResult> {
+export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput, registro?: RegistroXmlEnviado): Promise<AvulsaResult> {
   // Entrega a domicílio (indPres=4) exige destinatário identificado por
   // CPF/CNPJ — sem isso o <dest> nem chega a ser montado (ver montarInputNFe/
   // buildXml, que descartam o bloco inteiro, endereço incluso, quando falta
@@ -399,7 +470,39 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
     };
     const unsigned = builder.build(input);
     const { signedXml } = signer.sign(unsigned, cred);
-    return { chave44: c44, signedXml };
+    if (tpEmis !== '9') return { chave44: c44, signedXml };
+    // Contingência: o QR Code leva o digest da assinatura, que só existe depois
+    // de assinar — monta o QR Code offline agora e troca no XML assinado.
+    const digestValue = digestDoXml(signedXml);
+    if (!digestValue) throw new Error('XML assinado sem DigestValue — não é possível montar o QR Code da contingência.');
+    const qrOffline = gerarQrCodeOffline(c44, tpAmb, req.cscId, req.csc, req.qrBaseUrl, {
+      dhEmi: input.dhEmi, vNF: input.totals.vNF, digestValue,
+    });
+    return { chave44: c44, signedXml: trocarQrCode(signedXml, qrOffline) };
+  }
+
+  // Guarda o XML antes de transmitir. Falha ao guardar nunca impede a emissão.
+  async function guardarAntesDeEnviar(xml: string): Promise<void> {
+    if (!registro) return;
+    try { await registro.guardar(xml); } catch (err: any) {
+      console.warn('[nfce] não foi possível guardar o XML antes do envio:', err?.message || err);
+    }
+  }
+
+  // Resultado de uma nota reconhecida como autorizada por CONSULTA (a resposta
+  // da autorização original se perdeu, ou veio 204 duplicidade).
+  async function resultadoAdotado(chave44: string, signedXml: string, c: { nProt?: string; dhRecbto?: string; rawResponse?: string }, motivo: string): Promise<AvulsaResult> {
+    const xmlCerto = await xmlQueFoiAutorizado(signedXml, c.rawResponse, registro);
+    return {
+      status: 'AUTORIZADA',
+      chave: chave44,
+      protocolo: c.nProt,
+      cStat: '100',
+      motivo: xmlCerto ? motivo : motivo + AVISO_XML_INDISPONIVEL,
+      xml: xmlCerto,
+      xmlProc: xmlCerto ? nfeProcDe(xmlCerto, c.rawResponse) : undefined,
+      danfeBase64: await gerarDanfeBase64(xmlCerto || signedXml, { accessKey: chave44, protocol: c.nProt, receivedAt: c.dhRecbto }),
+    };
   }
 
   const permitirCont = req.contingencia?.permitir !== false;   // padrão: permite
@@ -412,6 +515,7 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
   // 1) Emissão normal (a menos que a contingência seja forçada)
   if (!forcarCont) {
     const { chave44, signedXml } = montarAssinar('1');
+    await guardarAntesDeEnviar(signedXml);
     try {
       let result = await transport.authorize(
         signedXml, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF, '1',
@@ -436,20 +540,32 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
         }
       }
 
+      const eraDuplicidade = result.cStat === '204';
       result = await conciliarDuplicidade(result, chave44, endpoints, cred, tpAmb, cUF);
-      const autorizada = result.cStat === '100';
-      return {
-        status: autorizada ? 'AUTORIZADA' : 'REJEITADA',
-        chave: chave44,
-        protocolo: result.nProt,
-        cStat: result.cStat ?? undefined,
-        motivo: motivoComDetalhe(result),
-        xml: signedXml,
-        xmlProc: autorizada ? nfeProcDe(signedXml, result.rawResponse) : undefined,
-        danfeBase64: autorizada
-          ? await gerarDanfeBase64(signedXml, { accessKey: chave44, protocol: result.nProt, receivedAt: result.dhRecbto })
-          : undefined,
-      };
+      // 204 que virou 100: quem foi autorizado foi um envio ANTERIOR desta mesma
+      // chave — o XML desta tentativa pode não ser o que a SEFAZ tem.
+      if (eraDuplicidade && result.cStat === '100') {
+        return resultadoAdotado(chave44, signedXml, result, result.xMotivo);
+      }
+      // Serviço paralisado (108/109): a SEFAZ respondeu que não está autorizando
+      // — é o mesmo caso de "sem comunicação", segue pra contingência abaixo.
+      const vaiPraContingencia = servicoParalisado(result.cStat) && permitirCont;
+      if (!vaiPraContingencia) {
+        const autorizada = result.cStat === '100';
+        return {
+          status: autorizada ? 'AUTORIZADA' : 'REJEITADA',
+          chave: chave44,
+          protocolo: result.nProt,
+          cStat: result.cStat ?? undefined,
+          motivo: motivoComDetalhe(result),
+          xml: signedXml,
+          xmlProc: autorizada ? nfeProcDe(signedXml, result.rawResponse) : undefined,
+          danfeBase64: autorizada
+            ? await gerarDanfeBase64(signedXml, { accessKey: chave44, protocol: result.nProt, receivedAt: result.dhRecbto })
+            : undefined,
+          transitorio: !autorizada && semVeredito(result) ? true : undefined,
+        };
+      }
     } catch (err: any) {
       // Falha de comunicação com a SEFAZ → cai para contingência (se permitida).
       // Antes disso, consulta a chave: timeout/queda na RESPOSTA não quer dizer que
@@ -458,16 +574,7 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
       try {
         const c = await transport.consultaProtocolo(chave44, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF);
         if (c.cStat === '100' && c.nProt) {
-          return {
-            status: 'AUTORIZADA',
-            chave: chave44,
-            protocolo: c.nProt,
-            cStat: '100',
-            motivo: 'Autorizado o uso da NF-e (confirmada por consulta após falha na resposta)',
-            xml: signedXml,
-            xmlProc: nfeProcDe(signedXml, c.rawResponse),
-            danfeBase64: await gerarDanfeBase64(signedXml, { accessKey: chave44, protocol: c.nProt, receivedAt: c.dhRecbto }),
-          };
+          return resultadoAdotado(chave44, signedXml, c, 'Autorizado o uso da NF-e (confirmada por consulta após falha na resposta)');
         }
       } catch { /* sem consulta também → segue o fluxo */ }
       if (!permitirCont) throw err;
@@ -477,6 +584,7 @@ export async function emitirNfceAvulsa(req: AvulsaRequest, cert: CertInput): Pro
   // 2) Contingência offline (tpEmis=9): assina, gera DANFE e deixa pendente de transmissão
   const dhCont = nowBRT();
   const { chave44, signedXml } = montarAssinar('9', { dhCont, xJust: justCont });
+  await guardarAntesDeEnviar(signedXml);
   return {
     status: 'CONTINGENCIA',
     chave: chave44,
@@ -536,6 +644,7 @@ export async function transmitirNfceContingencia(
   const autorizada = result.cStat === '100';
   return {
     status: autorizada ? 'AUTORIZADA' : 'REJEITADA',
+    transitorio: !autorizada && semVeredito(result) ? true : undefined,
     protocolo: result.nProt,
     cStat: result.cStat ?? undefined,
     motivo: motivoComDetalhe(result),

@@ -19,6 +19,7 @@
       "ignore": [
         "node_modules",
         "src",
+        "test",
         ".git",
         "firebase-debug.log",
         "firebase-debug.*.log",

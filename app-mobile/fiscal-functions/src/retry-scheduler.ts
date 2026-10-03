@@ -19,10 +19,13 @@ import * as fs from 'fs';
 import {
   emitirNfceAvulsa, AvulsaRequest, AvulsaResult,
   transmitirNfceContingencia, CertInput,
-  consultarNfcePorChave, chaveNormalCalculada,
+  consultarNfcePorChave, chaveNormalCalculada, danfeDeNotaAutorizada,
 } from './nfce';
 import { carregarCertificado } from './cert-store';
 import { conciliarNotasDoPedido, auditarDuplicidades } from './conciliar';
+import { registroXmlDaNota } from './xml-enviado';
+import { msEmProcessamento, podeGravarResultado, xmlAutorizado, xmlsDaNota } from './regras-fiscais';
+import { nfeProcDe } from './xml-proc';
 
 function db(): admin.firestore.Firestore {
   if (!admin.apps.length) admin.initializeApp();
@@ -181,21 +184,45 @@ async function liberarTravaEmissao(pedidoId: string): Promise<void> {
     .catch(() => {});
 }
 
-async function gravarResultado(ref: admin.firestore.DocumentReference, data: AvulsaResult): Promise<void> {
+// Grava o resultado de uma emissão. Em transação, pra um resultado tardio (de
+// um envio concorrente que perdeu a corrida) nunca rebaixar uma nota que outro
+// envio já deixou AUTORIZADA — ex.: gravar CONTINGENCIA por cima dela.
+// payload = o que foi enviado: sem veredito da SEFAZ (transitorio), a nota volta
+// pra ERRO_REDE COM o payload, e é reenviada com o mesmo número — nunca vira
+// rejeição (que liberaria número novo).
+async function gravarResultado(ref: admin.firestore.DocumentReference, data: AvulsaResult, payload: AvulsaRequest): Promise<void> {
   const emContingencia = data.status === 'CONTINGENCIA';
-  await ref.update({
-    status: data.status,
-    chave: data.chave || null,
-    protocolo: data.protocolo || null,
-    cStat: data.cStat || null,
-    motivo: data.motivo || null,
-    danfeBase64: data.danfeBase64 || null,
-    xml: data.xml || null,
-    xmlProc: data.xmlProc || null,
-    formaEmissao: emContingencia ? 'CONTINGENCIA' : 'NORMAL',
-    contingencia: !!data.contingencia,
-    xmlAssinado: emContingencia ? (data.xml || null) : null,
-    payload_pendente: admin.firestore.FieldValue.delete(),
+  await db().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const atual = snap.exists ? (snap.data() as any).status : undefined;
+    if (!podeGravarResultado(atual, data.status)) {
+      console.warn(`[retry fiscal] nota ${ref.id} já está ${atual} — resultado ${data.status} de envio concorrente descartado.`);
+      return;
+    }
+    if (data.transitorio) {
+      tx.update(ref, {
+        status: 'ERRO_REDE', cStat: data.cStat || null,
+        motivo: `SEFAZ sem veredito (${data.cStat || '-'}: ${data.motivo || 'sem resposta'}) — reenviando a mesma nota automaticamente.`,
+        payload_pendente: JSON.parse(JSON.stringify(payload)),
+      });
+      return;
+    }
+    tx.update(ref, {
+      status: data.status,
+      chave: data.chave || null,
+      protocolo: data.protocolo || null,
+      cStat: data.cStat || null,
+      motivo: data.motivo || null,
+      danfeBase64: data.danfeBase64 || null,
+      xml: data.xml || null,
+      xmlProc: data.xmlProc || null,
+      formaEmissao: emContingencia ? 'CONTINGENCIA' : 'NORMAL',
+      contingencia: !!data.contingencia,
+      xmlAssinado: emContingencia ? (data.xml || null) : null,
+      payload_pendente: admin.firestore.FieldValue.delete(),
+      // Os XMLs de cada envio só servem pra reconhecer uma autorização perdida.
+      ...(data.status === 'AUTORIZADA' ? { xml_enviado: admin.firestore.FieldValue.delete() } : {}),
+    });
   });
 }
 
@@ -267,11 +294,16 @@ async function emitirParaPedidoComTravaAdquirida(pedidoId: string, pedido: any, 
     cliente: pedido.nome_cliente || null,
     ambiente: payload.ambiente,
     criado_em: admin.firestore.FieldValue.serverTimestamp(),
+    processando_desde: admin.firestore.FieldValue.serverTimestamp(),
+    // Guardado desde a criação (igual ao painel): se este processo morrer no
+    // meio, a nota é reenviada com ESTE payload (mesmo número/chave), em vez
+    // de abrir uma tentativa com número novo.
+    payload_pendente: JSON.parse(JSON.stringify(payload)),
   });
 
   try {
-    const resultado = await emitirNfceAvulsa(payload, cert);
-    await gravarResultado(ref, resultado);
+    const resultado = await emitirNfceAvulsa(payload, cert, registroXmlDaNota(ref.id));
+    await gravarResultado(ref, resultado, payload);
   } catch (err: any) {
     // Rejeição/erro da SEFAZ (não falta de rede, já que estamos no servidor) —
     // fica em ERRO, igual ao fluxo interativo, esperando um "Retry" manual.
@@ -287,13 +319,13 @@ async function reemitirNotaComErroDeRede(
     const snap = await tx.get(ref);
     const d = snap.data();
     if (!d || d.status !== 'ERRO_REDE' || !d.payload_pendente) return null;
-    tx.update(ref, { status: 'PROCESSANDO' });
+    tx.update(ref, { status: 'PROCESSANDO', processando_desde: admin.firestore.FieldValue.serverTimestamp() });
     return d.payload_pendente as AvulsaRequest;
   });
   if (!payload) return;
   try {
-    const resultado = await emitirNfceAvulsa(payload, cert);
-    await gravarResultado(ref, resultado);
+    const resultado = await emitirNfceAvulsa(payload, cert, registroXmlDaNota(ref.id));
+    await gravarResultado(ref, resultado, payload);
   } catch (err: any) {
     await ref.update({ status: 'ERRO_REDE', motivo: err?.message || String(err), payload_pendente: payload });
   }
@@ -322,7 +354,7 @@ async function transmitirNotaEmContingencia(
         xmlProc: resultado.xmlProc || null,
         transmitida_em: admin.firestore.FieldValue.serverTimestamp(),
       });
-    } else if (resultado.cStat) {
+    } else if (resultado.cStat && !resultado.transitorio) {
       // SEFAZ processou e rejeitou de vez — reenviar o MESMO XML já assinado de
       // novo (próximo ciclo do cron) nunca vai funcionar, o problema está no
       // conteúdo dele. Libera o pedido pra uma emissão nova do zero em vez de
@@ -332,8 +364,11 @@ async function transmitirNotaEmContingencia(
         await db().collection('pedidos').doc(nota.pedido_id).set({ nfce_pendente: true }, { merge: true }).catch(() => {});
       }
     } else {
-      // Falha de comunicação (sem cStat) — mantém em CONTINGENCIA, vale tentar de novo.
-      await ref.update({ motivo: resultado.motivo || null });
+      // Falha de comunicação (sem cStat) ou SEFAZ sem veredito (lote em
+      // processamento, serviço paralisado, duplicidade sem consulta) — mantém em
+      // CONTINGENCIA e tenta de novo no próximo ciclo. Descartar aqui liberaria
+      // número novo pra uma nota que ainda pode ser autorizada.
+      await ref.update({ motivo: resultado.motivo || null, cStat: resultado.cStat || null });
     }
   } catch (err: any) {
     await ref.update({ motivo: err?.message || String(err) });
@@ -362,9 +397,31 @@ async function recuperarNotasProcessandoTravadas(cfg: any, cert: CertInput): Pro
   for (const doc of travadas.docs) {
     const d = doc.data();
     const criadoEm = d.criado_em && typeof d.criado_em.toDate === 'function' ? d.criado_em.toDate().getTime() : null;
-    if (!criadoEm || (agora - criadoEm) < LIMITE_PROCESSANDO_TRAVADA_MS) continue; // ainda pode estar em andamento de verdade
+    const parada = msEmProcessamento(d, agora);
+    if (!criadoEm || parada == null || parada < LIMITE_PROCESSANDO_TRAVADA_MS) continue; // ainda pode estar em andamento de verdade
 
-    console.log(`[retry fiscal] nota ${doc.id} (pedido ${d.pedido_id}) travada em PROCESSANDO há ${Math.round((agora - criadoEm) / 60000)}min.`);
+    console.log(`[retry fiscal] nota ${doc.id} (pedido ${d.pedido_id}) travada em PROCESSANDO há ${Math.round(parada / 60000)}min.`);
+
+    // Tem o payload guardado: reenvia A MESMA nota (mesmo número e mesma chave)
+    // pelo caminho do ERRO_REDE, logo abaixo no ciclo. Se o envio original ainda
+    // estiver em andamento ou já tiver sido autorizado, a SEFAZ responde
+    // duplicidade e a nota é reconhecida — não existe como sair uma segunda
+    // NFC-e. Abrir tentativa com número novo aqui foi o que duplicou 6 vendas
+    // em set/2026 ("Emissão anterior travou sem gerar chave").
+    if (d.payload_pendente) {
+      await db().runTransaction(async (tx) => {
+        const atual = (await tx.get(doc.ref)).data() as any;
+        if (!atual || atual.status !== 'PROCESSANDO') return;
+        const paradaAgora = msEmProcessamento(atual, Date.now());
+        if (paradaAgora == null || paradaAgora < LIMITE_PROCESSANDO_TRAVADA_MS) return;
+        tx.update(doc.ref, {
+          status: 'ERRO_REDE',
+          motivo: 'Emissão interrompida antes da resposta da SEFAZ — reenviando a mesma nota automaticamente.',
+        });
+      }).catch((err) => console.error(`[retry fiscal] nota ${doc.id}: falha ao devolver pra fila:`, err?.message || err));
+      continue;
+    }
+
     if (d.chave) {
       console.warn(`[retry fiscal] nota ${doc.id} travada em PROCESSANDO há mais de 3min mas já tem chave (${d.chave}) — não mexo automaticamente, requer verificação manual na SEFAZ.`);
       continue;
@@ -382,10 +439,17 @@ async function recuperarNotasProcessandoTravadas(cfg: any, cert: CertInput): Pro
       });
       const c = await consultarNfcePorChave({ ambiente: d.ambiente || cfg.ambiente || 'homologacao', uf: cfg.uf, chave }, cert);
       if (c.cStat === '100' && c.nProt) {
+        const xmlCerto = xmlAutorizado(xmlsDaNota(d), c.rawResponse);
+        const xmlProc = xmlCerto ? nfeProcDe(xmlCerto, c.rawResponse) : undefined;
+        const danfeBase64 = xmlCerto ? await danfeDeNotaAutorizada(xmlCerto, chave, c.nProt, c.dhRecbto) : undefined;
         await doc.ref.update({
           status: 'AUTORIZADA', chave, protocolo: c.nProt, cStat: '100',
-          motivo: 'Autorizado o uso da NF-e (conciliada: resposta da SEFAZ não chegou)',
+          motivo: 'Autorizado o uso da NF-e (conciliada: resposta da SEFAZ não chegou)'
+            + (xmlCerto ? '' : ' — XML autorizado não está guardado.'),
           formaEmissao: 'NORMAL', payload_pendente: admin.firestore.FieldValue.delete(),
+          ...(xmlCerto ? { xml: xmlCerto } : {}),
+          ...(xmlProc ? { xmlProc } : {}),
+          ...(danfeBase64 ? { danfeBase64 } : {}),
         });
         console.log(`[retry fiscal] nota ${doc.id} já estava autorizada na SEFAZ (${chave}) — conciliada, sem reemitir.`);
         continue;
@@ -398,10 +462,17 @@ async function recuperarNotasProcessandoTravadas(cfg: any, cert: CertInput): Pro
     try {
       // Tira o registro velho do caminho (não fica mais em STATUS_NOTA_ATIVA)
       // antes de abrir uma tentativa nova pro mesmo pedido.
-      await doc.ref.update({
-        status: 'ERRO',
-        motivo: 'Emissão anterior travou sem gerar chave (processo interrompido antes de transmitir) — nova tentativa aberta automaticamente.',
+      const liberada = await db().runTransaction(async (tx) => {
+        const atual = (await tx.get(doc.ref)).data() as any;
+        // Mudou enquanto consultávamos a SEFAZ (alguém concluiu ou reenviou): não mexe.
+        if (!atual || atual.status !== 'PROCESSANDO' || atual.chave || atual.payload_pendente) return false;
+        tx.update(doc.ref, {
+          status: 'ERRO',
+          motivo: 'Emissão anterior travou sem gerar chave (processo interrompido antes de transmitir) — nova tentativa aberta automaticamente.',
+        });
+        return true;
       });
+      if (!liberada) continue;
       const pedidoSnap = await db().collection('pedidos').doc(d.pedido_id).get();
       if (!pedidoSnap.exists) continue;
       await emitirParaPedido(d.pedido_id, pedidoSnap.data(), cfg, cert);

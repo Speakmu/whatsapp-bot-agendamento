@@ -263,6 +263,9 @@
             cliente: pedido.nome_cliente || null,
             ambiente: payload.ambiente,
             criado_em: firebase.firestore.FieldValue.serverTimestamp(),
+            // Quando entrou em PROCESSANDO pela ultima vez (renovado a cada
+            // reenvio) — e por ele, nao por criado_em, que se mede se a nota travou.
+            processando_desde: firebase.firestore.FieldValue.serverTimestamp(),
             // Guardado desde a criação (não só quando dá erro): se a aba fechar
             // ou recarregar antes da resposta chegar, resgatarNotasTravadas()
             // usa isso pra reenviar exatamente esta tentativa depois.
@@ -301,7 +304,9 @@
             resp = await fetch(`${cfg.url}/fiscal/nfce/avulsa`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { 'Authorization': `Bearer ${cfg.apiKey}` } : {}) },
-                body: JSON.stringify(payload),
+                // notaId: o servico guarda o XML assinado nesta nota ANTES de
+                // transmitir, pra ele existir mesmo se a resposta se perder.
+                body: JSON.stringify({ ...payload, notaId: ref.id }),
                 signal: controller.signal
             });
             data = await resp.json();
@@ -320,9 +325,32 @@
             clearTimeout(timeoutId);
         }
 
+        const novoStatus = data.status || (resp.ok ? 'AUTORIZADA' : 'ERRO');
         const emContingencia = data.status === 'CONTINGENCIA';
-        await ref.update({
-            status: data.status || (resp.ok ? 'AUTORIZADA' : 'ERRO'),
+        // Em transacao: um resultado atrasado (de um envio concorrente que perdeu
+        // a corrida) nao pode rebaixar uma nota que outro envio ja deixou
+        // AUTORIZADA — ex.: gravar CONTINGENCIA por cima dela.
+        await db().runTransaction(async (tx) => {
+            const atual = (await tx.get(ref)).data() || {};
+            if (['CANCELADA', 'INUTILIZADA'].includes(atual.status)) return;
+            if (atual.status === 'AUTORIZADA' && novoStatus !== 'AUTORIZADA') return;
+            // SEFAZ sem veredito (lote em processamento, servico paralisado,
+            // duplicidade sem consulta): NAO e rejeicao. Volta pra fila e reenvia
+            // a MESMA nota (mesmo numero) — rejeitar liberaria numero novo pra uma
+            // venda cuja nota ainda pode ser autorizada.
+            if (data.transitorio) {
+                tx.update(ref, {
+                    status: 'ERRO_REDE', cStat: data.cStat || null,
+                    motivo: `SEFAZ sem veredito (${data.cStat || '-'}: ${data.motivo || 'sem resposta'}) — reenviando a mesma nota automaticamente.`,
+                    payload_pendente: JSON.parse(JSON.stringify(payload))
+                });
+                return;
+            }
+            tx.update(ref, gravacao());
+        });
+
+        function gravacao() { return {
+            status: novoStatus,
             chave: data.chave || null,
             protocolo: data.protocolo || null,
             cStat: data.cStat || null,
@@ -339,8 +367,10 @@
             contingencia: !!data.contingencia,
             // guarda o XML assinado apenas na contingência (para transmitir depois)
             xmlAssinado: emContingencia ? (data.xml || null) : null,
-            payload_pendente: firebase.firestore.FieldValue.delete()
-        });
+            payload_pendente: firebase.firestore.FieldValue.delete(),
+            // Os XMLs de cada envio so servem pra reconhecer uma autorizacao perdida.
+            ...(novoStatus === 'AUTORIZADA' ? { xml_enviado: firebase.firestore.FieldValue.delete() } : {})
+        }; }
     }
 
     // ---------- Emissão automática (chamada pelo PDV/mesas ao concluir uma venda) ----------
@@ -413,7 +443,7 @@
                     const snap = await tx.get(ref);
                     const d = snap.data();
                     if (!d || d.status !== 'ERRO_REDE' || !d.payload_pendente) return null;
-                    tx.update(ref, { status: 'PROCESSANDO' });
+                    tx.update(ref, { status: 'PROCESSANDO', processando_desde: firebase.firestore.FieldValue.serverTimestamp() });
                     return d.payload_pendente;
                 });
             } catch { continue; }
@@ -435,13 +465,25 @@
     async function resgatarNotasTravadas() {
         const limite = Date.now() - LIMITE_PROCESSANDO_ORFA_MS;
         const presas = await db().collection('notas_fiscais').where('status', '==', 'PROCESSANDO').get();
+        // Conta a partir do ULTIMO envio (processando_desde), nao da criacao: uma
+        // nota antiga que acabou de ser reenviada parecia travada com o envio
+        // ainda em andamento.
+        const desdeMs = (n) => Math.max(
+            n.criado_em && n.criado_em.toMillis ? n.criado_em.toMillis() : 0,
+            n.processando_desde && n.processando_desde.toMillis ? n.processando_desde.toMillis() : 0
+        );
         for (const doc of presas.docs) {
             const n = doc.data();
-            const criadoMs = n.criado_em && n.criado_em.toMillis ? n.criado_em.toMillis() : 0;
-            if (!n.payload_pendente || criadoMs > limite) continue;
-            await doc.ref.update({
-                status: 'ERRO_REDE',
-                motivo: 'Emissão interrompida (aba fechada ou conexão perdida durante o envio) — reenviando automaticamente.'
+            if (!n.payload_pendente || desdeMs(n) > limite) continue;
+            // Em transacao: so devolve pra fila se continua travada (outra aba
+            // ou o agendador podem ter concluido/reenviado nesse meio tempo).
+            await db().runTransaction(async (tx) => {
+                const atual = (await tx.get(doc.ref)).data();
+                if (!atual || atual.status !== 'PROCESSANDO' || !atual.payload_pendente || desdeMs(atual) > limite) return;
+                tx.update(doc.ref, {
+                    status: 'ERRO_REDE',
+                    motivo: 'Emissão interrompida (aba fechada ou conexão perdida durante o envio) — reenviando automaticamente.'
+                });
             }).catch(() => {});
         }
     }
@@ -568,7 +610,9 @@
         // com o código atual) em vez de deixar a nota presa em CONTINGENCIA pra
         // sempre. Sem cStat (falha de rede/comunicação) mantém em CONTINGENCIA —
         // aí sim vale tentar "Transmitir" de novo depois.
-        if (data.cStat) {
+        // transitorio = SEFAZ sem veredito (lote em processamento, servico
+        // paralisado): a nota continua em CONTINGENCIA pra transmitir de novo.
+        if (data.cStat && !data.transitorio) {
             await notaRef.update({
                 status: 'ERRO', cStat: data.cStat, motivo: data.motivo || data.error || null, contingencia: false,
             });
@@ -577,8 +621,10 @@
             }
             throw new Error(`Transmissão rejeitada pela SEFAZ (${data.cStat}): ${data.motivo || 'erro'}. Uma nova emissão (número novo) foi liberada para este pedido.`);
         }
-        await notaRef.update({ motivo: data.motivo || data.error || null });
-        throw new Error(`Falha ao transmitir: ${data.motivo || data.error || 'erro'}`);
+        await notaRef.update({ motivo: data.motivo || data.error || null, cStat: data.cStat || null });
+        throw new Error(data.transitorio
+            ? `A SEFAZ ainda não deu resposta definitiva (${data.cStat}: ${data.motivo || 'em processamento'}). A nota continua em contingência e será transmitida de novo automaticamente.`
+            : `Falha ao transmitir: ${data.motivo || data.error || 'erro'}`);
     }
 
     // ---------- Cancelamento (evento 110111) ----------

@@ -105,7 +105,9 @@ export class DanfeNfceService {
     }
     // PDF estilo cupom fiscal (bobina 80mm)
     // Estimar altura: header ~110pt + itens ~18pt cada + pagamentos ~14pt cada + rodapé ~100pt
-    const estimatedH = 120 + dets.length * 18 + pags.length * 14 + 120 + (tpAmb === '2' ? 24 : 0) + (dest ? 14 : 0);
+    // Contingência offline ainda não transmitida: tpEmis=9 e sem protocolo.
+    const emContingencia = str(ide['tpEmis'] ?? '1') === '9' && !protocolo;
+    const estimatedH = 120 + dets.length * 18 + pags.length * 14 + 120 + (tpAmb === '2' ? 24 : 0) + (dest ? 14 : 0) + (emContingencia ? 30 : 0);
     const doc = new PDFDocument({
       size: [CUPOM_WIDTH, Math.max(estimatedH, 300)],
       margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
@@ -136,6 +138,18 @@ export class DanfeNfceService {
       doc.fillColor('#000000');
       y += bannerH + 4;
     }
+    // Aviso obrigatório do DANFE NFC-e emitido em contingência offline: o
+    // consumidor precisa saber que a nota ainda vai ser autorizada.
+    if (emContingencia) {
+      const bannerH = 24;
+      doc.rect(MARGIN, y, CONTENT_W, bannerH).fill('#000000');
+      doc.fillColor('#ffffff').font(FONT_BOLD).fontSize(7.5)
+        .text('EMITIDA EM CONTINGÊNCIA', MARGIN, y + 3, { width: CONTENT_W, align: 'center' });
+      doc.font(FONT_BOLD).fontSize(6.5)
+        .text('Pendente de autorização', MARGIN, y + 13, { width: CONTENT_W, align: 'center' });
+      doc.fillColor('#000000');
+      y += bannerH + 4;
+    }
     // Número e Série
     doc.font(FONT_BOLD).fontSize(7).text(`Número: ${str(ide['nNF'] ?? '')}   Série: ${str(ide['serie'] ?? '')}`, MARGIN, y, { width: CONTENT_W, align: 'center' });
     y += doc.currentLineHeight() + 2;
@@ -145,10 +159,15 @@ export class DanfeNfceService {
     doc.font(FONT_NORMAL).fontSize(7).text(chave44.replace(/(\d{4})(?=\d)/g, '$1 '), MARGIN, y, { width: CONTENT_W, align: 'center' });
     y += doc.currentLineHeight() + 2;
     // Protocolo e data
-    doc.font(FONT_NORMAL).fontSize(6).text(`Protocolo: ${protocolo}`, MARGIN, y, { width: CONTENT_W });
-    y += doc.currentLineHeight();
-    doc.font(FONT_NORMAL).fontSize(6).text(`Data/Hora Autorização: ${dhRecbto}`, MARGIN, y, { width: CONTENT_W });
-    y += doc.currentLineHeight() + 2;
+    if (emContingencia) {
+      doc.font(FONT_NORMAL).fontSize(6).text(`Data/Hora de emissão: ${str(ide['dhEmi'] ?? '')}`, MARGIN, y, { width: CONTENT_W });
+      y += doc.currentLineHeight() + 2;
+    } else {
+      doc.font(FONT_NORMAL).fontSize(6).text(`Protocolo: ${protocolo}`, MARGIN, y, { width: CONTENT_W });
+      y += doc.currentLineHeight();
+      doc.font(FONT_NORMAL).fontSize(6).text(`Data/Hora Autorização: ${dhRecbto}`, MARGIN, y, { width: CONTENT_W });
+      y += doc.currentLineHeight() + 2;
+    }
     // Itens
     doc.font(FONT_BOLD).fontSize(7).text('ITENS', MARGIN, y, { width: CONTENT_W, align: 'center' });
     y += doc.currentLineHeight() + 1;

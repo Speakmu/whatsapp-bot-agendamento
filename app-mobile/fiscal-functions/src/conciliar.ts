@@ -10,8 +10,9 @@
 //  não emitir agora (a venda segue pendente e é tentada de novo) do que duplicar.
 // ============================================================
 import * as admin from 'firebase-admin';
-import { CertInput, consultarNfcePorChave, chaveNormalCalculada } from './nfce';
+import { CertInput, consultarNfcePorChave, chaveNormalCalculada, danfeDeNotaAutorizada } from './nfce';
 import { nfeProcDe } from './xml-proc';
+import { xmlAutorizado, xmlsDaNota } from './regras-fiscais';
 
 function db(): admin.firestore.Firestore {
   if (!admin.apps.length) admin.initializeApp();
@@ -53,11 +54,20 @@ export async function conciliarNotasDoPedido(
     for (const chave of chaves) {
       const r = await consultarNfcePorChave({ ambiente: n.ambiente || cfg.ambiente || 'homologacao', uf: cfg.uf, chave }, cert);
       if (r.cStat === '100' && r.nProt) {
+        // Só junta o protocolo com o XML que a SEFAZ de fato autorizou (digest
+        // igual ao do protocolo). O XML gravado na nota pode ser de outra
+        // tentativa — o da contingência, por exemplo, que tem outra chave.
+        const xmlCerto = xmlAutorizado(xmlsDaNota(n), r.rawResponse);
+        const xmlProc = xmlCerto ? nfeProcDe(xmlCerto, r.rawResponse) : undefined;
+        const danfeBase64 = xmlCerto ? await danfeDeNotaAutorizada(xmlCerto, chave, r.nProt, r.dhRecbto) : undefined;
         await doc.ref.update({
           status: 'AUTORIZADA', chave, protocolo: r.nProt, cStat: '100',
-          motivo: 'Autorizado o uso da NF-e (conciliada com a SEFAZ antes de nova emissão)',
-          formaEmissao: 'NORMAL', contingencia: false,
-          ...(nfeProcDe(n.xml || n.xmlAssinado, r.rawResponse) ? { xmlProc: nfeProcDe(n.xml || n.xmlAssinado, r.rawResponse) } : {}),
+          motivo: 'Autorizado o uso da NF-e (conciliada com a SEFAZ antes de nova emissão)'
+            + (xmlCerto ? '' : ' — XML autorizado não está guardado.'),
+          formaEmissao: 'NORMAL', contingencia: false, xmlAssinado: null,
+          ...(xmlCerto ? { xml: xmlCerto } : {}),
+          ...(xmlProc ? { xmlProc } : {}),
+          ...(danfeBase64 ? { danfeBase64 } : {}),
           payload_pendente: admin.firestore.FieldValue.delete(),
         });
         console.log(`[conciliar] pedido ${pedidoId}: nota ${n.nNF} já estava AUTORIZADA na SEFAZ (${chave}) — não emite outra.`);
