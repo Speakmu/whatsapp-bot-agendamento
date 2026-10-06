@@ -16,8 +16,9 @@ document.addEventListener('DOMContentLoaded', () => {
         emi: { filtro: emiFiltro, alvo: 'emi-lista', render: () => renderListaEmissao() },
         dfe: { filtro: dfeFiltro, alvo: 'dfe-lista', render: () => renderListaDfe() }
     };
-    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr() };
+    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [] };
     let unsubRelatorio = null;
+    let unsubMesAtual = null;
     const tabs = [
         ['overview', 'Visao Geral'],
         ['settings', 'Config fiscal'],
@@ -114,6 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // sempre que o mes selecionado no relatorio muda.
     function listenRelatorio(mes) {
         if (unsubRelatorio) unsubRelatorio();
+        garantirMesAtual(mes);
         const { inicio, fim } = limitesDoMes(mes);
         unsubRelatorio = db.collection('notas_fiscais')
             .where('criado_em', '>=', inicio)
@@ -122,8 +124,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.notasRelatorio = [];
                 snap.forEach(doc => state.notasRelatorio.push({ id: doc.id, ...doc.data() }));
                 state.notasRelatorio.sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
-                if (state.tab === 'report') render();
+                if (state.tab === 'report' || (state.tab === 'overview' && state.relatorioMes === mesAtualStr())) render();
             }, err => console.warn('notas_fiscais (relatorio):', err.message));
+    }
+
+    // A Visao Geral mostra o MES ATUAL. Quando o seletor do relatorio esta no mes
+    // atual, os dois dividem a mesma consulta (state.notasRelatorio). Se o relatorio
+    // for para outro mes, abre uma consulta propria so do mes atual — sem isso o
+    // resumo passaria a mostrar o mes que estivesse escolhido no relatorio.
+    function garantirMesAtual(mesDoRelatorio) {
+        if (mesDoRelatorio === mesAtualStr()) {
+            if (unsubMesAtual) { unsubMesAtual(); unsubMesAtual = null; state.notasMesAtual = []; }
+            return;
+        }
+        if (unsubMesAtual) return;
+        const { inicio, fim } = limitesDoMes(mesAtualStr());
+        unsubMesAtual = db.collection('notas_fiscais')
+            .where('criado_em', '>=', inicio)
+            .where('criado_em', '<', fim)
+            .onSnapshot(snap => {
+                state.notasMesAtual = [];
+                snap.forEach(doc => state.notasMesAtual.push({ id: doc.id, ...doc.data() }));
+                if (state.tab === 'overview') render();
+            }, err => console.warn('notas_fiscais (mes atual):', err.message));
+    }
+    function notasDoMesAtual() {
+        return state.relatorioMes === mesAtualStr() ? state.notasRelatorio : state.notasMesAtual;
     }
 
     function listenOrders() {
@@ -242,18 +268,6 @@ document.addEventListener('DOMContentLoaded', () => {
         restaurarEdicao(formEdicao);
     }
 
-    // state.notas agora traz as ultimas 300 (nao so as de hoje), mas os cartoes
-    // da Visao Geral continuam sendo do dia. Nota recem-criada ainda sem
-    // criado_em do servidor (escrita pendente) conta como de hoje.
-    function notasDeHoje() {
-        const inicioHoje = new Date();
-        inicioHoje.setHours(0, 0, 0, 0);
-        return state.notas.filter(n => {
-            const d = n.criado_em?.toDate?.();
-            return !d || d >= inicioHoje;
-        });
-    }
-
     function counts(notas) {
         const base = { total: notas.length, autorizada: 0, rejeitada: 0, cancelada: 0, contingencia: 0, inutilizada: 0, processando: 0 };
         notas.forEach(n => {
@@ -269,14 +283,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderOverview() {
-        const hoje = notasDeHoje();
-        const c = counts(hoje);
-        const total = hoje.filter(n => n.status === 'AUTORIZADA').reduce((sum, n) => sum + Number(n.valor || 0), 0);
+        // Cartoes do MES atual (nao do dia). Inutilizacao nao e documento de venda.
+        const mes = notasDoMesAtual().filter(n => n.tipo !== 'INUTILIZACAO');
+        const c = counts(mes);
+        const total = mes.filter(n => n.status === 'AUTORIZADA').reduce((sum, n) => sum + Number(n.valor || 0), 0);
+        // Pendencia = nota que nao deu certo E cuja venda ainda nao tem nota autorizada.
+        // Uma tentativa que falhou mas foi refeita (outra nota AUTORIZADA no mesmo pedido)
+        // nao e pendencia — so historico.
+        const pedidosComNotaOk = new Set(mes.filter(n => ['AUTORIZADA', 'CANCELADA'].includes(n.status) && n.pedido_id).map(n => n.pedido_id));
+        const pendencias = mes.filter(n => !['AUTORIZADA', 'CANCELADA', 'INUTILIZADA'].includes(String(n.status || '').toUpperCase())
+            && !(n.pedido_id && pedidosComNotaOk.has(n.pedido_id))).length;
+        const [ano, nMes] = mesAtualStr().split('-').map(Number);
+        const nomeMes = new Date(ano, nMes - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
         return `
+            <p class="muted" style="margin:0 0 8px">Resumo de <strong>${esc(nomeMes)}</strong> (mes inteiro, do dia 1 ate hoje)</p>
             <div class="grid cards">
-                ${metric('Documentos', c.total)}
+                ${metric('Documentos no mes', c.total)}
                 ${metric('Autorizadas', c.autorizada)}
-                ${metric('Pendencias', c.rejeitada + c.contingencia + c.processando)}
+                ${metric('Pendencias', pendencias)}
                 ${metric('Valor autorizado', money(total))}
             </div>
             <div class="panel" style="margin-top:14px">
