@@ -187,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // estoque de uma nota voltava pras sugestoes automaticas no meio do
     // preenchimento, e o operador confirmava sem perceber (ex.: Tampico 450 ml
     // ligado ao produto de 250 ml).
-    const CAMPOS_ENTRADA = ['item-tipo', 'item-produto', 'item-insumo', 'item-novo-nome', 'item-prod-nome', 'item-prod-categoria', 'item-qtd'];
+    const CAMPOS_ENTRADA = ['item-tipo', 'item-produto', 'item-insumo', 'item-novo-nome', 'item-prod-nome', 'item-prod-categoria', 'item-prod-ncm', 'item-prod-cfop', 'item-prod-csosn', 'item-prod-origem', 'item-qtd'];
     // Valor do select de produto que significa "cadastrar um produto novo".
     const PRODUTO_NOVO = '__novo__';
     function capturarFormEntrada() {
@@ -792,10 +792,32 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<option value="">Selecione o produto no cardapio...</option><option value="${PRODUTO_NOVO}">+ Cadastrar produto novo</option>${opcoes}`;
     }
 
-    // Categorias pro produto novo: as que ja existem no cardapio.
+    // Categorias pro produto novo. Mesma lista fixa do cadastro do Cardapio
+    // (painel.html, #product-categoria) — antes so aparecia o que ja tinha
+    // produto cadastrado, entao "Doces" nunca aparecia numa loja sem doce no
+    // cardapio. Categorias extras que ja existam em produtos entram tambem, sem
+    // duplicar por diferenca de maiuscula/acento ("Salgados fritos"/"Salgados Fritos").
+    const CATEGORIAS_PADRAO = ['Doces', 'Bebidas', 'Salgados Fritos', 'Salgados assados', 'Molhos'];
     function opcoesCategorias() {
-        const cats = [...new Set(state.produtos.map(p => p.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-        return `<option value="">Categoria...</option>${cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}`;
+        const chave = (c) => normalizarNome(c);
+        const vistas = new Set(CATEGORIAS_PADRAO.map(chave));
+        const extras = [];
+        state.produtos.forEach(p => {
+            const c = p.categoria;
+            if (c && !vistas.has(chave(c))) { vistas.add(chave(c)); extras.push(c); }
+        });
+        extras.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        return `<option value="">Categoria...</option>${[...CATEGORIAS_PADRAO, ...extras].map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}`;
+    }
+
+    // Origem da mercadoria (campo 'orig' do ICMS) — mesmas opcoes do Cardapio.
+    const ORIGENS_FISCAIS = [
+        ['0', '0 - Nacional'], ['1', '1 - Estrangeira (importacao direta)'], ['2', '2 - Estrangeira (mercado interno)'],
+        ['3', '3 - Nacional, conteudo importado > 40%'], ['4', '4 - Nacional, PPB'], ['5', '5 - Nacional, conteudo importado <= 40%'],
+        ['6', '6 - Estrangeira, sem similar nacional'], ['7', '7 - Estrangeira, mercado interno sem similar'], ['8', '8 - Nacional, conteudo importado > 70%'],
+    ];
+    function opcoesOrigem() {
+        return `<option value="">Usar padrao fiscal</option>${ORIGENS_FISCAIS.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('')}`;
     }
 
     // Custo e unidade de um item NOVO no estoque, a partir da quantidade que o
@@ -824,6 +846,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div data-item-prod-novo="${idx}" style="display:none;margin-top:4px">
                     <input type="text" data-item-prod-nome="${idx}" placeholder="Nome do produto no cardapio" value="${esc(it.xProd || '')}">
                     <select data-item-prod-categoria="${idx}" style="margin-top:4px">${opcoesCategorias()}</select>
+                    <div style="margin-top:6px;font-weight:700;font-size:.8rem">Classificacao fiscal (contabilidade)</div>
+                    <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-top:2px">
+                        <input type="text" data-item-prod-ncm="${idx}" placeholder="NCM (8 digitos)" inputmode="numeric" maxlength="8" value="${esc(String(it.ncm || '').replace(/\D/g, '').slice(0, 8))}" title="NCM da mercadoria — ja sugerido pelo da nota">
+                        <input type="text" data-item-prod-cfop="${idx}" placeholder="CFOP venda (ex: 5102)" inputmode="numeric" maxlength="4" title="CFOP da VENDA (5102 revenda). Nao e o CFOP da compra que vem na nota.">
+                        <input type="text" data-item-prod-csosn="${idx}" placeholder="CSOSN/CST (ex: 102)" inputmode="numeric" maxlength="3">
+                        <select data-item-prod-origem="${idx}">${opcoesOrigem()}</select>
+                    </div>
+                    <small class="muted" style="display:block;margin-top:2px">Em branco = usa o padrao de Config fiscal. O NCM ja vem sugerido da nota; confirme com a contabilidade.</small>
                     <small class="muted" style="display:block;margin-top:4px">Entra no estoque agora e fica oculto do caixa, do app e do bot, sem preco, ate a loja completar o cadastro no Cardapio.</small>
                 </div>
                 <select data-item-insumo="${idx}" style="display:none">${opcoesInsumos(it.xProd)}</select>
@@ -1522,6 +1552,12 @@ document.addEventListener('DOMContentLoaded', () => {
                         const categoria = document.querySelector(`[data-item-prod-categoria="${idx}"]`)?.value || '';
                         if (!nomeNovo) throw new Error(`Informe o nome do produto novo para "${it.xProd || 'item ' + (idx + 1)}".`);
                         if (!categoria) throw new Error(`Escolha a categoria do produto novo "${nomeNovo}".`);
+                        const fval = (campo) => String(document.querySelector(`[data-item-prod-${campo}="${idx}"]`)?.value || '').trim();
+                        const ncmNovo = fval('ncm').replace(/\D/g, ''), cfopNovo = fval('cfop').replace(/\D/g, ''), csosnNovo = fval('csosn').replace(/\D/g, '');
+                        const origemNovo = fval('origem');
+                        if (ncmNovo && ncmNovo.length !== 8) throw new Error(`NCM de "${nomeNovo}" precisa ter 8 digitos (ou deixe em branco).`);
+                        if (cfopNovo && !/^5\d{3}$/.test(cfopNovo)) throw new Error(`CFOP de "${nomeNovo}" deve ser de venda dentro do estado (5xxx, ex: 5102) — ou deixe em branco.`);
+                        if (csosnNovo && !/^\d{2,3}$/.test(csosnNovo)) throw new Error(`CSOSN/CST de "${nomeNovo}" precisa ter 2 ou 3 digitos (ex: 102) — ou deixe em branco.`);
                         const chaveNome = normalizarNome(nomeNovo);
                         const jaExiste = state.produtos.find(p => normalizarNome(p.nome_exibicao || p.nome) === chaveNome);
                         if (jaExiste) throw new Error(`Ja existe no cardapio um produto chamado "${jaExiste.nome_exibicao || jaExiste.nome}". Selecione-o na lista em vez de cadastrar de novo.`);
@@ -1540,7 +1576,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 disponivel_online: false,
                                 cadastro_pendente: true,
                                 pontos_fidelidade: 0,
-                                ncm: it.ncm || '', cfop: '', csosn: '', cst: '', origem: '',
+                                ncm: ncmNovo, cfop: cfopNovo, csosn: csosnNovo, cst: '', origem: origemNovo,
                                 custo_unitario: custoEUnidadeNovoItem(it, qtd).custo,
                                 criado_pela_nota: d.chave || d.nsu || null,
                                 criado_por: operador,
