@@ -290,16 +290,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const listaPend = pendenciasDoMes(mes);
         const pendencias = listaPend.length;
         const duplicadas = duplicidadesDoMes(mes);
+        // De onde sai cada numero (para a conta fechar na tela): Documentos = autorizadas
+        // + canceladas + o resto (tentativas com erro/pendentes, inclusive as ja refeitas).
+        const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
+        const outras = c.total - c.autorizada - c.cancelada;
+        const composicao = [plural(c.autorizada, 'autorizada', 'autorizadas'), plural(c.cancelada, 'cancelada', 'canceladas')]
+            .concat(outras > 0 ? [`${outras} com erro/pendente`] : []).join(' + ');
         const [ano, nMes] = mesAtualStr().split('-').map(Number);
         const nomeMes = new Date(ano, nMes - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
         return `
             <p class="muted" style="margin:0 0 8px">Resumo de <strong>${esc(nomeMes)}</strong> (mes inteiro, do dia 1 ate hoje)</p>
             ${alertaDuplicidade(duplicadas)}
             <div class="grid cards">
-                ${metric('Documentos no mes', c.total)}
-                ${metric('Autorizadas', c.autorizada)}
+                ${metric('Documentos no mes', c.total, esc(composicao))}
+                ${metric('Autorizadas', c.autorizada, 'valendo agora (sem as canceladas)')}
                 ${cartaoPendencias(pendencias)}
-                ${metric('Valor autorizado', money(total))}
+                ${metric('Valor autorizado', money(total), 'so notas autorizadas, sem canceladas')}
             </div>
             ${state.overviewPend ? painelPendencias(listaPend) : ''}
             <div class="panel" style="margin-top:14px">
@@ -371,8 +377,8 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>`;
     }
 
-    function metric(label, value) {
-        return `<div class="card"><div class="metric-label">${esc(label)}</div><div class="metric-value">${esc(value)}</div></div>`;
+    function metric(label, value, sub) {
+        return `<div class="card"><div class="metric-label">${esc(label)}</div><div class="metric-value">${esc(value)}</div>${sub ? `<div class="muted" style="font-size:.74rem;margin-top:2px">${sub}</div>` : ''}</div>`;
     }
 
     function healthRows() {
