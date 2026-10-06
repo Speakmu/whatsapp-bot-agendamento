@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
         emi: { filtro: emiFiltro, alvo: 'emi-lista', render: () => renderListaEmissao() },
         dfe: { filtro: dfeFiltro, alvo: 'dfe-lista', render: () => renderListaDfe() }
     };
-    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [] };
+    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [], overviewPend: false };
     let unsubRelatorio = null;
     let unsubMesAtual = null;
     const tabs = [
@@ -287,22 +287,21 @@ document.addEventListener('DOMContentLoaded', () => {
         const mes = notasDoMesAtual().filter(n => n.tipo !== 'INUTILIZACAO');
         const c = counts(mes);
         const total = mes.filter(n => n.status === 'AUTORIZADA').reduce((sum, n) => sum + Number(n.valor || 0), 0);
-        // Pendencia = nota que nao deu certo E cuja venda ainda nao tem nota autorizada.
-        // Uma tentativa que falhou mas foi refeita (outra nota AUTORIZADA no mesmo pedido)
-        // nao e pendencia — so historico.
-        const pedidosComNotaOk = new Set(mes.filter(n => ['AUTORIZADA', 'CANCELADA'].includes(n.status) && n.pedido_id).map(n => n.pedido_id));
-        const pendencias = mes.filter(n => !['AUTORIZADA', 'CANCELADA', 'INUTILIZADA'].includes(String(n.status || '').toUpperCase())
-            && !(n.pedido_id && pedidosComNotaOk.has(n.pedido_id))).length;
+        const listaPend = pendenciasDoMes(mes);
+        const pendencias = listaPend.length;
+        const duplicadas = duplicidadesDoMes(mes);
         const [ano, nMes] = mesAtualStr().split('-').map(Number);
         const nomeMes = new Date(ano, nMes - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
         return `
             <p class="muted" style="margin:0 0 8px">Resumo de <strong>${esc(nomeMes)}</strong> (mes inteiro, do dia 1 ate hoje)</p>
+            ${alertaDuplicidade(duplicadas)}
             <div class="grid cards">
                 ${metric('Documentos no mes', c.total)}
                 ${metric('Autorizadas', c.autorizada)}
-                ${metric('Pendencias', pendencias)}
+                ${cartaoPendencias(pendencias)}
                 ${metric('Valor autorizado', money(total))}
             </div>
+            ${state.overviewPend ? painelPendencias(listaPend) : ''}
             <div class="panel" style="margin-top:14px">
                 <div class="panel-head"><h2>Saude fiscal</h2><button class="btn" data-tab-go="settings">Abrir config fiscal</button></div>
                 ${healthRows()}
@@ -311,6 +310,65 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="panel-head"><h2>Ultimos documentos</h2><button class="btn" data-tab-go="documents">Ver todos</button></div>
                 ${documentsTable(state.notas.slice(0, 6))}
             </div>`;
+    }
+
+    // Pendencia = nota que nao deu certo E cuja venda ainda nao tem nota autorizada.
+    // Uma tentativa que falhou mas foi refeita (outra nota AUTORIZADA no mesmo pedido)
+    // nao e pendencia — so historico.
+    function pendenciasDoMes(mes) {
+        const pedidosComNotaOk = new Set(mes.filter(n => ['AUTORIZADA', 'CANCELADA'].includes(n.status) && n.pedido_id).map(n => n.pedido_id));
+        return mes
+            .filter(n => !['AUTORIZADA', 'CANCELADA', 'INUTILIZADA'].includes(String(n.status || '').toUpperCase())
+                && !(n.pedido_id && pedidosComNotaOk.has(n.pedido_id)))
+            .sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
+    }
+
+    // Venda com mais de uma NFC-e AUTORIZADA (duplicidade): so uma pode valer.
+    function duplicidadesDoMes(mes) {
+        const porPedido = {};
+        mes.filter(n => n.status === 'AUTORIZADA' && n.pedido_id).forEach(n => { (porPedido[n.pedido_id] = porPedido[n.pedido_id] || []).push(n); });
+        return Object.entries(porPedido).filter(([, notas]) => notas.length > 1)
+            .map(([pedidoId, notas]) => ({ pedidoId, notas: notas.sort((a, b) => Number(a.nNF) - Number(b.nNF)) }));
+    }
+
+    function alertaDuplicidade(duplicadas) {
+        if (!duplicadas.length) return '';
+        const extra = duplicadas.reduce((sum, d) => sum + d.notas.slice(1).reduce((x, n) => x + Number(n.valor || 0), 0), 0);
+        return `<div style="border:1px solid #f1b0ab;background:#fdebea;color:#8f2118;padding:12px 14px;border-radius:8px;margin-bottom:14px">
+            <strong>Atencao: ${duplicadas.length} venda(s) com mais de uma NFC-e autorizada (${money(extra)} faturado a mais)</strong>
+            <ul style="margin:6px 0 6px 18px">${duplicadas.map(d => `<li>Pedido #${esc(String(d.pedidoId).slice(0, 6))} — notas ${d.notas.map(n => esc(n.nNF)).join(', ')} (${money(d.notas[0].valor)} cada). Mantenha uma e cancele as outras na SEFAZ junto com a contabilidade.</li>`).join('')}</ul>
+            <button class="btn" data-tab-go="documents">Ver em Documentos</button>
+        </div>`;
+    }
+
+    function cartaoPendencias(qtd) {
+        const cor = qtd > 0 ? 'border-color:#f1b0ab;' : '';
+        return `<button type="button" class="card" data-pend-toggle style="text-align:left;cursor:pointer;font:inherit;color:inherit;${cor}" title="Clique para ver as pendencias">
+            <div class="metric-label">Pendencias</div><div class="metric-value" ${qtd > 0 ? 'style="color:#c0392b"' : ''}>${esc(qtd)}</div>
+            <div class="muted" style="font-size:.74rem;margin-top:2px">${qtd > 0 ? (state.overviewPend ? 'Clique para fechar' : 'Clique para ver quais') : 'Nenhuma pendencia'}</div>
+        </button>`;
+    }
+
+    function painelPendencias(lista) {
+        if (!lista.length) return '<div class="panel" style="margin-top:14px"><div class="empty">Nenhuma pendencia neste mes.</div></div>';
+        const explica = (n) => {
+            const st = String(n.status || '').toUpperCase();
+            const idade = n.criado_em?.toMillis ? Date.now() - n.criado_em.toMillis() : 0;
+            if (st === 'CONTINGENCIA') return 'Emitida offline, falta transmitir a SEFAZ' + (idade > 86400000 ? ' — <strong style="color:#c0392b">ja passou de 24h!</strong>' : ' (prazo: 24h)');
+            if (st === 'ERRO_REDE') return 'Falha de conexao — o sistema reenvia sozinho';
+            if (st === 'PROCESSANDO') return 'Em envio' + (idade > 600000 ? ' — <strong style="color:#c0392b">parece travada</strong>' : '');
+            return esc(n.motivo || (n.cStat ? `cStat ${n.cStat}` : 'Sem detalhe do erro'));
+        };
+        const cls = (st) => (st === 'CONTINGENCIA' || st === 'PROCESSANDO' || st === 'ERRO_REDE') ? 'b-warn' : 'b-danger';
+        return `<div class="panel" style="margin-top:14px">
+            <div class="panel-head"><h2>Pendencias do mes (${lista.length})</h2>
+                <div style="display:flex;gap:8px"><button class="btn primary" data-tab-go="issuance">Ir para Emissao (Retry)</button><button class="btn" data-tab-go="documents">Documentos</button></div></div>
+            <p class="sub" style="margin-top:0">Vendas cuja nota ainda nao foi autorizada. Se a venda foi refeita e autorizada em outra nota, ela nao aparece aqui.</p>
+            <table><thead><tr><th>Nota</th><th>Pedido</th><th>Status</th><th>O que aconteceu</th><th>Cliente</th><th class="num">Valor</th><th>Data</th></tr></thead><tbody>${lista.map(n => {
+                const st = String(n.status || '-').toUpperCase();
+                return `<tr><td>${esc(n.nNF || '-')}</td><td>${n.pedido_id ? '#' + esc(String(n.pedido_id).slice(0, 6)) : '-'}</td><td><span class="badge ${cls(st)}">${esc(st)}</span></td><td>${explica(n)}</td><td>${esc(n.cliente || '-')}</td><td class="num">${n.valor != null ? money(n.valor) : '-'}</td><td>${dateTxt(n.criado_em)}</td></tr>`;
+            }).join('')}</tbody></table>
+        </div>`;
     }
 
     function metric(label, value) {
@@ -1261,6 +1319,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function bindActions() {
+        document.querySelectorAll('[data-pend-toggle]').forEach(btn => btn.onclick = () => { state.overviewPend = !state.overviewPend; render(); });
         document.querySelectorAll('[data-tab-go]').forEach(btn => btn.onclick = () => { state.tab = btn.dataset.tabGo; renderTabs(); render(); });
         document.querySelectorAll('[data-refresh-config]').forEach(btn => btn.onclick = loadConfig);
         document.querySelectorAll('[data-emitir]').forEach(btn => btn.onclick = () => emitir(btn));
