@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
         emi: { filtro: emiFiltro, alvo: 'emi-lista', render: () => renderListaEmissao() },
         dfe: { filtro: dfeFiltro, alvo: 'dfe-lista', render: () => renderListaDfe() }
     };
-    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, relatorioMes: mesAtualStr() };
+    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr() };
     let unsubRelatorio = null;
     const tabs = [
         ['overview', 'Visao Geral'],
@@ -225,6 +225,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const content = $('fiscal-content');
         if (!content) return;
         const formEntrada = capturarFormEntrada();
+        const formEdicao = capturarEdicao();
         if (state.tab === 'overview') content.innerHTML = renderOverview();
         if (state.tab === 'settings') content.innerHTML = renderSettings();
         if (state.tab === 'documents') content.innerHTML = renderDocuments();
@@ -238,6 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (state.tab === 'products') content.innerHTML = renderProducts();
         bindActions();
         restaurarFormEntrada(formEntrada);
+        restaurarEdicao(formEdicao);
     }
 
     // state.notas agora traz as ultimas 300 (nao so as de hoje), mas os cartoes
@@ -521,9 +523,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const alvo = $(listas[chave].alvo);
         if (!alvo) return;
         const formEntrada = capturarFormEntrada();
+        const formEdicao = capturarEdicao();
         alvo.innerHTML = listas[chave].render();
         bindActions();
         restaurarFormEntrada(formEntrada);
+        restaurarEdicao(formEdicao);
     }
 
     const optFiltro = (v, atual, txt) => `<option value="${esc(v)}" ${atual === v ? 'selected' : ''}>${esc(txt || v)}</option>`;
@@ -681,7 +685,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<table><thead><tr><th>NSU</th><th>Chave</th><th>Emitente</th><th class="num">Valor</th><th>Emissao</th><th>Schema</th><th class="num">Estoque</th></tr></thead><tbody>${docs.map(d => {
             const temItens = Array.isArray(d.itens) && d.itens.length > 0;
             let acaoEstoque;
-            if (d.entrada_confirmada) acaoEstoque = '<span class="badge b-ok">Entrada OK</span>';
+            if (d.entrada_confirmada) acaoEstoque = `<span class="badge b-ok">Entrada OK</span>${temItens ? ` <button class="btn" data-dfe-editar="${d.id}" style="margin-top:4px">${state.dfeEdicao === d.id ? 'Fechar' : 'Ver / editar itens'}</button>` : ''}`;
             else if (temItens) acaoEstoque = `<button class="btn" data-dfe-toggle="${d.id}">${state.dfeExpandido === d.id ? 'Fechar' : 'Ver itens'}</button>`;
             else acaoEstoque = '<span class="muted">Sem itens</span>';
             const linhaPrincipal = `<tr>
@@ -693,7 +697,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td><span class="badge ${d.resumo ? 'b-warn' : 'b-ok'}">${esc(d.schema || '-')}</span></td>
                 <td class="num">${acaoEstoque}</td>
             </tr>`;
-            const linhaExpandida = state.dfeExpandido === d.id ? linhaEntradaEstoque(d) : '';
+            const linhaExpandida = state.dfeExpandido === d.id ? linhaEntradaEstoque(d)
+                : (state.dfeEdicao === d.id && d.entrada_confirmada ? linhaEdicaoEntrada(d) : '');
             return linhaPrincipal + linhaExpandida;
         }).join('')}</tbody></table>`;
     }
@@ -798,7 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // cardapio. Categorias extras que ja existam em produtos entram tambem, sem
     // duplicar por diferenca de maiuscula/acento ("Salgados fritos"/"Salgados Fritos").
     const CATEGORIAS_PADRAO = ['Doces', 'Bebidas', 'Salgados Fritos', 'Salgados assados', 'Molhos'];
-    function opcoesCategorias() {
+    function opcoesCategorias(selecionada = '') {
         const chave = (c) => normalizarNome(c);
         const vistas = new Set(CATEGORIAS_PADRAO.map(chave));
         const extras = [];
@@ -807,7 +812,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (c && !vistas.has(chave(c))) { vistas.add(chave(c)); extras.push(c); }
         });
         extras.sort((a, b) => a.localeCompare(b, 'pt-BR'));
-        return `<option value="">Categoria...</option>${[...CATEGORIAS_PADRAO, ...extras].map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}`;
+        return `<option value="">Categoria...</option>${[...CATEGORIAS_PADRAO, ...extras].map(c => `<option value="${esc(c)}" ${c === selecionada ? 'selected' : ''}>${esc(c)}</option>`).join('')}`;
     }
 
     // Origem da mercadoria (campo 'orig' do ICMS) — mesmas opcoes do Cardapio.
@@ -816,8 +821,8 @@ document.addEventListener('DOMContentLoaded', () => {
         ['3', '3 - Nacional, conteudo importado > 40%'], ['4', '4 - Nacional, PPB'], ['5', '5 - Nacional, conteudo importado <= 40%'],
         ['6', '6 - Estrangeira, sem similar nacional'], ['7', '7 - Estrangeira, mercado interno sem similar'], ['8', '8 - Nacional, conteudo importado > 70%'],
     ];
-    function opcoesOrigem() {
-        return `<option value="">Usar padrao fiscal</option>${ORIGENS_FISCAIS.map(([v, t]) => `<option value="${v}">${esc(t)}</option>`).join('')}`;
+    function opcoesOrigem(selecionada = '') {
+        return `<option value="">Usar padrao fiscal</option>${ORIGENS_FISCAIS.map(([v, t]) => `<option value="${v}" ${v === String(selecionada) ? 'selected' : ''}>${esc(t)}</option>`).join('')}`;
     }
 
     // Custo e unidade de um item NOVO no estoque, a partir da quantidade que o
@@ -871,6 +876,212 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="actions"><button class="btn primary" data-dfe-confirmar="${d.id}">Confirmar entrada no estoque</button><span class="msg" id="dfe-entrada-msg-${esc(d.id)}"></span></div>
             </div>
         </td></tr>`;
+    }
+
+    // ---------- Edicao de uma entrada JA lancada ----------
+    // Mostra os itens da nota com o que foi lancado em cada um e deixa corrigir
+    // quantidade, custo e dados fiscais do produto. O que entrou no estoque e lido
+    // dos movimentos ("Entrada NF <chave>", mais as correcoes anteriores), entao
+    // funciona tambem para notas lancadas antes de existir o vinculo item->insumo.
+    // Correcao de quantidade nao reescreve a historia: gera um movimento AJUSTE
+    // com a diferenca e soma atomica (increment) no saldo, que pode ter mudado por vendas.
+    const CAMPOS_EDICAO = ['ed-qtd', 'ed-custo', 'ed-categoria', 'ed-ncm', 'ed-cfop', 'ed-csosn', 'ed-origem'];
+    function capturarEdicao() {
+        if (!state.dfeEdicao) return null;
+        const valores = {};
+        CAMPOS_EDICAO.forEach(c => document.querySelectorAll(`[data-${c}]`).forEach(el => {
+            valores[`${c}:${el.getAttribute('data-' + c)}`] = el.value;
+        }));
+        const ativo = document.activeElement;
+        const foco = CAMPOS_EDICAO.find(c => ativo && ativo.hasAttribute && ativo.hasAttribute('data-' + c));
+        return { dfeId: state.dfeEdicao, valores, foco: foco ? `${foco}:${ativo.getAttribute('data-' + foco)}` : null };
+    }
+    function restaurarEdicao(salvo) {
+        if (!salvo || salvo.dfeId !== state.dfeEdicao) return;
+        Object.entries(salvo.valores).forEach(([chave, valor]) => {
+            const [campo, idx] = chave.split(':');
+            const el = document.querySelector(`[data-${campo}="${idx}"]`);
+            if (!el) return;
+            if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === valor)) return;
+            el.value = valor;
+        });
+        if (salvo.foco) {
+            const [campo, idx] = salvo.foco.split(':');
+            document.querySelector(`[data-${campo}="${idx}"]`)?.focus();
+        }
+    }
+
+    const arred3 = (n) => Math.round(n * 1000) / 1000;
+
+    async function carregarEdicaoEntrada(d, aviso) {
+        state.dfeEdicaoDados = { dfeId: d.id, carregando: true };
+        render();
+        try {
+            const prefixo = `Entrada NF ${d.chave || d.nsu}`;
+            const snap = await db.collection('estoque_movimentos')
+                .where('motivo', '>=', prefixo).where('motivo', '<=', prefixo + '').get();
+            const porInsumo = {};
+            snap.forEach(doc => {
+                const m = doc.data();
+                // O prefixo tambem casaria com outra NF de numero parecido: exige fim exato ou espaco depois.
+                if (!(m.motivo === prefixo || String(m.motivo).startsWith(prefixo + ' '))) return;
+                if (!['ENTRADA', 'AJUSTE'].includes(m.tipo)) return;
+                const o = porInsumo[m.insumo_id] = porInsumo[m.insumo_id] || { insumo_id: m.insumo_id, nome: m.insumo_nome, qtd: 0 };
+                o.qtd = arred3(o.qtd + (Number(m.quantidade) || 0));
+            });
+            state.dfeEdicaoDados = { dfeId: d.id, carregando: false, porInsumo, aviso: aviso || '' };
+        } catch (err) {
+            state.dfeEdicaoDados = { dfeId: d.id, carregando: false, erro: err.message };
+        }
+        render();
+    }
+
+    // Liga cada item da nota ao insumo que recebeu a entrada: pelo vinculo gravado
+    // no lancamento (entrada_itens) ou, nas notas antigas, pelo nome/apelido
+    // aprendido (mesma regra de sugestao da tela de lancamento).
+    function vinculosDaEntrada(d, porInsumo) {
+        const produtoDoInsumo = (id) => state.produtos.find(p => p.insumo_vinculado_id === id) || null;
+        const vinc = (d.itens || []).map((it, idx) => {
+            const salvo = Array.isArray(d.entrada_itens) ? d.entrada_itens.find(x => x.idx === idx) : null;
+            let insumoId = salvo && porInsumo[salvo.insumo_id] ? salvo.insumo_id : null;
+            if (!insumoId) {
+                let melhor = null, pts = 0;
+                Object.values(porInsumo).forEach(c => {
+                    const ins = state.insumos.find(i => i.id === c.insumo_id) || { nome: c.nome, apelidos: [] };
+                    const prod = produtoDoInsumo(c.insumo_id);
+                    const p = Math.max(pontuarMatch(it.xProd, ins), prod ? pontuarMatch(it.xProd, { nome: prod.nome, apelidos: prod.apelidos }) : 0);
+                    if (p > pts) { pts = p; melhor = c.insumo_id; }
+                });
+                if (pts >= 30) insumoId = melhor;
+            }
+            return { idx, it, insumoId };
+        });
+        const contagem = {};
+        vinc.forEach(v => { if (v.insumoId) { v.primeiro = !contagem[v.insumoId]; contagem[v.insumoId] = (contagem[v.insumoId] || 0) + 1; } });
+        vinc.forEach(v => { v.compartilhado = !!v.insumoId && contagem[v.insumoId] > 1; });
+        return vinc;
+    }
+
+    function linhaEdicaoEntrada(d) {
+        const dados = state.dfeEdicaoDados;
+        const envolve = (html) => `<tr><td colspan="7" style="background:#f8fafc">${html}</td></tr>`;
+        if (!dados || dados.dfeId !== d.id || dados.carregando) return envolve('<p class="muted" style="margin:6px 0">Carregando o que foi lancado...</p>');
+        if (dados.erro) return envolve(`<p style="color:#c0392b;margin:6px 0">Nao foi possivel carregar os lancamentos: ${esc(dados.erro)}</p>`);
+
+        const linhas = vinculosDaEntrada(d, dados.porInsumo).map(v => {
+            const it = v.it;
+            const nomeNota = `<td>${esc(it.xProd || '-')}<br><span class="muted">${esc(it.uCom || '')} · nota: ${esc(it.qCom ?? '-')} x ${it.vUnCom != null ? money(it.vUnCom) : '-'}</span></td>`;
+            if (!v.insumoId) return `<tr>${nomeNota}<td colspan="4" class="muted">Nao encontrei onde este item foi lancado (nota lancada antes de guardar o vinculo). Corrija pelo Estoque.</td></tr>`;
+            const ins = state.insumos.find(i => i.id === v.insumoId);
+            if (!ins) return `<tr>${nomeNota}<td colspan="4" class="muted">O insumo deste item foi removido do estoque.</td></tr>`;
+            if (v.compartilhado && !v.primeiro) return `<tr>${nomeNota}<td colspan="4" class="muted">Somado na linha acima (os dois itens foram para o mesmo insumo).</td></tr>`;
+            const prod = state.produtos.find(p => p.insumo_vinculado_id === v.insumoId);
+            const lanc = dados.porInsumo[v.insumoId].qtd;
+            const fiscal = prod ? `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px">
+                    <select data-ed-categoria="${v.idx}" style="grid-column:1/-1">${opcoesCategorias(prod.categoria || '')}</select>
+                    <input type="text" data-ed-ncm="${v.idx}" placeholder="NCM" inputmode="numeric" maxlength="8" value="${esc(prod.ncm || '')}">
+                    <input type="text" data-ed-cfop="${v.idx}" placeholder="CFOP venda" inputmode="numeric" maxlength="4" value="${esc(prod.cfop || '')}">
+                    <input type="text" data-ed-csosn="${v.idx}" placeholder="CSOSN/CST" inputmode="numeric" maxlength="3" value="${esc(prod.csosn || prod.cst || '')}">
+                    <select data-ed-origem="${v.idx}">${opcoesOrigem(prod.origem || '')}</select>
+                </div>` : '<span class="muted">Insumo (sem dados fiscais de venda)</span>';
+            return `<tr>${nomeNota}
+                <td>${esc(prod ? (prod.nome_exibicao || prod.nome) : ins.nome)}<br><span class="muted">${prod ? 'Produto do cardapio' : 'Insumo'}${v.compartilhado ? ' · soma de mais de um item da nota' : ''}</span></td>
+                <td class="num"><input type="number" step="0.001" min="0" data-ed-qtd="${v.idx}" value="${esc(lanc)}" style="width:90px"><br><span class="muted">Estoque agora: ${esc(arred3(Number(ins.quantidade_atual) || 0))} ${esc(ins.unidade || '')}</span></td>
+                <td class="num"><input type="number" step="0.0001" min="0" data-ed-custo="${v.idx}" value="${esc(ins.custo_unitario ?? '')}" style="width:90px"></td>
+                <td>${fiscal}</td>
+            </tr>`;
+        }).join('');
+
+        const editada = d.entrada_editada_por ? `<p class="muted" style="margin:0 0 6px">Ultima edicao por ${esc(d.entrada_editada_por)}.</p>` : '';
+        return envolve(`<div class="panel" style="margin:6px 0;box-shadow:none">
+            <p class="sub" style="margin-top:0">Itens desta nota ja lancados no estoque. Mudar a <strong>quantidade lancada</strong> corrige o estoque pela diferenca (fica registrado como ajuste); o <strong>custo</strong> e os <strong>dados fiscais</strong> sao do cadastro do item.</p>
+            ${editada}
+            <table><thead><tr><th>Item na nota</th><th>Lancado em</th><th class="num">Qtd lancada</th><th class="num">Custo unit.</th><th>Dados fiscais</th></tr></thead><tbody>${linhas}</tbody></table>
+            <div class="actions"><button class="btn primary" data-dfe-salvar-edicao="${d.id}">Salvar alteracoes</button><span class="msg" style="${dados.aviso ? 'color:#1f8f4d' : ''}">${esc(dados.aviso || '')}</span><span class="msg" id="dfe-edicao-msg-${esc(d.id)}"></span></div>
+        </div>`);
+    }
+
+    async function salvarEdicaoEntrada(btn) {
+        const dfeId = btn.dataset.dfeSalvarEdicao;
+        const d = state.dfe.find(x => x.id === dfeId);
+        const dados = state.dfeEdicaoDados;
+        const msg = $(`dfe-edicao-msg-${dfeId}`);
+        const erro = (t) => { if (msg) { msg.style.color = '#c0392b'; msg.textContent = t; } else alert(t); };
+        if (!d || !dados || dados.dfeId !== dfeId || !dados.porInsumo) return;
+        if (msg) msg.textContent = '';
+        const operador = (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'operador';
+        const now = firebase.firestore.FieldValue.serverTimestamp();
+        const ref = d.chave || d.nsu;
+        const batch = db.batch();
+        const mudancas = [], negativos = [];
+        try {
+            vinculosDaEntrada(d, dados.porInsumo).forEach(v => {
+                if (!v.insumoId || (v.compartilhado && !v.primeiro)) return;
+                const ins = state.insumos.find(i => i.id === v.insumoId);
+                if (!ins) return;
+                const campo = (c) => document.querySelector(`[data-ed-${c}="${v.idx}"]`);
+                const nome = v.it.xProd || `item ${v.idx + 1}`;
+                const insRef = db.collection('estoque_insumos').doc(ins.id);
+                const updIns = {};
+
+                const qtdNova = parseFloat(String(campo('qtd')?.value ?? '').replace(',', '.'));
+                if (!(qtdNova >= 0)) throw new Error(`Quantidade invalida em "${nome}".`);
+                const qtdAntes = dados.porInsumo[v.insumoId].qtd;
+                const delta = arred3(qtdNova - qtdAntes);
+                if (Math.abs(delta) >= 0.0005) {
+                    const saldoNovo = arred3((Number(ins.quantidade_atual) || 0) + delta);
+                    if (saldoNovo < 0) negativos.push(`${ins.nome} (ficaria ${saldoNovo})`);
+                    updIns.quantidade_atual = firebase.firestore.FieldValue.increment(delta);
+                    batch.set(db.collection('estoque_movimentos').doc(), {
+                        insumo_id: ins.id, insumo_nome: ins.nome, tipo: 'AJUSTE',
+                        quantidade: delta, saldo_resultante: saldoNovo,
+                        motivo: `Entrada NF ${ref} - correcao (de ${qtdAntes} para ${qtdNova})`, operador, data: now
+                    });
+                    mudancas.push(`${ins.nome}: quantidade ${qtdAntes} -> ${qtdNova}`);
+                }
+
+                const custoTxt = String(campo('custo')?.value ?? '').replace(',', '.');
+                if (custoTxt !== '') {
+                    const custoNovo = parseFloat(custoTxt);
+                    if (!(custoNovo >= 0)) throw new Error(`Custo invalido em "${nome}".`);
+                    if (Math.abs(custoNovo - (Number(ins.custo_unitario) || 0)) >= 0.00005) {
+                        updIns.custo_unitario = custoNovo;
+                        mudancas.push(`${ins.nome}: custo ${ins.custo_unitario ?? 0} -> ${custoNovo}`);
+                    }
+                }
+                if (Object.keys(updIns).length) { updIns.atualizado_em = now; batch.update(insRef, updIns); }
+
+                const prod = state.produtos.find(p => p.insumo_vinculado_id === v.insumoId);
+                if (prod && campo('ncm')) {
+                    const val = (c) => String(campo(c)?.value ?? '').trim();
+                    const ncm = val('ncm').replace(/\D/g, ''), cfop = val('cfop').replace(/\D/g, ''), csosn = val('csosn').replace(/\D/g, '');
+                    const categoria = val('categoria'), origem = val('origem');
+                    if (ncm && ncm.length !== 8) throw new Error(`NCM de "${nome}" precisa ter 8 digitos (ou deixe em branco).`);
+                    if (cfop && !/^5\d{3}$/.test(cfop)) throw new Error(`CFOP de "${nome}" deve ser de venda dentro do estado (5xxx, ex: 5102) — ou deixe em branco.`);
+                    if (csosn && !/^\d{2,3}$/.test(csosn)) throw new Error(`CSOSN/CST de "${nome}" precisa ter 2 ou 3 digitos (ex: 102) — ou deixe em branco.`);
+                    if (!categoria) throw new Error(`Escolha a categoria de "${nome}".`);
+                    const antes = { ncm: prod.ncm || '', cfop: prod.cfop || '', csosn: prod.csosn || prod.cst || '', origem: String(prod.origem ?? ''), categoria: prod.categoria || '' };
+                    const depois = { ncm, cfop, csosn, origem, categoria };
+                    const alterados = Object.keys(depois).filter(k => antes[k] !== depois[k]);
+                    if (alterados.length) {
+                        batch.update(db.collection('cardapio').doc(prod.id), { ncm, cfop, csosn, cst: csosn, origem, categoria, ultima_atualizacao: now });
+                        mudancas.push(`${prod.nome_exibicao || prod.nome}: ${alterados.map(k => `${k} "${antes[k]}" -> "${depois[k]}"`).join(', ')}`);
+                    }
+                }
+            });
+            if (!mudancas.length) { erro('Nada foi alterado.'); return; }
+            if (negativos.length && !confirm('Estas correcoes deixam o estoque NEGATIVO:\n\n- ' + negativos.join('\n- ') + '\n\nSalvar mesmo assim?')) return;
+            batch.update(db.collection('dfe_documentos').doc(dfeId), {
+                entrada_editada_em: now, entrada_editada_por: operador,
+                entrada_edicoes: firebase.firestore.FieldValue.arrayUnion({ em: new Date().toISOString(), por: operador, resumo: mudancas.join('; ') })
+            });
+            btn.disabled = true;
+            await batch.commit();
+            await carregarEdicaoEntrada(d, `Salvo: ${mudancas.length} alteracao(oes).`);
+        } catch (err) {
+            btn.disabled = false;
+            erro(err.message);
+        }
     }
 
     function renderSettings() {
@@ -1103,6 +1314,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (enviarCert) enviarCert.onclick = enviarCertificadoFiscal;
         const definirNumeracao = $('btn-definir-numeracao');
         if (definirNumeracao) definirNumeracao.onclick = definirNumeracaoFiscal;
+        document.querySelectorAll('[data-dfe-editar]').forEach(btn => btn.onclick = () => {
+            const id = btn.dataset.dfeEditar;
+            if (state.dfeEdicao === id) { state.dfeEdicao = null; state.dfeEdicaoDados = null; render(); return; }
+            state.dfeEdicao = id;
+            state.dfeExpandido = null;
+            carregarEdicaoEntrada(state.dfe.find(x => x.id === id));
+        });
+        document.querySelectorAll('[data-dfe-salvar-edicao]').forEach(btn => btn.onclick = () => salvarEdicaoEntrada(btn));
         document.querySelectorAll('[data-dfe-toggle]').forEach(btn => btn.onclick = () => {
             state.dfeExpandido = state.dfeExpandido === btn.dataset.dfeToggle ? null : btn.dataset.dfeToggle;
             render();
@@ -1532,12 +1751,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // Insumos que receberam entrada: no fim, produto pausado sozinho por
             // falta de estoque volta a ficar disponivel.
             const insumosRepostos = new Set();
+            // Vinculo de cada item da nota com o insumo/produto que recebeu a entrada —
+            // e o que permite abrir a nota depois e editar o que foi lancado.
+            const entradaItens = [];
             d.itens.forEach((it, idx) => {
                 const qtd = parseFloat(document.querySelector(`[data-item-qtd="${idx}"]`)?.value);
                 if (!(qtd > 0)) throw new Error(`Informe uma quantidade valida para "${it.xProd || 'item ' + (idx + 1)}".`);
                 const tipo = document.querySelector(`[data-item-tipo="${idx}"]`)?.value || 'produto';
 
                 let insumoId, insumoNome, insumoAtual, motivoExtra = '';
+                let produtoLigado = null;
 
                 if (tipo === 'produto') {
                     let produtoId = document.querySelector(`[data-item-produto="${idx}"]`)?.value;
@@ -1590,6 +1813,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         produto = state.produtos.find(p => p.id === produtoId);
                     }
                     if (!produto) throw new Error('Produto selecionado nao encontrado.');
+                    produtoLigado = produtoId;
 
                     if (insumoCriadoPorProduto[produtoId]) {
                         // Outro item desta mesma nota ja criou o insumo desse produto.
@@ -1653,6 +1877,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
 
+                entradaItens.push({ idx, insumo_id: insumoId, produto_id: produtoLigado, quantidade: qtd });
                 const novoSaldo = (insumoId in saldoNoLote ? saldoNoLote[insumoId] : insumoAtual) + qtd;
                 saldoNoLote[insumoId] = novoSaldo;
                 if (novoSaldo > 0) insumosRepostos.add(insumoId);
@@ -1680,7 +1905,8 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             batch.update(db.collection('dfe_documentos').doc(dfeId), {
-                entrada_confirmada: true, entrada_confirmada_em: now, entrada_confirmada_por: operador
+                entrada_confirmada: true, entrada_confirmada_em: now, entrada_confirmada_por: operador,
+                entrada_itens: entradaItens
             });
 
             await batch.commit();
