@@ -60,7 +60,27 @@ document.addEventListener('DOMContentLoaded', () => {
         listenIbptCache();
         listenDfe();
         listenInsumos();
+        listenStatusDfe();
     });
+
+    // O agendador do servidor atualiza o estado da sincronizacao em segundo plano;
+    // acompanha so esses campos (a config tambem muda a cada nota emitida — seqNNF —
+    // e isso nao deve redesenhar a tela).
+    let assinaturaDfe = null;
+    function listenStatusDfe() {
+        db.collection('configuracoes').doc('fiscal').onSnapshot(snap => {
+            if (!snap.exists) return;
+            const d = snap.data();
+            const assinatura = JSON.stringify([d.dfeUltNSU, d.dfeMaxNSU, d.dfeSincronizadoEm && d.dfeSincronizadoEm.toMillis && d.dfeSincronizadoEm.toMillis(),
+                d.dfeProximaConsultaApos && d.dfeProximaConsultaApos.toMillis && d.dfeProximaConsultaApos.toMillis(), d.dfeUltimoStatus && d.dfeUltimoStatus.status]);
+            if (assinaturaDfe === null) { assinaturaDfe = assinatura; return; }
+            if (assinatura === assinaturaDfe) return;
+            assinaturaDfe = assinatura;
+            Object.assign(state.cfg, { dfeUltNSU: d.dfeUltNSU, dfeMaxNSU: d.dfeMaxNSU, dfeSincronizadoEm: d.dfeSincronizadoEm,
+                dfeProximaConsultaApos: d.dfeProximaConsultaApos, dfeUltimoStatus: d.dfeUltimoStatus });
+            if (state.tab === 'dfe') render();
+        }, err => console.warn('config (status DFe):', err.message));
+    }
 
     function renderTabs() {
         $('fiscal-tabs').innerHTML = tabs.map(([id, label]) =>
@@ -719,12 +739,37 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<div class="panel"><h2>Inutilizacao de numeracao</h2><div class="form-grid"><label>Serie<input id="inut-serie" type="number" min="1" value="${esc(state.cfg.serie || 1)}"></label><label>Numero inicial<input id="inut-ini" type="number" min="1"></label><label>Numero final<input id="inut-fim" type="number" min="1"></label><button class="btn primary" id="btn-inutilizar-range">Inutilizar</button></div><label style="margin-top:12px">Justificativa<textarea id="inut-just" placeholder="Informe uma justificativa com pelo menos 15 caracteres"></textarea></label></div>`;
     }
 
+    // Estado da sincronizacao automatica com a SEFAZ, lido da config (o servidor grava
+    // dfeSincronizadoEm, dfeUltNSU/dfeMaxNSU, dfeProximaConsultaApos e dfeUltimoStatus).
+    function hora(ts) {
+        const d = ts && ts.toDate ? ts.toDate() : null;
+        return d ? d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : null;
+    }
+    function statusSincronizacaoDfe() {
+        const c = state.cfg || {};
+        const nsu = (v) => Number(String(v || '0').replace(/\D/g, '')) || 0;
+        const faltam = Math.max(0, nsu(c.dfeMaxNSU) - nsu(c.dfeUltNSU));
+        const ultima = hora(c.dfeSincronizadoEm);
+        const msUltima = c.dfeSincronizadoEm && c.dfeSincronizadoEm.toMillis ? Date.now() - c.dfeSincronizadoEm.toMillis() : null;
+        const libera = c.dfeProximaConsultaApos && c.dfeProximaConsultaApos.toMillis ? c.dfeProximaConsultaApos.toMillis() : 0;
+        const st = c.dfeUltimoStatus || null;
+        const linhas = [];
+        linhas.push(`<span>${ultima ? `Ultima sincronizacao: <strong>${esc(ultima)}</strong>` : 'Ainda nao sincronizou'}</span>`
+            + ` · <span>${faltam > 0 ? `<strong style="color:#c77700">faltam ${faltam} documento(s) da SEFAZ</strong>` : '<strong style="color:#1f8f4d">em dia com a SEFAZ</strong>'}</span>`
+            + ` · <span class="muted">NSU ${esc(c.dfeUltNSU || '0')} / ${esc(c.dfeMaxNSU || '0')}</span>`);
+        if (libera > Date.now()) linhas.push(`<span class="muted">Proxima consulta a SEFAZ liberada as ${esc(new Date(libera).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))} (a SEFAZ exige 1h entre consultas). O sistema sincroniza sozinho.</span>`);
+        else linhas.push('<span class="muted">O sistema sincroniza sozinho a cada poucos minutos, respeitando o limite da SEFAZ.</span>');
+        if (st && st.status === 'ERRO') linhas.push(`<span style="color:#c0392b">Ultima tentativa falhou${st.cStat ? ` (${esc(st.cStat)})` : ''}: ${esc(st.motivo || 'erro')}. Vai tentar de novo sozinho.</span>`);
+        if (msUltima != null && msUltima > 36 * 3600 * 1000 && faltam > 0) linhas.push('<strong style="color:#c0392b">Sincronizacao parada ha mais de 1 dia — avise o suporte.</strong>');
+        return `<p class="muted" style="margin:2px 0 0;line-height:1.5">${linhas.join('<br>')}</p>`;
+    }
+
     function renderDfe() {
         return `<div class="panel">
             <div class="panel-head">
                 <div>
                     <h2>Notas recebidas</h2>
-                    <p class="muted">Ultimo NSU: ${esc(state.cfg.dfeUltNSU || '0')} / Max NSU: ${esc(state.cfg.dfeMaxNSU || '0')}</p>
+                    ${statusSincronizacaoDfe()}
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                     <input type="file" id="dfe-arquivo-xml" accept=".xml" style="display:none">
@@ -1780,9 +1825,14 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.disabled = true;
         btn.textContent = 'Sincronizando...';
         try {
-            const result = await FiscalClient.sincronizarDfe();
+            const r = await FiscalClient.sincronizarDfe();
             await loadConfig();
-            alert(`${result.documentos?.length || 0} documento(s) sincronizado(s). ${result.motivo || ''}`.trim());
+            const ate = r.proximaConsultaApos ? new Date(r.proximaConsultaApos).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null;
+            if (r.status === 'AGUARDANDO') alert(`A SEFAZ so permite nova consulta depois das ${ate || 'proxima hora'}. Nao precisa fazer nada: o sistema sincroniza sozinho assim que liberar.`);
+            else if (r.status === 'EM_ANDAMENTO') alert('Ja existe uma sincronizacao em andamento. Aguarde alguns instantes.');
+            else if (r.status === 'ERRO') alert(`Nao foi possivel sincronizar agora${r.cStat ? ` (${r.cStat})` : ''}: ${r.motivo || 'erro'}. O sistema tenta de novo sozinho.`);
+            else if (r.status === 'CONFIG') alert(r.motivo || 'Configuracao fiscal incompleta.');
+            else alert(r.novos > 0 ? `${r.novos} nota(s) recebida(s) sincronizada(s).${r.proximaConsultaApos ? ' Em dia com a SEFAZ.' : ' Ainda ha mais notas: clique de novo ou aguarde a proxima rodada automatica.'}` : 'Nenhuma nota nova na SEFAZ. O sistema continua conferindo sozinho.');
         } catch (err) {
             alert(err.message);
         } finally {

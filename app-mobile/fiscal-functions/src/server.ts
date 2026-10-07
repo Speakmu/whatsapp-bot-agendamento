@@ -32,6 +32,7 @@ import { carregarCertificado, salvarCertificado, existeCertificado } from './cer
 import { prewarmAliquotas } from './ibpt-store';
 import { registroXmlDaNota } from './xml-enviado';
 import { conciliarNotasDoPedido } from './conciliar';
+import { sincronizarDfeServidor } from './dfe-sync';
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const API_KEY = process.env.API_KEY || '';
@@ -304,14 +305,30 @@ app.post('/fiscal/nfce/transmitir', auth, async (req, res) => {
   }
 });
 
-app.post('/fiscal/dfe/sync', auth, async (req, res) => {
+// Sincronizacao completa (todas as paginas, grava as notas, respeita a espera de 1h
+// da SEFAZ e usa trava contra consulta simultanea). E o que o botao do painel e o
+// agendador usam — ver dfe-sync.ts.
+app.post('/fiscal/dfe/sincronizar', auth, async (_req, res) => {
   try {
-    const payload = req.body as DfeSyncRequest;
-    if (!payload?.cnpj) return res.status(400).json({ error: 'CNPJ ausente.' });
-    if (!payload?.uf) return res.status(400).json({ error: 'UF ausente.' });
     const cert = await exigirCert(res); if (!cert) return;
-    const result = await sincronizarDfe(payload, cert);
-    res.status(result.status === 'REJEITADA' ? 422 : 200).json(result);
+    res.json(await sincronizarDfeServidor(cert));
+  } catch (err: any) {
+    console.error('[DFe sincronizar] erro:', err?.message || err);
+    res.status(500).json({ status: 'ERRO', motivo: err?.message || String(err) });
+  }
+});
+
+// Rota antiga: um painel desatualizado ainda pode chama-la. Passa pela mesma trava e
+// espera da nova (consultar direto repetia o ultNSU e a SEFAZ bloqueava por 1h).
+// O resultado ja foi gravado pelo servidor, entao nao devolve documentos.
+app.post('/fiscal/dfe/sync', auth, async (_req, res) => {
+  try {
+    const cert = await exigirCert(res); if (!cert) return;
+    const r = await sincronizarDfeServidor(cert);
+    const ok = r.status === 'OK' || r.status === 'EM_ANDAMENTO';
+    res.status(ok ? 200 : 422).json({
+      status: ok ? 'OK' : 'REJEITADA', cStat: r.cStat, motivo: r.motivo, ultNSU: r.ultNSU, maxNSU: r.maxNSU, documentos: [],
+    });
   } catch (err: any) {
     console.error('[DFe sync] erro:', err?.message || err);
     res.status(500).json({ status: 'ERRO', error: err?.message || String(err) });

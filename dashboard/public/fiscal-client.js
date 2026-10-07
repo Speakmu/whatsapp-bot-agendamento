@@ -729,35 +729,23 @@
         }
     }
 
+    // A sincronizacao das notas recebidas roda NO SERVIDOR (todas as paginas, grava as
+    // notas e respeita a espera de 1h que a SEFAZ exige entre consultas — repetir a
+    // consulta gerava o bloqueio 656 "Consumo Indevido"). Aqui so se dispara e se le o
+    // resumo: { status: OK|AGUARDANDO|EM_ANDAMENTO|ERRO|CONFIG, novos, proximaConsultaApos, motivo }.
+    // O agendador do servidor faz o mesmo sozinho a cada 15 min.
     async function sincronizarDfe() {
         const cfg = await getConfig();
-        validarConfig({ ...cfg, ativo: true });
+        if (!cfg.url) throw new Error('Informe a URL do servico fiscal em Configuracoes > Fiscal.');
         if (!cfg.cnpj) throw new Error('CNPJ da empresa ausente em Configuracoes > Fiscal.');
         if (!cfg.uf) throw new Error('UF da empresa ausente em Configuracoes > Fiscal.');
-
-        const resp = await fetch(`${cfg.url}/fiscal/dfe/sync`, {
+        const resp = await fetch(`${cfg.url}/fiscal/dfe/sincronizar`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...(cfg.apiKey ? { 'Authorization': `Bearer ${cfg.apiKey}` } : {}) },
-            body: JSON.stringify({
-                ambiente: cfg.ambiente,
-                uf: cfg.uf,
-                cnpj: cfg.cnpj,
-                ultNSU: cfg.dfeUltNSU || '0'
-            })
+            body: '{}'
         });
         const data = await resp.json().catch(() => ({}));
-        if (!resp.ok) throw new Error(data.error || data.motivo || `Falha ao sincronizar DFe (${resp.status}).`);
-
-        const batch = db().batch();
-        const now = firebase.firestore.FieldValue.serverTimestamp();
-        const fornecedoresVistos = new Set();
-        (data.documentos || []).forEach(doc => salvarDocumentoDfe(batch, doc, now, fornecedoresVistos));
-        batch.set(db().collection('configuracoes').doc('fiscal'), {
-            dfeUltNSU: data.ultNSU || cfg.dfeUltNSU || '0',
-            dfeMaxNSU: data.maxNSU || cfg.dfeMaxNSU || '0',
-            dfeSincronizadoEm: now
-        }, { merge: true });
-        await batch.commit();
+        if (!resp.ok) throw new Error(data.motivo || data.error || `Falha ao sincronizar as notas recebidas (${resp.status}).`);
         return data;
     }
 

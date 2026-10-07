@@ -8,6 +8,7 @@ import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { defineSecret } from 'firebase-functions/params';
 import { app } from './server';
 import { retentarPendenciasFiscais } from './retry-scheduler';
+import { sincronizarDfeAgendado } from './dfe-sync';
 
 // Mesmo nome de variável que server.ts já lê via process.env — o Functions
 // injeta o valor do secret na env var de mesmo nome em tempo de execução.
@@ -48,5 +49,22 @@ export const fiscalRetryScheduler = onSchedule(
   },
   async () => {
     await retentarPendenciasFiscais();
+  },
+);
+
+// Mantem as notas recebidas (compras) em dia com a SEFAZ sem depender de alguem
+// clicar em "Sincronizar". Roda a cada 15 min, mas a consulta real so acontece
+// quando a SEFAZ permite (1h depois da ultima sem novidades) — o resto do tempo
+// e uma leitura barata do Firestore. Ver dfe-sync.ts.
+export const fiscalDfeScheduler = onSchedule(
+  {
+    schedule: 'every 15 minutes',
+    timeZone: 'America/Sao_Paulo',
+    secrets: [API_KEY],
+    timeoutSeconds: 300,
+    memory: '512MiB',
+  },
+  async () => {
+    await sincronizarDfeAgendado();
   },
 );
