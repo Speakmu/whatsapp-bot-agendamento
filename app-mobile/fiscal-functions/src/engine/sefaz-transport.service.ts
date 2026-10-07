@@ -324,6 +324,34 @@ export class SefazTransport {
     return this.parseDistDFeResponse(response.data as string);
   }
 
+  /**
+   * Busca UM documento pelo NSU (distDFeInt/consNSU). E o caminho para recuperar notas
+   * que ficaram para tras (lacuna entre o ultNSU do sistema e o da SEFAZ) sem refazer a
+   * distribuicao em lote, que a SEFAZ trata como consumo indevido (656).
+   */
+  async consultaDistribuicaoPorNSU(
+    cnpj: string,
+    cUFAutor: string,
+    nsu: string,
+    endpointUrl: string,
+    certPem: string,
+    keyPem: string,
+    tpAmb: '1' | '2',
+  ): Promise<SefazDistribuicaoResult> {
+    const n = String(nsu ?? '0').replace(/\D/g, '').padStart(15, '0');
+    const soapBody = this.buildDistDFeUltNsuEnvelope(cnpj, cUFAutor, n, tpAmb)
+      .replace(`<distNSU><ultNSU>${n}</ultNSU></distNSU>`, `<consNSU><NSU>${n}</NSU></consNSU>`);
+    const soapAction = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe/nfeDistDFeInteresse';
+    const client = this.buildHttpClient(certPem, keyPem);
+    let response;
+    try {
+      response = await client.post(endpointUrl, soapBody, { headers: this.soap12Headers(soapAction) });
+    } catch (err: any) {
+      throw new Error(this.describeHttpError(err));
+    }
+    return this.parseDistDFeResponse(response.data as string);
+  }
+
   private buildDistDFeUltNsuEnvelope(
     cnpj: string,
     cUFAutor: string,

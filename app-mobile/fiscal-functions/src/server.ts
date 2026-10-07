@@ -32,7 +32,7 @@ import { carregarCertificado, salvarCertificado, existeCertificado } from './cer
 import { prewarmAliquotas } from './ibpt-store';
 import { registroXmlDaNota } from './xml-enviado';
 import { conciliarNotasDoPedido } from './conciliar';
-import { sincronizarDfeServidor } from './dfe-sync';
+import { sincronizarDfeServidor, recuperarNsusServidor } from './dfe-sync';
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const API_KEY = process.env.API_KEY || '';
@@ -314,6 +314,19 @@ app.post('/fiscal/dfe/sincronizar', auth, async (_req, res) => {
     res.json(await sincronizarDfeServidor(cert));
   } catch (err: any) {
     console.error('[DFe sincronizar] erro:', err?.message || err);
+    res.status(500).json({ status: 'ERRO', motivo: err?.message || String(err) });
+  }
+});
+
+// Recupera notas recebidas especificas pelo NSU (lacuna entre o ponteiro do sistema e o da SEFAZ).
+app.post('/fiscal/dfe/recuperar', auth, async (req, res) => {
+  try {
+    const nsus = Array.isArray(req.body?.nsus) ? req.body.nsus.map(String) : [];
+    if (!nsus.length) return res.status(400).json({ error: 'Informe "nsus": lista de NSU.' });
+    const cert = await exigirCert(res); if (!cert) return;
+    res.json(await recuperarNsusServidor(cert, nsus));
+  } catch (err: any) {
+    console.error('[DFe recuperar] erro:', err?.message || err);
     res.status(500).json({ status: 'ERRO', motivo: err?.message || String(err) });
   }
 });

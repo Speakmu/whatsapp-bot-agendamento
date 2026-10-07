@@ -114,6 +114,26 @@ const base = { ativo: true, cnpj: '03689716000217', uf: 'MG', ambiente: 'produca
   r = await sincronizarDfeServidor(cert, { consultar: (async () => { throw new Error('nao devia chamar'); }), pausa });
   ok(r.status === 'CONFIG', 'sem CNPJ/UF: CONFIG, nao consulta');
 
+
+  // 10) recuperacao por NSU (lacuna entre o ponteiro do sistema e o da SEFAZ)
+  await reset(base);
+  const porNsu = (docs) => async (req) => docs[Number(req.nsu)] ? ({ status: 'OK', cStat: '138', motivo: 'ok', ultNSU: req.nsu, maxNSU: req.nsu, documentos: [docs[Number(req.nsu)]] }) : ({ status: 'SEM_DOCUMENTOS', cStat: '137', motivo: 'nada', documentos: [] });
+  const rec = require('../dist/dfe-sync').recuperarNsusServidor;
+  let rr = await rec(cert, ['1561', '1578', '1561'], { consultarNSU: porNsu({ 1561: doc(1561), 1578: doc(1578) }), pausa });
+  ok(rr.status === 'OK' && rr.recuperadas.length === 2 && rr.novos === 2, `recupera por NSU (sem repetir): ${rr.recuperadas.join(',')}`);
+  ok((await admin.firestore().collection('dfe_documentos').get()).size === 2, 'notas recuperadas gravadas em dfe_documentos');
+  cfg = await lerCfg();
+  ok(cfg.dfeProximaConsultaApos.toMillis() - Date.now() > 59 * 60000, 'segura as consultas em lote por ~1h depois de recuperar');
+  chamadas = 0;
+  rr = await rec(cert, ['1599'], { consultarNSU: async () => { chamadas++; return {}; }, pausa });
+  ok(rr.status === 'AGUARDANDO' && chamadas === 0, 'respeita a espera gravada (zero consultas)');
+  await reset(base); let ordem = [];
+  rr = await rec(cert, ['1', '2', '3'], { consultarNSU: async (req) => { ordem.push(req.nsu); if (req.nsu.endsWith('2')) return { status: 'REJEITADA', cStat: '656', motivo: 'Consumo Indevido', documentos: [] }; return { status: 'OK', cStat: '138', motivo: 'ok', documentos: [doc(Number(req.nsu))] }; }, pausa });
+  ok(rr.status === 'AGUARDANDO' && ordem.length === 2 && rr.recuperadas.length === 1, `656 no meio: para (${ordem.length} consultas) e guarda o que ja veio`);
+  await reset(base);
+  rr = await rec(cert, ['7'], { consultarNSU: porNsu({}), pausa });
+  ok(rr.status === 'OK' && rr.naoEncontradas.length === 1 && rr.novos === 0, 'NSU inexistente (137): vai para naoEncontradas');
+
   console.log(falhas ? `\n${falhas} FALHA(S)` : '\nTODOS OS TESTES PASSARAM');
   process.exit(falhas ? 1 : 0);
 })().catch(e => { console.error('ERRO NO TESTE', e); process.exit(1); });

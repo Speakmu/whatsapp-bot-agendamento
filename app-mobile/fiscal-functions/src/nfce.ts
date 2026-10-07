@@ -935,3 +935,21 @@ export async function sincronizarDfe(req: DfeSyncRequest, cert: CertInput): Prom
     documentos,
   };
 }
+
+// Recupera UM documento recebido pelo NSU (ver consultaDistribuicaoPorNSU).
+export async function recuperarDfePorNSU(req: { ambiente: 'homologacao' | 'producao'; uf: string; cnpj: string; nsu: string }, cert: CertInput): Promise<DfeSyncResult> {
+  const tpAmb: '1' | '2' = req.ambiente === 'producao' ? '1' : '2';
+  const cUF = UF_CODIGO[req.uf.toUpperCase()];
+  if (!cUF) throw new Error(`UF invalida: ${req.uf}`);
+  const cnpj = (req.cnpj || '').replace(/\D/g, '');
+  if (cnpj.length !== 14) throw new Error('CNPJ invalido para distribuicao DFe.');
+  const cred = carregarCred(cert);
+  const endpoint = getDistribuicaoDFeEndpoint(tpAmb === '1' ? 'PRODUCAO' : 'HOMOLOGACAO');
+  const r = await transport.consultaDistribuicaoPorNSU(cnpj, cUF, req.nsu, endpoint, cred.certificatePem, cred.privateKeyPem, tpAmb);
+  const ok = r.cStat === '138' || r.cStat === '137';
+  return {
+    status: r.cStat === '137' ? 'SEM_DOCUMENTOS' : (ok ? 'OK' : 'REJEITADA'),
+    cStat: r.cStat, motivo: r.xMotivo, ultNSU: r.ultNSU, maxNSU: r.maxNSU,
+    documentos: r.documentos.map(resumirDfe),
+  };
+}

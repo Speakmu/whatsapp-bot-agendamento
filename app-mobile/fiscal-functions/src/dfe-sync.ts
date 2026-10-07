@@ -16,7 +16,7 @@
 // ============================================================
 import * as admin from 'firebase-admin';
 import * as fs from 'fs';
-import { CertInput, sincronizarDfe } from './nfce';
+import { CertInput, sincronizarDfe, recuperarDfePorNSU } from './nfce';
 import { carregarCertificado } from './cert-store';
 
 function db(): admin.firestore.Firestore {
@@ -89,7 +89,7 @@ async function adquirirTrava(): Promise<boolean> {
 }
 
 // `deps` existe so para teste (consulta e pausa substituiveis); em producao usa os padroes.
-export interface DepsSyncDfe { consultar?: typeof sincronizarDfe; pausa?: (ms: number) => Promise<void>; }
+export interface DepsSyncDfe { consultar?: typeof sincronizarDfe; consultarNSU?: typeof recuperarDfePorNSU; pausa?: (ms: number) => Promise<void>; }
 
 export async function sincronizarDfeServidor(cert: CertInput, deps: DepsSyncDfe = {}): Promise<ResultadoSyncDfe> {
   const consultar = deps.consultar || sincronizarDfe;
@@ -201,4 +201,64 @@ export async function sincronizarDfeAgendado(): Promise<ResultadoSyncDfe | null>
   const r = await sincronizarDfeServidor(cert);
   console.log(`[dfe] ${r.status} | novos=${r.novos} paginas=${r.paginas} ultNSU=${r.ultNSU} maxNSU=${r.maxNSU} ${r.cStat || ''} ${r.motivo || ''}`);
   return r;
+}
+
+// Recupera notas especificas pelo NSU. Serve para a lacuna que fica quando o ponteiro
+// do sistema (ultNSU) e o da SEFAZ se afastam — por exemplo, alguem consultou a SEFAZ por
+// fora do sistema. NUNCA consulte a SEFAZ por fora: ela guarda o ultNSU entregue e pedir
+// de novo um intervalo ja entregue vira 656 "Consumo Indevido" (bloqueio de 1h) a cada
+// tentativa do agendador. Respeita a espera gravada e a trava, para em 656, e ao terminar
+// segura as proximas consultas em lote por 1h por precaucao (a SEFAZ conta o consumo do CNPJ).
+export async function recuperarNsusServidor(cert: CertInput, nsus: string[], deps: DepsSyncDfe = {}): Promise<ResultadoSyncDfe & { recuperadas: string[]; naoEncontradas: string[] }> {
+  const consultarNSU = deps.consultarNSU || recuperarDfePorNSU;
+  const pausa = deps.pausa || dormir;
+  const ref = db().collection('configuracoes').doc('fiscal');
+  const cfg = ((await ref.get()).data() || {}) as any;
+  const vazio = { novos: 0, paginas: 0, recuperadas: [] as string[], naoEncontradas: [] as string[] };
+  if (!cfg.cnpj || !cfg.uf) return { ...vazio, status: 'CONFIG', motivo: 'CNPJ/UF da empresa ausentes em Config fiscal.' };
+  const libera = cfg.dfeProximaConsultaApos && cfg.dfeProximaConsultaApos.toMillis ? cfg.dfeProximaConsultaApos.toMillis() : 0;
+  if (libera > Date.now()) return { ...vazio, status: 'AGUARDANDO', proximaConsultaApos: libera, motivo: 'A SEFAZ so permite nova consulta depois desse horario.' };
+  if (!(await adquirirTrava())) return { ...vazio, status: 'EM_ANDAMENTO', motivo: 'Ja existe uma sincronizacao em andamento.' };
+
+  const lista = Array.from(new Set(nsus.map((n) => String(n).replace(/\D/g, '').padStart(15, '0')))).slice(0, 40);
+  const recuperadas: string[] = [], naoEncontradas: string[] = [];
+  let resultado: ResultadoSyncDfe = { status: 'OK', novos: 0, paginas: 0 };
+  let novos = 0, paginas = 0;
+  try {
+    for (const nsu of lista) {
+      let r;
+      try {
+        r = await consultarNSU({ ambiente: cfg.ambiente || 'homologacao', uf: cfg.uf, cnpj: cfg.cnpj, nsu }, cert);
+      } catch (err: any) {
+        resultado = { status: 'ERRO', novos, paginas, motivo: err?.message || String(err) };
+        break;
+      }
+      paginas++;
+      if (r.cStat === '138' && r.documentos.length) {
+        const batch = db().batch();
+        const now = admin.firestore.FieldValue.serverTimestamp();
+        const vistos = new Set<string>();
+        const refsResumo = r.documentos.filter((d: any) => d.resumo && (d.chave || d.nsu)).map((d: any) => db().collection('dfe_documentos').doc(String(d.chave || d.nsu)));
+        const jaCompletos = new Set<string>();
+        if (refsResumo.length) (await db().getAll(...refsResumo)).forEach((snap) => { if (snap.exists && (snap.data() as any).resumo === false) jaCompletos.add(snap.id); });
+        r.documentos.forEach((d: any) => { if (!(d.resumo && jaCompletos.has(String(d.chave || d.nsu)))) salvarDocumento(batch, d, now, vistos); });
+        await batch.commit();
+        novos += r.documentos.length; recuperadas.push(nsu);
+      } else if (r.cStat === '138' || r.cStat === '137') {
+        naoEncontradas.push(nsu);
+      } else {
+        const espera = r.cStat === '656';
+        resultado = { status: espera ? 'AGUARDANDO' : 'ERRO', novos, paginas, cStat: r.cStat, motivo: r.motivo, proximaConsultaApos: espera ? Date.now() + ESPERA_SEFAZ_MS : null };
+        break;
+      }
+      await pausa(PAUSA_ENTRE_PAGINAS_MS);
+    }
+    if (resultado.status === 'OK') resultado = { status: 'OK', novos, paginas, proximaConsultaApos: Date.now() + ESPERA_SEFAZ_MS, motivo: `${recuperadas.length} nota(s) recuperada(s).` };
+  } finally {
+    await refTrava().delete().catch((e) => console.error('[dfe] nao consegui liberar a trava:', e?.message || e));
+    if (resultado.proximaConsultaApos) {
+      await ref.set({ dfeProximaConsultaApos: admin.firestore.Timestamp.fromMillis(resultado.proximaConsultaApos) }, { merge: true }).catch(() => { /* melhor esforco */ });
+    }
+  }
+  return { ...resultado, recuperadas, naoEncontradas };
 }
