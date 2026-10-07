@@ -10,9 +10,9 @@
 //  não emitir agora (a venda segue pendente e é tentada de novo) do que duplicar.
 // ============================================================
 import * as admin from 'firebase-admin';
-import { CertInput, consultarNfcePorChave, chaveNormalCalculada, danfeDeNotaAutorizada } from './nfce';
+import { CertInput, consultarNfcePorChave, chaveNormalCalculada, danfeDeNotaAutorizada, xmlsParaContabilidade } from './nfce';
 import { nfeProcDe } from './xml-proc';
-import { xmlAutorizado, xmlsDaNota } from './regras-fiscais';
+import { xmlAutorizado, xmlsDaNota, precisaCompletarXml } from './regras-fiscais';
 
 function db(): admin.firestore.Firestore {
   if (!admin.apps.length) admin.initializeApp();
@@ -82,7 +82,7 @@ export async function conciliarNotasDoPedido(
 // alerta em fiscal_alertas/{pedido_id} e loga — nunca altera as notas.
 export async function auditarDuplicidades(dias = 3): Promise<void> {
   const desde = admin.firestore.Timestamp.fromMillis(Date.now() - dias * 86400000);
-  const snap = await db().collection('notas_fiscais').where('criado_em', '>=', desde).get();
+  const snap = await db().collection('notas_fiscais').where('criado_em', '>=', desde).select('status', 'pedido_id', 'nNF').get();
   const porPedido: Record<string, number[]> = {};
   snap.docs.forEach((d) => {
     const n = d.data();
@@ -95,4 +95,45 @@ export async function auditarDuplicidades(dias = 3): Promise<void> {
       tipo: 'DUPLICIDADE', pedido_id: pedidoId, notas: nums, atualizado_em: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
   }
+}
+
+// Completa, no ciclo automatico, o XML de distribuicao (nfeProc) e o evento de
+// cancelamento que ficaram sem gravar: nota autorizada por uma tela desatualizada,
+// cancelamento feito pelo painel (guarda so o evento sem protocolo), conciliacao
+// sem XML. So junta o protocolo com o XML cujo digest bate (ver xmlsParaContabilidade);
+// se nenhum bate, marca xml_proc_indisponivel e nao tenta de novo. Limita a
+// quantidade por ciclo para nao estourar o tempo da function.
+export async function completarXmlsFaltantes(cert: CertInput, dias = 7, max = 40): Promise<number> {
+  const cfgSnap = await db().collection('configuracoes').doc('fiscal').get();
+  const cfg = (cfgSnap.exists ? cfgSnap.data() : {}) as any;
+  if (!cfg.uf) return 0;
+  const desde = admin.firestore.Timestamp.fromMillis(Date.now() - dias * 86400000);
+  // select(): sem o DANFE (PDF em base64), que e o campo mais pesado da nota.
+  const snap = await db().collection('notas_fiscais').where('criado_em', '>=', desde)
+    .select('status', 'tipo', 'chave', 'ambiente', 'xml', 'xmlAssinado', 'xml_enviado', 'xmlProc', 'xml_proc_indisponivel', 'cancelamento').get();
+  let feitas = 0;
+  for (const doc of snap.docs) {
+    if (feitas >= max) break;
+    const n = doc.data();
+    if (!precisaCompletarXml(n)) continue;
+    feitas++;
+    try {
+      const xmls = xmlsDaNota(n);
+      const r = await xmlsParaContabilidade({ ambiente: n.ambiente || cfg.ambiente || 'homologacao', uf: cfg.uf, chave: n.chave, xmls }, cert);
+      const upd: Record<string, any> = {};
+      if (!n.xmlProc && xmls.length) {
+        if (r.xmlProc) upd.xmlProc = r.xmlProc; else upd.xml_proc_indisponivel = true;
+      }
+      if (n.status === 'CANCELADA' && !(n.cancelamento && n.cancelamento.xmlProcEvento) && r.eventosCancelamento[0]) {
+        upd['cancelamento.xmlProcEvento'] = r.eventosCancelamento[0];
+      }
+      if (Object.keys(upd).length) {
+        await doc.ref.update(upd);
+        console.log(`[xml] nota ${doc.id} (${n.chave}): ${Object.keys(upd).join(', ')}`);
+      }
+    } catch (err: any) {
+      console.warn(`[xml] nota ${doc.id}: ${err?.message || err}`);
+    }
+  }
+  return feitas;
 }

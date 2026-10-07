@@ -493,7 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const validas = notasDoMes.filter(n => n.tipo !== 'INUTILIZACAO' && (n.status === 'AUTORIZADA' || n.status === 'CONTINGENCIA'));
         const canceladas = notasDoMes.filter(n => n.status === 'CANCELADA');
         const totalFaturado = validas.reduce((s, n) => s + Number(n.valor || 0), 0);
-        const comXml = notasValidasParaContabilidade(notasDoMes).filter(n => n.xmlProc || n.xml || n.xmlAssinado);
+        const comXml = notasValidasParaContabilidade(notasDoMes);
 
         return `<div class="panel">
             <div class="panel-head">
@@ -556,8 +556,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function exportarXmlsZip(notas, mes, btn) {
         if (!window.JSZip) { alert('Biblioteca de .zip nao carregou (sem internet?). Tente novamente.'); return; }
         // So AUTORIZADA/CANCELADA (ERRO/REJEITADA nunca existiram na SEFAZ). O arquivo
-        // e o nfeProc (NFe + protocolo); sem ele a nota entra marcada SEM-PROTOCOLO.
-        const validas = notasValidasParaContabilidade(notas).filter(n => n.xmlProc || n.xml || n.xmlAssinado);
+        // e o nfeProc (NFe + protocolo). Nota sem nfeProc NAO leva o <NFe> solto: o XML
+        // guardado pode ser de outra tentativa (reassinado) e nao bate com o protocolo,
+        // e a contabilidade/SPED recusa. Entra um .txt dizendo como obter o XML correto.
+        const validas = notasValidasParaContabilidade(notas);
         if (!validas.length) return;
         const textoOriginal = btn ? btn.textContent : '';
         if (btn) { btn.disabled = true; btn.textContent = 'Gerando .zip...'; }
@@ -567,7 +569,13 @@ document.addEventListener('DOMContentLoaded', () => {
             validas.forEach(n => {
                 const base = n.chave || `nNF-${n.nNF || n.id}`;
                 if (n.xmlProc) zip.file(base + '-procNFe.xml', n.xmlProc);
-                else { semProtocolo++; zip.file(base + '-SEM-PROTOCOLO.xml', n.xml || n.xmlAssinado); }
+                else {
+                    semProtocolo++;
+                    zip.file(base + '-XML-INDISPONIVEL.txt',
+                        `NFC-e n. ${n.nNF || '-'} | chave ${n.chave || '-'} | protocolo ${n.protocolo || '-'} | status ${n.status}\r\n\r\n`
+                        + 'O XML autorizado desta nota nao esta guardado no sistema (a nota foi reenviada e o XML original nao foi preservado).\r\n'
+                        + 'Baixe o XML pelo portal da SEFAZ (Consulta NFC-e / download do XML), informando a chave acima.\r\n');
+                }
                 // Evento de cancelamento (110111) — prova do cancelamento perante a SEFAZ.
                 const ev = n.cancelamento?.xmlProcEvento || n.cancelamento?.xmlEvento;
                 if (ev) zip.file(base + '-cancelamento.xml', ev);
@@ -579,7 +587,7 @@ document.addEventListener('DOMContentLoaded', () => {
             a.download = `xmls-nfce-${mes}.zip`;
             a.click();
             URL.revokeObjectURL(a.href);
-            if (semProtocolo) alert(`${semProtocolo} XML(s) ficaram sem protocolo (arquivos "-SEM-PROTOCOLO.xml"). Avise o suporte antes de enviar para a contabilidade.`);
+            if (semProtocolo) alert(`${semProtocolo} nota(s) ficaram sem XML valido para a contabilidade (arquivos "-XML-INDISPONIVEL.txt", com a chave e o protocolo). O XML delas precisa ser baixado no portal da SEFAZ.`);
         } finally {
             if (btn) { btn.disabled = false; btn.textContent = textoOriginal; }
         }

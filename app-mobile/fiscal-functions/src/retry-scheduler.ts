@@ -22,7 +22,7 @@ import {
   consultarNfcePorChave, chaveNormalCalculada, danfeDeNotaAutorizada,
 } from './nfce';
 import { carregarCertificado } from './cert-store';
-import { conciliarNotasDoPedido, auditarDuplicidades } from './conciliar';
+import { conciliarNotasDoPedido, auditarDuplicidades, completarXmlsFaltantes } from './conciliar';
 import { registroXmlDaNota } from './xml-enviado';
 import { msEmProcessamento, podeGravarResultado, xmlAutorizado, xmlsDaNota } from './regras-fiscais';
 import { nfeProcDe } from './xml-proc';
@@ -527,6 +527,7 @@ export async function retentarPendenciasFiscais(): Promise<void> {
   }
 
   await auditarDuplicidades().catch((err) => console.error('[retry fiscal] auditoria de duplicidade falhou:', err?.message || err));
+  await completarXmlsFaltantes(cert).catch((err) => console.error('[retry fiscal] completar XMLs falhou:', err?.message || err));
 
   console.log('[retry fiscal] ciclo concluído.');
 }

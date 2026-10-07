@@ -74,3 +74,16 @@ export function xmlsDaNota(nota: any): string[] {
     .filter((x) => typeof x === 'string');
   return [nota?.xml, nota?.xmlAssinado, ...enviados].filter((x) => typeof x === 'string' && x);
 }
+
+// Nota AUTORIZADA/CANCELADA a que ainda falta o XML de distribuição (nfeProc) ou,
+// se cancelada, o evento de cancelamento com protocolo. Alimenta o passo do ciclo
+// automatico que completa o que um navegador desatualizado, uma conciliacao ou um
+// cancelamento deixaram de gravar. xml_proc_indisponivel marca a nota cujo XML
+// autorizado nao esta guardado (nenhum digest bate): nao adianta tentar de novo.
+export function precisaCompletarXml(nota: any): boolean {
+  if (!nota || nota.tipo === 'INUTILIZACAO' || !nota.chave) return false;
+  if (nota.status !== 'AUTORIZADA' && nota.status !== 'CANCELADA') return false;
+  const faltaProc = !nota.xmlProc && !nota.xml_proc_indisponivel && xmlsDaNota(nota).length > 0;
+  const faltaEvento = nota.status === 'CANCELADA' && !(nota.cancelamento && nota.cancelamento.xmlProcEvento);
+  return faltaProc || faltaEvento;
+}

@@ -673,15 +673,21 @@ export async function consultarNfcePorChave(req: ConsultaRequest, cert: CertInpu
   return transport.consultaProtocolo(chave, endpoints, cred.certificatePem, cred.privateKeyPem, tpAmb, cUF);
 }
 
-// XMLs de distribuição de uma nota já existente: junta o <NFe> guardado com o
-// protNFe devolvido pela SEFAZ na consulta, e traz os eventos de cancelamento.
-export async function xmlsParaContabilidade(req: ConsultaRequest & { xml?: string }, cert: CertInput) {
+// XMLs de distribuição de uma nota já existente: junta o <NFe> que a SEFAZ de fato
+// autorizou (o de digest igual ao do protocolo, entre os candidatos guardados) com o
+// protNFe devolvido na consulta, e traz os eventos de cancelamento. Um XML de outra
+// tentativa (reassinado com outra hora, ou o da contingência) NAO serve: o arquivo
+// sairia com protocolo que nao corresponde a ele e a contabilidade/SPED recusa.
+export async function xmlsParaContabilidade(req: ConsultaRequest & { xml?: string; xmls?: string[] }, cert: CertInput) {
   const r = await consultarNfcePorChave(req, cert);
   const prot = extrairProtNFe(r.rawResponse);
+  const candidatos = (req.xmls && req.xmls.length ? req.xmls : (req.xml ? [req.xml] : []));
+  const xmlCerto = candidatos.length ? xmlAutorizado(candidatos, r.rawResponse) : undefined;
   return {
     cStat: r.cStat,
     protocolo: r.nProt,
-    xmlProc: montarNfeProc(req.xml, prot),
+    xmlProc: xmlCerto ? montarNfeProc(xmlCerto, prot) : undefined,
+    xmlConfere: candidatos.length ? !!xmlCerto : null,
     eventosCancelamento: extrairEventosCancelamento(r.rawResponse),
   };
 }

@@ -280,7 +280,7 @@ app.post('/fiscal/nfce/conciliar-pedido', auth, async (req, res) => {
 // XML de distribuição (nfeProc) e eventos de cancelamento de uma nota existente.
 app.post('/fiscal/nfce/xml-proc', auth, async (req, res) => {
   try {
-    const payload = req.body as ConsultaRequest & { xml?: string };
+    const payload = req.body as ConsultaRequest & { xml?: string; xmls?: string[] };
     if (!payload?.chave) return res.status(400).json({ error: 'Chave ausente.' });
     if (!payload?.uf) return res.status(400).json({ error: 'UF ausente.' });
     const cert = await exigirCert(res); if (!cert) return;

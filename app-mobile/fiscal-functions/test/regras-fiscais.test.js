@@ -73,3 +73,30 @@ test('reúne todos os XMLs que a nota já teve', () => {
   assert.deepEqual(r.xmlsDaNota({}), []);
   assert.deepEqual(r.xmlsDaNota(null), []);
 });
+
+test('completar XML: so nota autorizada/cancelada com XML guardado e sem nfeProc', () => {
+  const base = { status: 'AUTORIZADA', chave: 'c'.repeat(44), xml: xmlCom('A') };
+  assert.equal(r.precisaCompletarXml(base), true, 'autorizada sem xmlProc');
+  assert.equal(r.precisaCompletarXml({ ...base, xmlProc: '<nfeProc/>' }), false, 'ja tem nfeProc');
+  assert.equal(r.precisaCompletarXml({ ...base, xml: undefined }), false, 'sem XML nenhum nao ha o que juntar');
+  assert.equal(r.precisaCompletarXml({ ...base, xml_proc_indisponivel: true }), false, 'XML autorizado nao guardado: nao tenta de novo');
+  assert.equal(r.precisaCompletarXml({ ...base, status: 'ERRO' }), false, 'nota com erro nao entra');
+  assert.equal(r.precisaCompletarXml({ ...base, chave: undefined }), false, 'sem chave nao da pra consultar');
+  assert.equal(r.precisaCompletarXml({ ...base, tipo: 'INUTILIZACAO' }), false, 'inutilizacao nao entra');
+});
+
+test('completar XML: cancelada com nfeProc ainda precisa do evento de cancelamento', () => {
+  const cancelada = { status: 'CANCELADA', chave: 'c'.repeat(44), xml: xmlCom('A'), xmlProc: '<nfeProc/>' };
+  assert.equal(r.precisaCompletarXml(cancelada), true, 'falta o evento');
+  assert.equal(r.precisaCompletarXml({ ...cancelada, cancelamento: { xmlEvento: '<evento/>' } }), true, 'so o evento sem protocolo nao basta');
+  assert.equal(r.precisaCompletarXml({ ...cancelada, cancelamento: { xmlProcEvento: '<procEventoNFe/>' } }), false, 'evento com protocolo completo');
+  // XML autorizado indisponivel nao impede de buscar o evento (ele nao depende do XML da nota)
+  assert.equal(r.precisaCompletarXml({ ...cancelada, xmlProc: undefined, xml_proc_indisponivel: true }), true);
+});
+
+test('XML de outra tentativa nao e juntado com o protocolo (digest diferente)', () => {
+  const protocolo = protCom('AUTORIZADO');
+  assert.equal(r.xmlAutorizado([xmlCom('REASSINADO')], protocolo), undefined, 'so ha XML de outra tentativa');
+  const certo = xmlCom('AUTORIZADO');
+  assert.equal(r.xmlAutorizado([xmlCom('REASSINADO'), certo], protocolo), certo, 'acha o que bate entre varios');
+});
