@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { create } from 'xmlbuilder2';
 import * as crypto from 'crypto';
+import { separarLogradouro } from '../regras-fiscais';
 
 
 export interface NfeXmlInput {
@@ -324,8 +325,9 @@ export class NfeXmlBuilder {
 
       if (hasRecipientAddress) {
         const enderDest = dest.ele('enderDest');
-        enderDest.ele('xLgr').txt(this.sanitizeNfeText(r.xLgr!));
-        enderDest.ele('nro').txt(r.nro ?? 'S/N');
+        const { xLgr, nro } = separarLogradouro(r.xLgr, r.nro);
+        enderDest.ele('xLgr').txt(this.sanitizeNfeText(xLgr));
+        enderDest.ele('nro').txt(this.sanitizeNfeText(nro));
         if (r.xCpl) enderDest.ele('xCpl').txt(this.sanitizeNfeText(r.xCpl));
         enderDest.ele('xBairro').txt(this.sanitizeNfeText(r.xBairro!));
         enderDest.ele('cMun').txt(r.cMun!);
@@ -516,7 +518,9 @@ export class NfeXmlBuilder {
       .replace(/\s+/g, ' ')
       .trim();
 
-    return text.slice(0, maxLen);
+    // trim DEPOIS de cortar: o corte pode cair logo apos um espaco, e o schema da
+    // NF-e nao aceita texto terminando em branco (rejeicao 215).
+    return text.slice(0, maxLen).trim();
   }
 
   /**

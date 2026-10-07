@@ -87,3 +87,23 @@ export function precisaCompletarXml(nota: any): boolean {
   const faltaEvento = nota.status === 'CANCELADA' && !(nota.cancelamento && nota.cancelamento.xmlProcEvento);
   return faltaProc || faltaEvento;
 }
+
+// O app guarda o endereco do cliente em UM texto livre ("Av. X, 333 - Bairro Y, Cidade") e
+// a NFC-e de entrega exige logradouro (ate 60 caracteres) e numero separados. Antes o texto
+// inteiro ia como logradouro, era cortado em 60 no meio de uma palavra e podia terminar em
+// espaco — o schema da NF-e recusa (215). O que vem depois de " - " e bairro/complemento.
+export function separarLogradouro(texto?: string | null, nroInformado?: string | null): { xLgr: string; nro: string } {
+  let nro = String(nroInformado ?? '').trim();
+  let t = String(texto ?? '').replace(/\s+/g, ' ').trim().split(/\s+-\s+/)[0].trim();
+  if (!nro) {
+    const virgula = t.match(/^(.+?)\s*,\s*(?:n(?:[º°.]|ro|umero|úmero)?\.?\s*)?(\d+[A-Za-z]?|s\s*\/?\s*n)\b.*$/i);
+    if (virgula) {
+      t = virgula[1].trim();
+      nro = /^s/i.test(virgula[2]) ? 'S/N' : virgula[2].toUpperCase();
+    } else {
+      const fim = t.match(/^(.+?)\s+(\d{1,6}[A-Za-z]?)$/);
+      if (fim) { t = fim[1].trim(); nro = fim[2].toUpperCase(); }
+    }
+  }
+  return { xLgr: t, nro: nro || 'S/N' };
+}

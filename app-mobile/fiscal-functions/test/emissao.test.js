@@ -318,3 +318,59 @@ test('transmissão rejeitada de verdade: rejeição definitiva', async () => {
   assert.equal(res.status, 'REJEITADA');
   assert.equal(res.transitorio, undefined);
 });
+
+// ------------------------------------------------------- endereço do destinatário
+
+// Todo texto de folha do XML precisa respeitar o padrao TString do schema da NF-e: sem
+// espaco no comeco nem no fim. (Foi o que rejeitou a nota 99729 com 215.)
+function textosComBrancoNasPontas(xml) {
+  const ruins = [];
+  for (const m of xml.matchAll(/<([A-Za-z]+)(?:\s[^>]*)?>([^<]*)<\/\1>/g)) {
+    if (m[2] !== m[2].trim()) ruins.push(`${m[1]}="${m[2]}"`);
+  }
+  return ruins;
+}
+
+const enderecoDoApp = 'Avenida Doutor José de Oliveira Brandão Filho, 333 - Bairro Jardim Mediterranée, Ministério Público ';
+const entregaComCpf = (extra = {}) => pedidoDeTeste({
+  indPres: '4', indIntermed: '0',
+  recipient: {
+    cpf: '16148462605', xNome: 'Raquel Silva Ribeiro', xLgr: enderecoDoApp, xBairro: 'Jardim Mediterranée',
+    cMun: '3164704', xMun: 'São Sebastião do Paraíso', uf: 'MG', cep: '37950000', ...extra,
+  },
+});
+
+test('entrega do app (nota 99729): endereco em texto livre vira logradouro + numero, sem espaco no fim', async () => {
+  const cert = certDeTeste();
+  const chamadas = sefazFalsa({ authorize: (xml) => protocolo((xml.match(/Id="NFe(\d{44})"/))[1], digestDe(xml)) });
+  const res = await emitirNfceAvulsa(entregaComCpf(), cert);
+  assert.equal(res.status, 'AUTORIZADA');
+  const xml = chamadas.authorize[0][0];
+  assert.equal(xml.match(/<enderDest><xLgr>([^<]*)<\/xLgr>/)[1], 'Avenida Doutor Jose de Oliveira Brandao Filho');
+  assert.equal(xml.match(/<enderDest>[\s\S]*?<nro>([^<]*)<\/nro>/)[1], '333');
+  assert.equal(xml.match(/<xBairro>Jardim Mediterranee<\/xBairro>/) !== null, true);
+  assert.deepEqual(textosComBrancoNasPontas(xml), []);
+});
+
+test('texto cortado em 60 caracteres nao pode terminar em espaco (schema 215)', async () => {
+  const cert = certDeTeste();
+  const chamadas = sefazFalsa({ authorize: (xml) => protocolo((xml.match(/Id="NFe(\d{44})"/))[1], digestDe(xml)) });
+  // o 60o caractere cai logo antes de um espaco: antes do corte "X...X " e depois "X...X "
+  const nome59 = 'N'.repeat(59);
+  const res = await emitirNfceAvulsa(entregaComCpf({
+    xNome: `${nome59} SOBRENOME`, xLgr: `${'R'.repeat(59)} SEM NUMERO`, xBairro: `${'B'.repeat(59)} CENTRO`, xMun: `${'M'.repeat(59)} CIDADE`,
+  }), cert);
+  assert.equal(res.status, 'AUTORIZADA');
+  assert.deepEqual(textosComBrancoNasPontas(chamadas.authorize[0][0]), []);
+});
+
+test('numero informado no pedido tem prioridade; sem numero em lugar nenhum vai S/N', async () => {
+  const cert = certDeTeste();
+  let chamadas = sefazFalsa({ authorize: (xml) => protocolo((xml.match(/Id="NFe(\d{44})"/))[1], digestDe(xml)) });
+  await emitirNfceAvulsa(entregaComCpf({ xLgr: 'Rua das Flores', nro: '45' }), cert);
+  assert.equal(chamadas.authorize[0][0].match(/<enderDest>[\s\S]*?<nro>([^<]*)<\/nro>/)[1], '45');
+  restaurarSefaz();
+  chamadas = sefazFalsa({ authorize: (xml) => protocolo((xml.match(/Id="NFe(\d{44})"/))[1], digestDe(xml)) });
+  await emitirNfceAvulsa(entregaComCpf({ xLgr: 'Rua das Flores' }), cert);
+  assert.equal(chamadas.authorize[0][0].match(/<enderDest>[\s\S]*?<nro>([^<]*)<\/nro>/)[1], 'S/N');
+});

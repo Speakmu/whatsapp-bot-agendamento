@@ -100,3 +100,24 @@ test('XML de outra tentativa nao e juntado com o protocolo (digest diferente)', 
   const certo = xmlCom('AUTORIZADO');
   assert.equal(r.xmlAutorizado([xmlCom('REASSINADO'), certo], protocolo), certo, 'acha o que bate entre varios');
 });
+
+test('endereco do app em texto livre: separa logradouro e numero', () => {
+  const casos = [
+    ['Avenida Doutor José de Oliveira Brandão Filho, 333 - Bairro Jardim Mediterranée, Ministério Público ', 'Avenida Doutor José de Oliveira Brandão Filho', '333'],
+    ['Rua das Flores, 45', 'Rua das Flores', '45'],
+    ['Rua 7 de Setembro, 100 - Centro', 'Rua 7 de Setembro', '100'],
+    ['Rua das Flores 45', 'Rua das Flores', '45'],
+    ['Rua das Flores, nº 45, apto 3', 'Rua das Flores', '45'],
+    ['Rua das Flores, s/n', 'Rua das Flores', 'S/N'],
+    ['Rua das Flores, 45B', 'Rua das Flores', '45B'],
+    ['Avenida Brasil', 'Avenida Brasil', 'S/N'],
+    ['  Rua   A ,   9  ', 'Rua A', '9'],
+    ['', '', 'S/N'],
+  ];
+  for (const [texto, xLgr, nro] of casos) assert.deepEqual(r.separarLogradouro(texto), { xLgr, nro }, texto);
+});
+
+test('endereco: numero ja informado no pedido nao e reinterpretado', () => {
+  assert.deepEqual(r.separarLogradouro('Rua das Flores, 99', '45'), { xLgr: 'Rua das Flores, 99', nro: '45' });
+  assert.deepEqual(r.separarLogradouro(null, null), { xLgr: '', nro: 'S/N' });
+});
