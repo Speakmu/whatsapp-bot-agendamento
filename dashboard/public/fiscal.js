@@ -210,11 +210,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return pct;
     }
 
+    // Mais recentes primeiro, pela DATA DE EMISSAO. Antes ordenava pelo texto do NSU, e as
+    // notas importadas a mao ("MANUAL-...") sempre ficavam acima das sincronizadas, entao uma
+    // nota nova (ex.: 06/10) aparecia depois de notas bem mais antigas. Sem data (resumo/evento)
+    // vai para o fim; empate desempata pelo NSU.
+    function ordenarNotasRecebidas(a, b) {
+        const da = Date.parse(a.dhEmi) || 0, db_ = Date.parse(b.dhEmi) || 0;
+        if (da !== db_) return db_ - da;
+        return String(b.nsu || '').localeCompare(String(a.nsu || ''));
+    }
+
     function listenDfe() {
         db.collection('dfe_documentos').onSnapshot(snap => {
             state.dfe = [];
             snap.forEach(doc => state.dfe.push({ id: doc.id, ...doc.data() }));
-            state.dfe.sort((a, b) => String(b.nsu || '').localeCompare(String(a.nsu || '')));
+            state.dfe.sort(ordenarNotasRecebidas);
             render();
         }, err => console.warn('dfe_documentos:', err.message));
     }
