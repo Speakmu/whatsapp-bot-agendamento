@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
         emi: { filtro: emiFiltro, alvo: 'emi-lista', render: () => renderListaEmissao() },
         dfe: { filtro: dfeFiltro, alvo: 'dfe-lista', render: () => renderListaDfe() }
     };
-    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [], overviewPend: false };
+    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [], overviewPend: false, pedidosExtra: [] };
     let unsubRelatorio = null;
     let unsubMesAtual = null;
     const tabs = [
@@ -125,6 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .onSnapshot(snap => {
                 state.notas = [];
                 snap.forEach(doc => state.notas.push({ id: doc.id, ...doc.data() }));
+                garantirPedidosComFalha();
                 render();
             }, err => console.warn('notas_fiscais:', err.message));
     }
@@ -144,6 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 state.notasRelatorio = [];
                 snap.forEach(doc => state.notasRelatorio.push({ id: doc.id, ...doc.data() }));
                 state.notasRelatorio.sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
+                garantirPedidosComFalha();
                 if (state.tab === 'report' || (state.tab === 'overview' && state.relatorioMes === mesAtualStr())) render();
             }, err => console.warn('notas_fiscais (relatorio):', err.message));
     }
@@ -165,6 +167,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .onSnapshot(snap => {
                 state.notasMesAtual = [];
                 snap.forEach(doc => state.notasMesAtual.push({ id: doc.id, ...doc.data() }));
+                garantirPedidosComFalha();
                 if (state.tab === 'overview') render();
             }, err => console.warn('notas_fiscais (mes atual):', err.message));
     }
@@ -180,6 +183,7 @@ document.addEventListener('DOMContentLoaded', () => {
             .onSnapshot(snap => {
                 state.pedidos = [];
                 snap.forEach(doc => state.pedidos.push({ id: doc.id, ...doc.data() }));
+                garantirPedidosComFalha();
                 render();
             }, err => console.warn('pedidos:', err.message));
     }
@@ -398,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const cls = (st) => (st === 'CONTINGENCIA' || st === 'PROCESSANDO' || st === 'ERRO_REDE') ? 'b-warn' : 'b-danger';
         return `<div class="panel" style="margin-top:14px">
             <div class="panel-head"><h2>Pendencias do mes (${lista.length})</h2>
-                <div style="display:flex;gap:8px"><button class="btn primary" data-tab-go="issuance">Ir para Emissao (Retry)</button><button class="btn" data-tab-go="documents">Documentos</button></div></div>
+                <div style="display:flex;gap:8px"><button class="btn primary" data-ir-emissao-falha>Ir para Emissao (Retry)</button><button class="btn" data-tab-go="documents">Documentos</button></div></div>
             <p class="sub" style="margin-top:0">Vendas cuja nota ainda nao foi autorizada. Se a venda foi refeita e autorizada em outra nota, ela nao aparece aqui.</p>
             <table><thead><tr><th>Nota</th><th>Pedido</th><th>Status</th><th>O que aconteceu</th><th>Cliente</th><th class="num">Valor</th><th>Data</th></tr></thead><tbody>${lista.map(n => {
                 const st = String(n.status || '-').toUpperCase();
@@ -658,14 +662,48 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const optFiltro = (v, atual, txt) => `<option value="${esc(v)}" ${atual === v ? 'selected' : ''}>${esc(txt || v)}</option>`;
 
+    // Notas conhecidas: as 300 mais recentes + as do mes (atual e o do relatorio), sem
+    // repetir. Ficar so com as 300 fazia a ligacao venda->nota se perder em ~3 dias de
+    // movimento e uma venda com falha voltar a parecer "sem nota".
+    function notasConhecidas() {
+        const vistas = new Map();
+        [state.notas, notasDoMesAtual(), state.notasRelatorio].forEach(lista => lista.forEach(n => { if (!vistas.has(n.id)) vistas.set(n.id, n); }));
+        return [...vistas.values()].sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
+    }
+
     function notaFiscalPorPedido() {
-        // state.notas ja vem ordenado do mais recente pro mais antigo (listenNotes),
-        // entao a primeira ocorrencia por pedido_id e sempre a tentativa mais atual.
+        // notasConhecidas() vem do mais recente pro mais antigo, entao a primeira
+        // ocorrencia por pedido_id e sempre a tentativa mais atual.
         const map = {};
-        state.notas.forEach(n => {
+        notasConhecidas().forEach(n => {
             if (n.pedido_id && !(n.pedido_id in map)) map[n.pedido_id] = n;
         });
         return map;
+    }
+
+    // Vendas exibidas na aba Emissao: as 60 concluidas mais recentes MAIS as que tem nota
+    // pendente/com falha, mesmo antigas — senao uma venda com falha sumia da tela assim que
+    // 60 vendas novas entravam e nao dava mais para reemitir.
+    function todosPedidos() {
+        const vistos = new Map();
+        [state.pedidos, state.pedidosExtra].forEach(lista => lista.forEach(p => { if (!vistos.has(p.id)) vistos.set(p.id, p); }));
+        return [...vistos.values()].sort((a, b) => (b.hora_pedido?.toMillis?.() || 0) - (a.hora_pedido?.toMillis?.() || 0));
+    }
+
+    const pedidosJaBuscados = new Set();
+    function garantirPedidosComFalha() {
+        const noJanela = new Set(state.pedidos.map(p => p.id));
+        const faltando = pendenciasDoMes(notasConhecidas().filter(n => n.tipo !== 'INUTILIZACAO'))
+            .map(n => n.pedido_id)
+            .filter(id => id && !noJanela.has(id) && !pedidosJaBuscados.has(id));
+        [...new Set(faltando)].forEach(id => {
+            pedidosJaBuscados.add(id);
+            db.collection('pedidos').doc(id).get().then(doc => {
+                if (!doc.exists) return;
+                state.pedidosExtra.push({ id: doc.id, ...doc.data() });
+                render();
+            }).catch(() => pedidosJaBuscados.delete(id));
+        });
     }
 
     // Situacao fiscal da venda, a partir do status da nota mais recente dela.
@@ -682,7 +720,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const busca = f.busca.trim().toLowerCase();
         const de = f.de ? new Date(f.de + 'T00:00:00').getTime() : null;
         const ate = f.ate ? new Date(f.ate + 'T23:59:59.999').getTime() : null;
-        return state.pedidos.filter(p => {
+        return todosPedidos().filter(p => {
             const nota = notaPorPedido[p.id];
             if (f.situacao && situacaoFiscal(nota ? statusDaNota(nota) : null) !== f.situacao) return false;
             if (f.pagamento && String(p.forma_pagamento || '-') !== f.pagamento) return false;
@@ -698,9 +736,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderIssuance() {
-        if (!state.pedidos.length) return '<div class="panel"><h2>Emissao NFC-e</h2><div class="empty">Nenhuma venda concluida recente.</div></div>';
+        if (!todosPedidos().length) return '<div class="panel"><h2>Emissao NFC-e</h2><div class="empty">Nenhuma venda concluida recente.</div></div>';
         const f = emiFiltro;
-        const pagamentos = [...new Set(state.pedidos.map(p => String(p.forma_pagamento || '-')))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        const pagamentos = [...new Set(todosPedidos().map(p => String(p.forma_pagamento || '-')))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
         const situacoes = [['SEM_NOTA', 'Sem nota'], ['EMITIDA', 'Emitida'], ['PENDENTE', 'Em processamento'], ['FALHA', 'Com falha'], ['CANCELADA', 'Nota cancelada']];
         return `<div class="panel"><div class="panel-head"><h2>Emitir NFC-e por venda concluida</h2></div>
             <div class="actions" style="margin:0 0 12px;flex-wrap:wrap;gap:8px;align-items:flex-end">
@@ -718,7 +756,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const notaPorPedido = notaFiscalPorPedido();
         const lista = pedidosFiltrados(notaPorPedido);
         const pag = fatiarPagina(lista, emiFiltro);
-        const pager = pagerHtml('emi', lista, pag, state.pedidos.length, 'vendas carregadas');
+        const pager = pagerHtml('emi', lista, pag, todosPedidos().length, 'vendas carregadas');
         if (!lista.length) return '<div class="empty">Nenhuma venda encontrada com esses filtros.</div>' + pager;
         return `<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Pagamento</th><th class="num">Valor</th><th>Data</th><th class="num">Acao</th></tr></thead><tbody>${pag.itens.map(p => {
             const nota = notaPorPedido[p.id];
@@ -1388,6 +1426,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function bindActions() {
+        document.querySelectorAll('[data-ir-emissao-falha]').forEach(btn => btn.onclick = () => {
+            Object.assign(emiFiltro, { busca: '', situacao: 'FALHA', pagamento: '', de: '', ate: '', pagina: 1 });
+            state.tab = 'issuance'; renderTabs(); render();
+        });
         document.querySelectorAll('[data-pend-toggle]').forEach(btn => btn.onclick = () => { state.overviewPend = !state.overviewPend; render(); });
         document.querySelectorAll('[data-tab-go]').forEach(btn => btn.onclick = () => { state.tab = btn.dataset.tabGo; renderTabs(); render(); });
         document.querySelectorAll('[data-refresh-config]').forEach(btn => btn.onclick = loadConfig);
@@ -1740,7 +1782,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function emitir(btn) {
-        const pedido = state.pedidos.find(p => p.id === btn.dataset.emitir);
+        const pedido = todosPedidos().find(p => p.id === btn.dataset.emitir);
         if (!pedido) return;
         btn.disabled = true;
         btn.textContent = 'Iniciando...';
@@ -1759,7 +1801,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function cancelarVenda(btn) {
         const id = btn.dataset.cancelarVenda;
-        const pedido = state.pedidos.find(p => p.id === id);
+        const pedido = todosPedidos().find(p => p.id === id);
         if (!pedido) return;
         const nota = notaFiscalPorPedido()[id];
         const st = nota ? String(nota.status || '').toUpperCase() : null;
