@@ -1400,11 +1400,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 @page { size: 80mm auto; margin: 1mm 2mm; }
                 * { box-sizing: border-box; }
                 html, body { margin: 0; }
-                body { font-family: 'Courier New', monospace; font-size: 12px; padding: 0; color: #000; width: 76mm; }
-                h1 { font-size: 13px; text-align: center; margin: 0 0 4px; }
-                .linha { padding: 1px 0; border-bottom: 1px dashed #999; word-break: break-word; }
-                hr { border: none; border-top: 1px solid #000; margin: 3px 0; }
-                .total { font-weight: bold; font-size: 13px; }
+                /* Impressora térmica (203 dpi) não segura traço fino: em
+                   'Courier New' normal os valores saíam falhados/apagados e só
+                   os rótulos em negrito ficavam legíveis. Fonte de traço
+                   grosso, tudo em negrito e preto puro (cinza também some). */
+                body { font-family: Arial, Helvetica, sans-serif; font-size: 14px; font-weight: 700; line-height: 1.25; padding: 0; color: #000; width: 76mm;
+                    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                h1 { font-size: 16px; font-weight: 900; text-align: center; margin: 0 0 4px; }
+                strong { font-weight: 900; }
+                .linha { padding: 2px 0; border-bottom: 1px dashed #000; word-break: break-word; }
+                hr { border: none; border-top: 2px solid #000; margin: 3px 0; }
+                .total { font-weight: 900; font-size: 17px; }
                 .center { text-align: center; }
             </style>
             </head><body>

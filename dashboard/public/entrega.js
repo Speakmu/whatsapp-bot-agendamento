@@ -248,10 +248,14 @@ document.addEventListener('DOMContentLoaded', () => {
         janela.document.write(`
             <html><head><title>Relação de entregas</title>
             <style>
-                body { font-family:'Courier New', monospace; font-size:13px; padding:14px; color:#000; }
-                h1 { font-size:16px; text-align:center; margin-bottom:4px; }
-                h2 { font-size:14px; margin:14px 0 8px; border-bottom:1px solid #000; padding-bottom:4px; }
-                .parada { padding:6px 0; border-bottom:1px dashed #999; }
+                /* Traço grosso e preto puro: 'Courier New' normal sai falhado
+                   em impressora térmica (mesmo ajuste do cupom de pedido). */
+                body { font-family:Arial, Helvetica, sans-serif; font-size:14px; font-weight:700; line-height:1.25; padding:14px; color:#000;
+                    -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+                h1 { font-size:17px; font-weight:900; text-align:center; margin-bottom:4px; }
+                h2 { font-size:15px; font-weight:900; margin:14px 0 8px; border-bottom:2px solid #000; padding-bottom:4px; }
+                strong { font-weight:900; }
+                .parada { padding:6px 0; border-bottom:1px dashed #000; }
                 .parada-cab { margin-bottom:3px; }
                 hr { border:none; border-top:2px solid #000; margin:10px 0; }
                 .center { text-align:center; }
