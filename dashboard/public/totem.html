@@ -329,15 +329,24 @@
             #cupom-impressao {
                 display: block !important;
                 width: 72mm;
-                font-family: 'Courier New', monospace;
-                font-size: 12px;
+                /* Traço grosso e preto puro: 'Courier New' normal sai falhado
+                   em impressora térmica (mesmo ajuste do cupom de pedido do
+                   painel). */
+                font-family: Arial, Helvetica, sans-serif;
+                font-size: 14px;
+                font-weight: 700;
+                line-height: 1.25;
                 color: #000;
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
             }
-            #cupom-impressao h1 { font-size: 15px; text-align: center; margin-bottom: 4px; }
-            #cupom-impressao .senha-grande { font-size: 34px; text-align: center; font-weight: 900; margin: 10px 0; }
-            #cupom-impressao hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
-            #cupom-impressao .linha { display: flex; justify-content: space-between; }
-            #cupom-impressao .total { font-weight: 900; font-size: 14px; }
+            #cupom-impressao h1 { font-size: 17px; font-weight: 900; text-align: center; margin-bottom: 4px; }
+            #cupom-impressao strong { font-weight: 900; }
+            #cupom-impressao .senha-grande { font-size: 36px; text-align: center; font-weight: 900; margin: 10px 0; }
+            #cupom-impressao hr { border: none; border-top: 2px dashed #000; margin: 8px 0; }
+            #cupom-impressao .linha { display: flex; justify-content: space-between; gap: 8px; }
+            #cupom-impressao .linha span:last-child { white-space: nowrap; }
+            #cupom-impressao .total { font-weight: 900; font-size: 17px; }
         }
     </style>
 </head>
