@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
         emi: { filtro: emiFiltro, alvo: 'emi-lista', render: () => renderListaEmissao() },
         dfe: { filtro: dfeFiltro, alvo: 'dfe-lista', render: () => renderListaDfe() }
     };
-    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [], overviewPend: false, pedidosExtra: [] };
+    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [], overviewPend: false, pedidosExtra: [], pedidosPeriodo: [], notasPeriodo: [] };
     let unsubRelatorio = null;
     let unsubMesAtual = null;
     const tabs = [
@@ -328,8 +328,13 @@ document.addEventListener('DOMContentLoaded', () => {
         // + canceladas + o resto (tentativas com erro/pendentes, inclusive as ja refeitas).
         const plural = (n, um, varios) => `${n} ${n === 1 ? um : varios}`;
         const outras = c.total - c.autorizada - c.cancelada;
+        // O que sobra se divide em: ainda PENDENTE (precisa de acao — e o mesmo numero do
+        // cartao de Pendencias) e tentativa com erro que ja foi REFEITA (so historico).
+        // Juntar os dois mostrava "1 com erro/pendente" mesmo com Pendencias = 0.
+        const refeitas = Math.max(0, outras - pendencias);
         const composicao = [plural(c.autorizada, 'autorizada', 'autorizadas'), plural(c.cancelada, 'cancelada', 'canceladas')]
-            .concat(outras > 0 ? [`${outras} com erro/pendente`] : []).join(' + ');
+            .concat(pendencias > 0 ? [plural(pendencias, 'pendente', 'pendentes')] : [])
+            .concat(refeitas > 0 ? [plural(refeitas, 'tentativa com erro ja refeita', 'tentativas com erro ja refeitas')] : []).join(' + ');
         const [ano, nMes] = mesAtualStr().split('-').map(Number);
         const nomeMes = new Date(ano, nMes - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
         return `
@@ -443,7 +448,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const busca = f.busca.trim().toLowerCase();
         const de = f.de ? new Date(f.de + 'T00:00:00').getTime() : null;
         const ate = f.ate ? new Date(f.ate + 'T23:59:59.999').getTime() : null;
-        return state.notas.filter(n => {
+        return notasParaDocumentos().filter(n => {
             if (f.status && statusDaNota(n) !== f.status) return false;
             if (f.forma && formaDaNota(n) !== f.forma) return false;
             const ms = n.criado_em?.toMillis?.() ?? Date.now(); // escrita pendente = agora
@@ -481,14 +486,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const ini = (f.pagina - 1) * f.porPagina;
         const pagina = lista.slice(ini, ini + f.porPagina);
         const pager = `<div class="actions" style="margin:12px 0 0;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center">
-            <span class="muted">${lista.length ? `${ini + 1}-${ini + pagina.length} de ${lista.length}` : '0 resultados'}${lista.length !== state.notas.length ? ` (${state.notas.length} carregados)` : ''}</span>
+            <span class="muted">${lista.length ? `${ini + 1}-${ini + pagina.length} de ${lista.length}` : '0 resultados'}${lista.length !== notasParaDocumentos().length ? ` (${notasParaDocumentos().length} carregados)` : ''}</span>
             <span style="display:flex;gap:8px;align-items:center">
                 <label class="sub" style="margin:0">Por pagina <select id="doc-por-pagina">${[10, 20, 50, 100].map(v => `<option value="${v}" ${f.porPagina === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
                 <button class="btn" data-doc-pag="-1" ${f.pagina <= 1 ? 'disabled' : ''}>&lsaquo; Anterior</button>
                 <span class="muted">Pagina ${f.pagina} de ${totalPag}</span>
                 <button class="btn" data-doc-pag="1" ${f.pagina >= totalPag ? 'disabled' : ''}>Proxima &rsaquo;</button>
             </span></div>`;
-        return documentsTable(pagina) + pager;
+        return avisoPeriodo('doc') + documentsTable(pagina) + pager;
     }
 
     // Atualiza so a lista (sem recriar os campos de filtro, pra nao perder o foco da busca).
@@ -662,12 +667,67 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const optFiltro = (v, atual, txt) => `<option value="${esc(v)}" ${atual === v ? 'selected' : ''}>${esc(txt || v)}</option>`;
 
+    // ---- Filtro De/Ate: consulta o BANCO no periodo escolhido -------------------------------
+    // As telas carregam so o recente (60 vendas / 300 notas) e o filtro de data rodava em cima
+    // disso: escolher 07 a 12/10 mostrava apenas o dia 10, porque so ele estava carregado.
+    // Com De/Ate preenchido, busca de verdade as vendas/notas do periodo (com teto, avisando).
+    const periodos = {
+        emi: { chave: '', carregando: false, truncado: false, limite: 600, filtro: () => emiFiltro, rotulo: 'vendas' },
+        doc: { chave: '', carregando: false, truncado: false, limite: 400, filtro: () => docFiltro, rotulo: 'notas' }
+    };
+
+    function avisoPeriodo(tipo) {
+        const c = periodos[tipo], f = c.filtro();
+        if (c.carregando) return `<p class="muted" style="margin:8px 0">Carregando ${c.rotulo} do periodo...</p>`;
+        if (c.truncado) return `<p style="margin:8px 0;color:#c77700">Periodo grande: mostrando as ${c.limite} ${c.rotulo} mais recentes. Reduza as datas para ver as demais.</p>`;
+        if (!f.de && !f.ate) return `<p class="muted" style="margin:8px 0;font-size:.82rem">Mostrando as ${c.rotulo} mais recentes. Use De/Ate para ver um periodo especifico.</p>`;
+        return '';
+    }
+
+    async function carregarPeriodo(tipo) {
+        const c = periodos[tipo], f = c.filtro();
+        const chave = `${f.de || ''}|${f.ate || ''}`;
+        const redesenhar = () => (tipo === 'emi' ? atualizarLista('emi') : atualizarListaDocumentos());
+        if (!f.de && !f.ate) {
+            c.chave = ''; c.carregando = false; c.truncado = false;
+            if (tipo === 'emi') state.pedidosPeriodo = []; else state.notasPeriodo = [];
+            return;
+        }
+        if (c.chave === chave) return;
+        c.chave = chave; c.carregando = true; c.truncado = false;
+        redesenhar();
+        const de = f.de ? new Date(f.de + 'T00:00:00') : new Date(2000, 0, 1);
+        const ate = f.ate ? new Date(f.ate + 'T23:59:59.999') : new Date(Date.now() + 86400000);
+        try {
+            const q = tipo === 'emi'
+                ? db.collection('pedidos').where('status', '==', 'CONCLUIDO').where('hora_pedido', '>=', de).where('hora_pedido', '<=', ate).orderBy('hora_pedido', 'desc')
+                : db.collection('notas_fiscais').where('criado_em', '>=', de).where('criado_em', '<=', ate).orderBy('criado_em', 'desc');
+            const snap = await q.limit(c.limite + 1).get();
+            if (c.chave !== chave) return;               // o usuario ja mudou as datas de novo
+            const itens = snap.docs.slice(0, c.limite).map(d => ({ id: d.id, ...d.data() }));
+            c.truncado = snap.size > c.limite;
+            if (tipo === 'emi') state.pedidosPeriodo = itens; else state.notasPeriodo = itens;
+        } catch (err) {
+            console.warn(`periodo ${tipo}:`, err.message);
+            if (c.chave === chave) c.chave = '';          // permite tentar de novo
+        } finally {
+            if (c.chave === chave || c.chave === '') { c.carregando = false; redesenhar(); }
+        }
+    }
+
+    // Notas da aba Documentos: as recentes + as do periodo escolhido, sem repetir.
+    function notasParaDocumentos() {
+        const vistas = new Map();
+        [state.notas, state.notasPeriodo].forEach(lista => lista.forEach(n => { if (!vistas.has(n.id)) vistas.set(n.id, n); }));
+        return [...vistas.values()].sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
+    }
+
     // Notas conhecidas: as 300 mais recentes + as do mes (atual e o do relatorio), sem
     // repetir. Ficar so com as 300 fazia a ligacao venda->nota se perder em ~3 dias de
     // movimento e uma venda com falha voltar a parecer "sem nota".
     function notasConhecidas() {
         const vistas = new Map();
-        [state.notas, notasDoMesAtual(), state.notasRelatorio].forEach(lista => lista.forEach(n => { if (!vistas.has(n.id)) vistas.set(n.id, n); }));
+        [state.notas, notasDoMesAtual(), state.notasRelatorio, state.notasPeriodo].forEach(lista => lista.forEach(n => { if (!vistas.has(n.id)) vistas.set(n.id, n); }));
         return [...vistas.values()].sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
     }
 
@@ -686,7 +746,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 60 vendas novas entravam e nao dava mais para reemitir.
     function todosPedidos() {
         const vistos = new Map();
-        [state.pedidos, state.pedidosExtra].forEach(lista => lista.forEach(p => { if (!vistos.has(p.id)) vistos.set(p.id, p); }));
+        [state.pedidos, state.pedidosExtra, state.pedidosPeriodo].forEach(lista => lista.forEach(p => { if (!vistos.has(p.id)) vistos.set(p.id, p); }));
         return [...vistos.values()].sort((a, b) => (b.hora_pedido?.toMillis?.() || 0) - (a.hora_pedido?.toMillis?.() || 0));
     }
 
@@ -757,8 +817,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const lista = pedidosFiltrados(notaPorPedido);
         const pag = fatiarPagina(lista, emiFiltro);
         const pager = pagerHtml('emi', lista, pag, todosPedidos().length, 'vendas carregadas');
-        if (!lista.length) return '<div class="empty">Nenhuma venda encontrada com esses filtros.</div>' + pager;
-        return `<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Pagamento</th><th class="num">Valor</th><th>Data</th><th class="num">Acao</th></tr></thead><tbody>${pag.itens.map(p => {
+        if (!lista.length) return avisoPeriodo('emi') + '<div class="empty">Nenhuma venda encontrada com esses filtros.</div>' + pager;
+        return avisoPeriodo('emi') + `<table><thead><tr><th>Pedido</th><th>Cliente</th><th>Pagamento</th><th class="num">Valor</th><th>Data</th><th class="num">Acao</th></tr></thead><tbody>${pag.itens.map(p => {
             const nota = notaPorPedido[p.id];
             const st = nota ? String(nota.status || '').toUpperCase() : null;
             let acao;
@@ -1447,7 +1507,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const docBind = (id, campo, evento) => {
             const el = $(id);
             if (!el) return;
-            el[evento] = () => { docFiltro[campo] = el.value; docFiltro.pagina = 1; atualizarListaDocumentos(); };
+            el[evento] = () => {
+                docFiltro[campo] = el.value; docFiltro.pagina = 1;
+                if (campo === 'de' || campo === 'ate') carregarPeriodo('doc');
+                atualizarListaDocumentos();
+            };
         };
         docBind('doc-busca', 'busca', 'oninput');
         docBind('doc-status', 'status', 'onchange');
@@ -1455,19 +1519,24 @@ document.addEventListener('DOMContentLoaded', () => {
         docBind('doc-de', 'de', 'onchange');
         docBind('doc-ate', 'ate', 'onchange');
         const docLimpar = $('doc-limpar');
-        if (docLimpar) docLimpar.onclick = () => { Object.assign(docFiltro, { busca: '', status: '', forma: '', de: '', ate: '', pagina: 1 }); render(); };
+        if (docLimpar) docLimpar.onclick = () => { Object.assign(docFiltro, { busca: '', status: '', forma: '', de: '', ate: '', pagina: 1 }); carregarPeriodo('doc'); render(); };
         const docPorPag = $('doc-por-pagina');
         if (docPorPag) docPorPag.onchange = () => { docFiltro.porPagina = Number(docPorPag.value) || 20; docFiltro.pagina = 1; atualizarListaDocumentos(); };
         document.querySelectorAll('[data-doc-pag]').forEach(btn => btn.onclick = () => { docFiltro.pagina += Number(btn.dataset.docPag); atualizarListaDocumentos(); });
         document.querySelectorAll('[data-lista-filtro]').forEach(el => {
             const [chave, campo] = el.dataset.listaFiltro.split(':');
             const f = listas[chave].filtro;
-            el[el.type === 'search' ? 'oninput' : 'onchange'] = () => { f[campo] = el.value; f.pagina = 1; atualizarLista(chave); };
+            el[el.type === 'search' ? 'oninput' : 'onchange'] = () => {
+                f[campo] = el.value; f.pagina = 1;
+                if (chave === 'emi' && (campo === 'de' || campo === 'ate')) carregarPeriodo('emi');
+                atualizarLista(chave);
+            };
         });
         document.querySelectorAll('[data-lista-limpar]').forEach(btn => btn.onclick = () => {
             const f = listas[btn.dataset.listaLimpar].filtro;
             Object.keys(f).forEach(k => { if (k !== 'pagina' && k !== 'porPagina') f[k] = ''; });
             f.pagina = 1;
+            if (btn.dataset.listaLimpar === 'emi') carregarPeriodo('emi');
             render();
         });
         document.querySelectorAll('[data-lista-por-pagina]').forEach(sel => sel.onchange = () => {
