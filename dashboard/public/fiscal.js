@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
         emi: { filtro: emiFiltro, alvo: 'emi-lista', render: () => renderListaEmissao() },
         dfe: { filtro: dfeFiltro, alvo: 'dfe-lista', render: () => renderListaDfe() }
     };
-    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [], overviewPend: false, pedidosExtra: [], pedidosPeriodo: [], notasPeriodo: [] };
+    const state = { tab: 'overview', cfg: {}, notas: [], notasRelatorio: [], pedidos: [], produtos: [], dfe: [], ibptCache: {}, insumos: [], dfeExpandido: null, dfeEdicao: null, dfeEdicaoDados: null, relatorioMes: mesAtualStr(), notasMesAtual: [], overviewPend: false, pedidosExtra: [], pedidosPeriodo: [], notasPeriodo: [], notasPeriodoEmi: [] };
     let unsubRelatorio = null;
     let unsubMesAtual = null;
     const tabs = [
@@ -672,41 +672,93 @@ document.addEventListener('DOMContentLoaded', () => {
     // disso: escolher 07 a 12/10 mostrava apenas o dia 10, porque so ele estava carregado.
     // Com De/Ate preenchido, busca de verdade as vendas/notas do periodo (com teto, avisando).
     const periodos = {
-        emi: { chave: '', carregando: false, truncado: false, limite: 600, filtro: () => emiFiltro, rotulo: 'vendas' },
+        emi: { chave: '', carregando: false, truncado: false, limite: 3000, filtro: () => emiFiltro, rotulo: 'vendas' },
         doc: { chave: '', carregando: false, truncado: false, limite: 400, filtro: () => docFiltro, rotulo: 'notas' }
     };
+
+    // Situacoes/status "raros" (poucas notas): para eles busca-se direto as NOTAS com esse
+    // status e as vendas delas, em vez de depender do teto de vendas do periodo — assim
+    // "Nota cancelada" / "Com falha" mostram TUDO, mesmo num periodo com milhares de vendas.
+    const STATUS_DA_SITUACAO = { FALHA: ['REJEITADA', 'ERRO'], PENDENTE: ['PROCESSANDO', 'ERRO_REDE'], CANCELADA: ['CANCELADA'] };
+    const STATUS_RAROS_DOC = ['CANCELADA', 'REJEITADA', 'ERRO', 'ERRO_REDE', 'CONTINGENCIA', 'PROCESSANDO', 'INUTILIZADA'];
+
+    function statusRaros(tipo, f) {
+        if (tipo === 'emi') return STATUS_DA_SITUACAO[f.situacao] || null;
+        return STATUS_RAROS_DOC.includes(f.status) ? [f.status] : null;
+    }
 
     function avisoPeriodo(tipo) {
         const c = periodos[tipo], f = c.filtro();
         if (c.carregando) return `<p class="muted" style="margin:8px 0">Carregando ${c.rotulo} do periodo...</p>`;
-        if (c.truncado) return `<p style="margin:8px 0;color:#c77700">Periodo grande: mostrando as ${c.limite} ${c.rotulo} mais recentes. Reduza as datas para ver as demais.</p>`;
-        if (!f.de && !f.ate) return `<p class="muted" style="margin:8px 0;font-size:.82rem">Mostrando as ${c.rotulo} mais recentes. Use De/Ate para ver um periodo especifico.</p>`;
+        if (c.truncado) return `<p style="margin:8px 0;color:#c77700">Periodo muito grande: so as ${c.limite} ${c.rotulo} mais recentes foram carregadas, entao as mais antigas podem nao aparecer. Reduza as datas.</p>`;
+        if (!f.de && !f.ate && !statusRaros(tipo, f)) return `<p class="muted" style="margin:8px 0;font-size:.82rem">Mostrando as ${c.rotulo} mais recentes. Use De/Ate para ver um periodo especifico.</p>`;
+        if (!f.de && f.ate) return `<p class="muted" style="margin:8px 0;font-size:.82rem">Sem "De": considerando os 30 dias anteriores a "Ate".</p>`;
         return '';
     }
 
     async function carregarPeriodo(tipo) {
         const c = periodos[tipo], f = c.filtro();
-        const chave = `${f.de || ''}|${f.ate || ''}`;
+        const raras = statusRaros(tipo, f);
+        const chave = `${f.de || ''}|${f.ate || ''}|${raras ? raras.join(',') : ''}`;
         const redesenhar = () => (tipo === 'emi' ? atualizarLista('emi') : atualizarListaDocumentos());
-        if (!f.de && !f.ate) {
+        if (!f.de && !f.ate && !raras) {
             c.chave = ''; c.carregando = false; c.truncado = false;
-            if (tipo === 'emi') state.pedidosPeriodo = []; else state.notasPeriodo = [];
+            if (tipo === 'emi') { state.pedidosPeriodo = []; state.notasPeriodoEmi = []; } else state.notasPeriodo = [];
             return;
         }
         if (c.chave === chave) return;
         c.chave = chave; c.carregando = true; c.truncado = false;
         redesenhar();
-        const de = f.de ? new Date(f.de + 'T00:00:00') : new Date(2000, 0, 1);
         const ate = f.ate ? new Date(f.ate + 'T23:59:59.999') : new Date(Date.now() + 86400000);
+        const de = f.de ? new Date(f.de + 'T00:00:00') : (f.ate ? new Date(ate.getTime() - 30 * 86400000) : new Date(2000, 0, 1));
+        const temData = !!(f.de || f.ate);
+        const dentro = (n, tolerancia = 0) => { const ms = n.criado_em?.toMillis?.() ?? Date.now(); return ms >= de.getTime() && ms <= ate.getTime() + tolerancia; };
+        const lista = (snap) => snap.docs.map(d => ({ id: d.id, ...d.data() }));
         try {
-            const q = tipo === 'emi'
-                ? db.collection('pedidos').where('status', '==', 'CONCLUIDO').where('hora_pedido', '>=', de).where('hora_pedido', '<=', ate).orderBy('hora_pedido', 'desc')
-                : db.collection('notas_fiscais').where('criado_em', '>=', de).where('criado_em', '<=', ate).orderBy('criado_em', 'desc');
-            const snap = await q.limit(c.limite + 1).get();
-            if (c.chave !== chave) return;               // o usuario ja mudou as datas de novo
-            const itens = snap.docs.slice(0, c.limite).map(d => ({ id: d.id, ...d.data() }));
-            c.truncado = snap.size > c.limite;
-            if (tipo === 'emi') state.pedidosPeriodo = itens; else state.notasPeriodo = itens;
+            if (tipo === 'doc') {
+                // Status raro: busca direta por status (sem teto de periodo); senao, o periodo.
+                const q = raras
+                    ? db.collection('notas_fiscais').where('status', '==', raras[0])
+                    : db.collection('notas_fiscais').where('criado_em', '>=', de).where('criado_em', '<=', ate).orderBy('criado_em', 'desc');
+                const limite = raras ? 1000 : c.limite;
+                const snap = await q.limit(limite + 1).get();
+                if (c.chave !== chave) return;
+                c.limite = limite; c.truncado = snap.size > limite;
+                state.notasPeriodo = lista(snap).slice(0, limite);
+            } else {
+                let pedidos = [];
+                if (temData) {
+                    const snap = await db.collection('pedidos').where('status', '==', 'CONCLUIDO')
+                        .where('hora_pedido', '>=', de).where('hora_pedido', '<=', ate).orderBy('hora_pedido', 'desc').limit(c.limite + 1).get();
+                    // Com filtro de situacao rara o resultado e completo mesmo se o teto estourar.
+                    c.truncado = snap.size > c.limite && !raras;
+                    pedidos = lista(snap).slice(0, c.limite);
+                }
+                let notas = [];
+                if (raras) {
+                    // Notas com esse status (poucas) + todas as notas dos pedidos delas, e os pedidos que faltam.
+                    const ns = await db.collection('notas_fiscais').where('status', 'in', raras).limit(1000).get();
+                    const doPeriodo = lista(ns).filter(n => n.pedido_id && (!temData || dentro(n, 2 * 86400000)));
+                    const ids = [...new Set(doPeriodo.map(n => n.pedido_id))].slice(0, 300);
+                    const jaTenho = new Set(pedidos.map(p => p.id));
+                    const buscas = await Promise.all(ids.map(async id => {
+                        const todas = await db.collection('notas_fiscais').where('pedido_id', '==', id).get();
+                        const ped = jaTenho.has(id) ? null : await db.collection('pedidos').doc(id).get();
+                        return { notas: lista(todas), pedido: ped && ped.exists ? { id: ped.id, ...ped.data() } : null };
+                    }));
+                    buscas.forEach(b => { notas.push(...b.notas); if (b.pedido) pedidos.push(b.pedido); });
+                } else if (temData) {
+                    // Periodo anterior ao que as outras telas ja carregam (mes atual / mes do relatorio):
+                    // sem as notas dele, toda venda pareceria "sem nota". Busca so nesse caso.
+                    const inicioCoberto = Math.min(limitesDoMes(mesAtualStr()).inicio.getTime(), limitesDoMes(state.relatorioMes || mesAtualStr()).inicio.getTime());
+                    if (de.getTime() < inicioCoberto) {
+                        const ns = await db.collection('notas_fiscais').where('criado_em', '>=', de).where('criado_em', '<=', new Date(ate.getTime() + 2 * 86400000)).limit(3000).get();
+                        notas = lista(ns);
+                    }
+                }
+                if (c.chave !== chave) return;
+                state.pedidosPeriodo = pedidos; state.notasPeriodoEmi = notas;
+            }
         } catch (err) {
             console.warn(`periodo ${tipo}:`, err.message);
             if (c.chave === chave) c.chave = '';          // permite tentar de novo
@@ -727,7 +779,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // movimento e uma venda com falha voltar a parecer "sem nota".
     function notasConhecidas() {
         const vistas = new Map();
-        [state.notas, notasDoMesAtual(), state.notasRelatorio, state.notasPeriodo].forEach(lista => lista.forEach(n => { if (!vistas.has(n.id)) vistas.set(n.id, n); }));
+        [state.notas, notasDoMesAtual(), state.notasRelatorio, state.notasPeriodo, state.notasPeriodoEmi].forEach(lista => lista.forEach(n => { if (!vistas.has(n.id)) vistas.set(n.id, n); }));
         return [...vistas.values()].sort((a, b) => (b.criado_em?.toMillis?.() || 0) - (a.criado_em?.toMillis?.() || 0));
     }
 
@@ -1509,7 +1561,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!el) return;
             el[evento] = () => {
                 docFiltro[campo] = el.value; docFiltro.pagina = 1;
-                if (campo === 'de' || campo === 'ate') carregarPeriodo('doc');
+                if (campo === 'de' || campo === 'ate' || campo === 'status') carregarPeriodo('doc');
                 atualizarListaDocumentos();
             };
         };
@@ -1528,7 +1580,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const f = listas[chave].filtro;
             el[el.type === 'search' ? 'oninput' : 'onchange'] = () => {
                 f[campo] = el.value; f.pagina = 1;
-                if (chave === 'emi' && (campo === 'de' || campo === 'ate')) carregarPeriodo('emi');
+                if (chave === 'emi' && (campo === 'de' || campo === 'ate' || campo === 'situacao')) carregarPeriodo('emi');
                 atualizarLista(chave);
             };
         });
