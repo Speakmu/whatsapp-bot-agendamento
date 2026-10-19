@@ -125,6 +125,23 @@ export const processarPagamentoDireto = onRequest(
     }
 });
 
+// Terminal Point de cada ponto de venda. pointDeviceId (campo antigo) continua
+// valendo como o do caixa para quem já tinha configurado só um terminal.
+function deviceIdPoint(cfg, terminal) {
+    const id = terminal === 'totem' ? cfg.pointDeviceIdTotem : (cfg.pointDeviceIdCaixa || cfg.pointDeviceId);
+    return String(id || '').trim();
+}
+
+// Tipo de cartão enviado ao terminal. Sem "type" a própria máquina pergunta
+// débito/crédito ao cliente. Parcelas ficam em 1x (a Point não deixa o cliente
+// escolher parcelamento via API de integração).
+function pagamentoPoint(cfg) {
+    const tipo = cfg.pointTipoCartao || 'credito'; // sem config = comportamento antigo (crédito 1x)
+    if (tipo === 'debito') return { type: 'debit_card' };
+    if (tipo === 'escolher') return {};
+    return { type: 'credit_card', installments: 1, installments_cost: 'seller' };
+}
+
 // Cria uma cobrança na maquininha Point (Cartão no balcão/caixa físico).
 // Chamada pelo dashboard (caixa.js) quando o operador finaliza uma venda no Cartão.
 // O resultado chega depois via webhook (topic=point_integration_ipn, ver abaixo).
@@ -157,9 +174,10 @@ export const criarCobrancaPoint = onRequest(
         if (cfgPoint.maquininhaAtiva === false) {
             return res.status(409).json({ message: "Integração com a maquininha está desativada nas configurações." });
         }
-        const deviceId = cfgPoint.pointDeviceId;
+        const terminal = req.body.terminal === 'totem' ? 'totem' : 'caixa';
+        const deviceId = deviceIdPoint(cfgPoint, terminal);
         if (!deviceId) {
-            return res.status(500).json({ message: "Terminal Point não configurado (pointDeviceId ausente)." });
+            return res.status(500).json({ message: `Terminal Point do ${terminal} não configurado (device_id ausente).` });
         }
 
         // amount em centavos, conforme a API do Point.
@@ -170,7 +188,7 @@ export const criarCobrancaPoint = onRequest(
             {
                 amount: amountCentavos,
                 description: description || `Pedido ${externalReference}`,
-                payment: { installments: 1, type: "credit_card", installments_cost: "seller" },
+                payment: pagamentoPoint(cfgPoint),
                 additional_info: { external_reference: externalReference },
             },
             { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
@@ -181,6 +199,101 @@ export const criarCobrancaPoint = onRequest(
     } catch (error) {
         console.error("Erro ao criar cobrança Point:", error.response?.data || error.message);
         return res.status(error.response?.status || 500).json(error.response?.data || { message: error.message });
+    }
+});
+
+// Cancela uma cobrança ainda pendente na Point (operador desistiu / cliente saiu).
+// Só age sobre pedido AGUARDANDO_CARTAO, então não dá pra usar para estornar venda paga.
+export const cancelarCobrancaPoint = onRequest(
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN] },
+    async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        return res.status(204).send('');
+    }
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
+
+    try {
+        await exigirUsuario(req);
+        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
+        if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
+
+        const pedidoId = String(req.body?.pedidoId || '').trim();
+        if (!pedidoId) return res.status(400).json({ message: "Informe pedidoId." });
+
+        const pedidoRef = db.collection('pedidos').doc(pedidoId);
+        const pedidoSnap = await pedidoRef.get();
+        if (!pedidoSnap.exists) return res.status(404).json({ message: "Pedido não encontrado." });
+        const pedido = pedidoSnap.data();
+        if (pedido.status !== 'AGUARDANDO_CARTAO' || !pedido.pagamento_id) {
+            return res.status(409).json({ message: "Este pedido não está aguardando pagamento no cartão." });
+        }
+
+        const cfgSnap = await db.collection('configuracoes').doc('pagamentos').get();
+        const deviceId = deviceIdPoint(cfgSnap.exists ? cfgSnap.data() : {}, pedido.origem === 'TOTEM' ? 'totem' : 'caixa');
+        if (!deviceId) return res.status(500).json({ message: "Terminal Point não configurado." });
+
+        try {
+            await axios.delete(
+                `https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents/${pedido.pagamento_id}`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+        } catch (err) {
+            // 404 = a cobrança já saiu da máquina (expirou/foi cancelada lá). Segue e cancela o pedido.
+            if (err.response?.status !== 404) throw err;
+        }
+
+        // Re-confere dentro de transação: o webhook pode ter aprovado nesse meio tempo.
+        const cancelou = await db.runTransaction(async tx => {
+            const atual = await tx.get(pedidoRef);
+            if (atual.data()?.status !== 'AGUARDANDO_CARTAO') return false;
+            tx.update(pedidoRef, { status: 'CANCELADO_PAGAMENTO', gateway_state: 'CANCELED_BY_OPERATOR' });
+            return true;
+        });
+        return res.status(200).json({ cancelado: cancelou });
+    } catch (error) {
+        console.error("Erro ao cancelar cobrança Point:", error.response?.data || error.message);
+        return res.status(error.status || error.response?.status || 500).json(error.response?.data || { message: error.message });
+    }
+});
+
+// Administração dos terminais Point: lista os terminais da conta (para preencher o
+// device_id sozinho) e coloca um terminal em modo PDV (exigido pela API de integração).
+export const terminaisPoint = onRequest(
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN] },
+    async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        return res.status(204).send('');
+    }
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
+
+    try {
+        await exigirAdminGenerico(req);
+        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
+        if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
+        const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+
+        if (req.body?.acao === 'pdv') {
+            const deviceId = String(req.body.deviceId || '').trim();
+            if (!deviceId) return res.status(400).json({ message: "Informe deviceId." });
+            const r = await axios.patch(
+                `https://api.mercadopago.com/point/integration-api/devices/${deviceId}`,
+                { operating_mode: 'PDV' },
+                { headers }
+            );
+            return res.status(200).json(r.data);
+        }
+
+        const r = await axios.get('https://api.mercadopago.com/point/integration-api/devices', { headers });
+        return res.status(200).json(r.data);
+    } catch (error) {
+        console.error("Erro nos terminais Point:", error.response?.data || error.message);
+        return res.status(error.status || error.response?.status || 500).json(error.response?.data || { message: error.message });
     }
 });
 
@@ -239,7 +352,7 @@ async function tratarNotificacaoPoint(paymentIntentId, accessToken) {
 
     const estado = String(intent.state || intent.status || '').toUpperCase();
     const finalizado = estado === 'FINISHED' || estado === 'APPROVED';
-    const cancelado = estado === 'CANCELED' || estado === 'CANCELLED' || estado === 'ERROR';
+    const cancelado = ['CANCELED', 'CANCELLED', 'ERROR', 'FAILED', 'ABANDONED', 'EXPIRED'].includes(estado);
 
     const snap = await db.collection('pedidos')
         .where('pagamento_id', '==', paymentIntentId)
@@ -261,6 +374,15 @@ async function tratarNotificacaoPoint(paymentIntentId, accessToken) {
     if (!finalizado) return; // ainda em andamento, aguarda proxima notificacao
 
     await confirmarCartaoAprovado(pedidoDoc, pedido, 'Point', estado);
+
+    // Guarda o id/tipo do pagamento real (para conciliação e consulta de bandeira/NSU).
+    const pag = intent.payment || {};
+    if (pag.id || pag.type) {
+        await pedidoDoc.ref.update({
+            ...(pag.id ? { point_payment_id: String(pag.id) } : {}),
+            ...(pag.type ? { point_payment_type: String(pag.type) } : {}),
+        });
+    }
 }
 
 // Salva a credencial do Connect em uma coleção sem acesso pelo navegador.

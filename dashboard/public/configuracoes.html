@@ -100,7 +100,23 @@
                 </select>
                 <small>Define qual maquininha o Caixa vai acionar quando a forma de pagamento for Cart&atilde;o.</small>
             </div>
-            <div class="campo" id="campo-point"><label>ID do terminal Point (device_id)</label><input id="pag-point-device" placeholder="PAX_A910__XXXXXXXXXXXXXXX"></div>
+            <div class="campo" id="campo-point">
+                <label>ID do terminal Point do Caixa (device_id)</label>
+                <input id="pag-point-device" placeholder="PAX_A910__XXXXXXXXXXXXXXX">
+                <label style="margin-top:10px;">ID do terminal Point do Totem (device_id)</label>
+                <input id="pag-point-device-totem" placeholder="PAX_A910__XXXXXXXXXXXXXXX">
+                <label style="margin-top:10px;">Tipo de cart&atilde;o</label>
+                <select id="pag-point-tipo">
+                    <option value="credito">Somente cr&eacute;dito &agrave; vista</option>
+                    <option value="debito">Somente d&eacute;bito</option>
+                    <option value="escolher">Cliente escolhe na m&aacute;quina (d&eacute;bito ou cr&eacute;dito)</option>
+                </select>
+                <div style="margin-top:10px;">
+                    <button type="button" class="btn btn-azul" id="listar-point">Buscar terminais da conta</button>
+                    <div id="point-terminais" style="display:none;margin-top:8px;"></div>
+                </div>
+                <small>Depois de vincular a m&aacute;quina &agrave; conta do Mercado Pago, clique em &quot;Buscar terminais&quot; para preencher o ID sozinho. A m&aacute;quina precisa estar em <b>modo PDV</b> &mdash; o bot&atilde;o &quot;Ativar modo PDV&quot; faz isso.</small>
+            </div>
             <div class="campo" id="campo-stone">
                 <label>N&uacute;mero de s&eacute;rie da POS Stone</label>
                 <input id="pag-stone-serial" placeholder="Ex: 1078295125">

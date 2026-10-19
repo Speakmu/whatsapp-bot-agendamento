@@ -66,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('pag-provedor').addEventListener('change', aplicarVisibilidadeProvedor);
         $('pag-maquininha-ativa').addEventListener('change', aplicarVisibilidadeMaquininha);
         $('testar-stone').addEventListener('click', testarMaquininhaStone);
+        $('listar-point').addEventListener('click', listarTerminaisPoint);
         $('salvar-ifood').addEventListener('click', salvarIfood);
         $('testar-ifood').addEventListener('click', testarIfood);
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
@@ -284,11 +285,78 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    const TERMINAIS_POINT_URL = FUNCTIONS_BASE_URL + "/terminaisPoint";
+
+    async function chamarTerminaisPoint(corpo) {
+        const resp = await fetch(TERMINAIS_POINT_URL, {
+            method: 'POST',
+            headers: await authHeaders(),
+            body: JSON.stringify(corpo)
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.message || data.error || `erro ${resp.status}`);
+        return data;
+    }
+
+    // Lista os terminais da conta Mercado Pago e deixa escolher qual é o do Caixa/Totem.
+    async function listarTerminaisPoint() {
+        const btn = $('listar-point');
+        const box = $('point-terminais');
+        btn.disabled = true;
+        box.style.display = 'block';
+        box.textContent = 'Buscando terminais...';
+        try {
+            const data = await chamarTerminaisPoint({ acao: 'listar' });
+            const devices = data.devices || [];
+            if (!devices.length) {
+                box.textContent = 'Nenhum terminal encontrado. Confirme se a máquina está vinculada à conta do token.';
+                return;
+            }
+            box.innerHTML = '';
+            devices.forEach(dv => {
+                const linha = document.createElement('div');
+                linha.style.cssText = 'padding:8px 0;border-bottom:1px solid #eee;';
+                const modo = dv.operating_mode === 'PDV' ? 'modo PDV ✅' : `modo ${dv.operating_mode || '?'} ⚠️`;
+                const txt = document.createElement('div');
+                txt.textContent = `${dv.id} — ${modo}`;
+                txt.style.cssText = 'font-size:.85rem;word-break:break-all;margin-bottom:6px;';
+                linha.appendChild(txt);
+                const add = (rotulo, fn, cls) => {
+                    const b = document.createElement('button');
+                    b.type = 'button';
+                    b.className = 'btn ' + cls;
+                    b.style.cssText = 'margin-right:6px;padding:6px 12px;font-size:.8rem;';
+                    b.textContent = rotulo;
+                    b.addEventListener('click', fn);
+                    linha.appendChild(b);
+                };
+                add('Usar no Caixa', () => { $('pag-point-device').value = dv.id; }, 'btn-salvar');
+                add('Usar no Totem', () => { $('pag-point-device-totem').value = dv.id; }, 'btn-salvar');
+                if (dv.operating_mode !== 'PDV') {
+                    add('Ativar modo PDV', async () => {
+                        try {
+                            await chamarTerminaisPoint({ acao: 'pdv', deviceId: dv.id });
+                            alert('Modo PDV ativado. Reinicie a máquina para aplicar.');
+                            listarTerminaisPoint();
+                        } catch (err) { alert('Não consegui ativar o modo PDV: ' + err.message); }
+                    }, 'btn-cinza');
+                }
+                box.appendChild(linha);
+            });
+        } catch (err) {
+            box.textContent = '❌ ' + err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     async function carregarPagamentos() {
         try {
             const snap = await DOC_PAGAMENTOS.get();
             const d = snap.exists ? (snap.data() || {}) : {};
-            $('pag-point-device').value = d.pointDeviceId || '';
+            $('pag-point-device').value = d.pointDeviceIdCaixa || d.pointDeviceId || '';
+            $('pag-point-device-totem').value = d.pointDeviceIdTotem || '';
+            $('pag-point-tipo').value = d.pointTipoCartao || 'credito';
             $('pag-stone-serial').value = d.stoneDeviceSerial || '';
             $('pag-stone-code').value = d.stoneCode || '';
             $('pag-stone-referer').value = d.stoneServiceRefererName || '';
@@ -311,6 +379,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 maquininhaAtiva,
                 provedorCartao: $('pag-provedor').value,
                 pointDeviceId: $('pag-point-device').value.trim(),
+                pointDeviceIdCaixa: $('pag-point-device').value.trim(),
+                pointDeviceIdTotem: $('pag-point-device-totem').value.trim(),
+                pointTipoCartao: $('pag-point-tipo').value,
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
             flash('Configuracoes de pagamento salvas.');

@@ -496,6 +496,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const FUNCTIONS_BASE_URL = (window.__CLIENT_CONFIG__ || {}).functionsBaseUrl;
     const CRIAR_COBRANCA_POINT_URL = FUNCTIONS_BASE_URL + "/criarCobrancaPoint";
     const CRIAR_COBRANCA_STONE_URL = FUNCTIONS_BASE_URL + "/criarCobrancaStone";
+    const CANCELAR_COBRANCA_POINT_URL = FUNCTIONS_BASE_URL + "/cancelarCobrancaPoint";
     let provedorPagamentoCartao = "mercadopago";
     let maquininhaAtiva = true;
     db.collection('configuracoes').doc('pagamentos').onSnapshot(snap => {
@@ -596,6 +597,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Faixa fixa com "Cancelar cobrança" enquanto a Point espera o cartão — sem ela,
+    // se o cliente desiste a cobrança fica pendurada na máquina. Devolve a função que remove a faixa.
+    function mostrarAvisoCartaoPendente(pedidoId, total) {
+        let wrap = document.getElementById('cartao-pendentes');
+        if (!wrap) {
+            wrap = document.createElement('div');
+            wrap.id = 'cartao-pendentes';
+            wrap.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;';
+            document.body.appendChild(wrap);
+        }
+        const item = document.createElement('div');
+        item.style.cssText = 'background:#2c3e50;color:#fff;padding:10px 14px;border-radius:10px;display:flex;align-items:center;gap:12px;box-shadow:0 4px 14px rgba(0,0,0,.3);';
+        const txt = document.createElement('span');
+        txt.textContent = `💳 Aguardando cartão na maquininha • ${money(total)}`;
+        const btn = document.createElement('button');
+        btn.textContent = 'Cancelar cobrança';
+        btn.style.cssText = 'background:#e74c3c;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;';
+        btn.addEventListener('click', async () => {
+            if (!confirm('Cancelar a cobrança na maquininha?')) return;
+            btn.disabled = true;
+            try {
+                const user = firebase.auth().currentUser;
+                if (!user) throw new Error('Sessão expirada. Entre novamente no sistema.');
+                const resp = await fetch(CANCELAR_COBRANCA_POINT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
+                    body: JSON.stringify({ pedidoId })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok) throw new Error(data.message || `erro ${resp.status}`);
+                if (data.cancelado === false) flash('A cobrança já havia sido finalizada.');
+            } catch (err) {
+                alert('Não consegui cancelar a cobrança: ' + err.message);
+                btn.disabled = false;
+            }
+        });
+        item.append(txt, btn);
+        wrap.appendChild(item);
+        return () => { item.remove(); if (!wrap.children.length) wrap.remove(); };
+    }
+
     // Venda no Cartão via maquininha física (Point/Mercado Pago ou Stone): dispara a
     // cobrança no terminal e só grava a venda como concluída quando o pagamento é
     // confirmado (webhook do backend atualiza o pedido). Não trava a tela esperando —
@@ -623,6 +665,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     amount: total,
                     externalReference: pedidoRef.id,
+                    terminal: 'caixa',
                     description: `Pedido balcão ${pedidoRef.id.slice(0, 6)}`
                 })
             });
@@ -680,10 +723,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Observa o pedido até a confirmação (ou cancelamento) chegar pelo webhook,
         // para então dar baixa no estoque e emitir a NFC-e — só uma vez.
+        const removerAviso = nomeProvedor === 'Point' ? mostrarAvisoCartaoPendente(pedidoRef.id, total) : () => {};
         const unsub = pedidoRef.onSnapshot(snap => {
             const d = snap.data();
             if (!d || d.status === 'AGUARDANDO_CARTAO') return;
             unsub();
+            removerAviso();
             if (d.status === 'CANCELADO_PAGAMENTO') {
                 flash(`❌ Pagamento no cartão não aprovado (pedido ${pedidoRef.id.slice(0, 6)})`);
                 return;
