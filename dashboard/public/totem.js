@@ -1,7 +1,8 @@
 // Totem de autoatendimento — tela cheia, sem login, pensado pra rodar em
 // Chrome kiosk mode (--kiosk --kiosk-printing) num Windows com impressora
 // térmica configurada como padrão. Cliente monta o pedido, confirma, recebe
-// uma senha (impressa + na tela) e paga no caixa — o pedido entra como
+// uma senha (impressa + na tela) e escolhe como pagar: cartão (maquininha
+// Point do totem), PIX (QR Code na tela) ou no caixa — este último entra como
 // AGUARDANDO_PAGAMENTO, igual às comandas de mesa já funcionam hoje.
 document.addEventListener('DOMContentLoaded', () => {
     const firebaseConfig = window.__FIREBASE_CONFIG__;
@@ -273,48 +274,223 @@ document.addEventListener('DOMContentLoaded', () => {
     $('fechar-carrinho').addEventListener('click', () => $('overlay-carrinho').classList.remove('aberto'));
     $('btn-continuar-comprando').addEventListener('click', () => $('overlay-carrinho').classList.remove('aberto'));
 
-    // ---------- Confirmar pedido ----------
-    $('btn-confirmar-pedido').addEventListener('click', async () => {
+    // ---------- Confirmar pedido -> forma de pagamento ----------
+    const FUNCTIONS_BASE_URL = (window.__CLIENT_CONFIG__ || {}).functionsBaseUrl;
+    const TEMPO_ESPERA_CARTAO_MS = 180000;
+    const TEMPO_ESPERA_PIX_MS = 240000;
+    let pagando = false;       // true enquanto espera cartão/PIX — segura o reset por inatividade
+    let senhaAtual = null;     // reaproveitada se o cliente trocar de forma de pagamento
+    let aguardaUnsub = null;
+    let aguardaTimer = null;
+    let aguardaCtx = null;     // { pedidoId, tipo: 'CARTAO' | 'PIX' } do pagamento em andamento
+
+    $('btn-confirmar-pedido').addEventListener('click', () => {
         if (!carrinho.length) return;
-        const btn = $('btn-confirmar-pedido');
-        btn.disabled = true;
-        btn.textContent = 'Enviando...';
-        try {
-            const senha = await proximaSenha();
-            const itensPedido = carrinho.map(i => ({
-                id: i.id,
-                nome: i.qtd > 1 ? `${i.qtd}x ${i.nome}` : i.nome,
-                nome_exibicao: i.nome_exibicao,
-                quantidade: i.qtd,
-                preco_unitario: i.preco,
-                preco: i.preco * i.qtd
-            }));
-            const valorTotal = totalCarrinho();
-            const agora = new Date();
-
-            await COL_PEDIDOS.add({
-                origem: 'TOTEM',
-                senha,
-                itens: itensPedido,
-                nome_cliente: `Totem #${senha}`,
-                tipo_entrega: 'RETIRADA',
-                tipo_consumo: tipoConsumo || 'RETIRADA',
-                endereco: 'Retirada no balcão',
-                forma_pagamento: null,
-                valor_total: valorTotal,
-                status: 'AGUARDANDO_PAGAMENTO',
-                hora_pedido: firebase.firestore.FieldValue.serverTimestamp(),
-                data_formatada: agora.toLocaleString('pt-BR')
-            });
-
-            mostrarConfirmacao(senha, itensPedido, valorTotal);
-        } catch (err) {
-            alert('Não foi possível enviar o pedido: ' + err.message);
-        } finally {
-            btn.disabled = false;
-            btn.textContent = 'Confirmar pedido';
-        }
+        $('overlay-carrinho').classList.remove('aberto');
+        abrirTelaPagamento('');
     });
+
+    function abrirTelaPagamento(aviso) {
+        $('pag-total').textContent = money(totalCarrinho());
+        $('pag-aviso').textContent = aviso;
+        $('pag-aviso').style.display = aviso ? '' : 'none';
+        $('tela-aguarda-pag').classList.remove('aberta');
+        $('tela-pagamento').classList.add('aberta');
+    }
+
+    $('btn-pag-voltar').addEventListener('click', () => {
+        $('tela-pagamento').classList.remove('aberta');
+        $('overlay-carrinho').classList.add('aberto');
+    });
+
+    document.querySelectorAll('#tela-pagamento .opcao').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const forma = btn.dataset.forma;
+            document.querySelectorAll('#tela-pagamento .opcao').forEach(b => { b.disabled = true; });
+            try {
+                if (forma === 'CAIXA') await pagarNoCaixa();
+                else if (forma === 'CARTAO') await pagarCartao();
+                else if (forma === 'PIX') await pagarPix();
+            } finally {
+                document.querySelectorAll('#tela-pagamento .opcao').forEach(b => { b.disabled = false; });
+            }
+        });
+    });
+
+    function itensDoPedido() {
+        return carrinho.map(i => ({
+            id: i.id,
+            nome: i.qtd > 1 ? `${i.qtd}x ${i.nome}` : i.nome,
+            nome_exibicao: i.nome_exibicao,
+            quantidade: i.qtd,
+            preco_unitario: i.preco,
+            preco: i.preco * i.qtd
+        }));
+    }
+
+    function dadosBasePedido(senha, itens, valorTotal) {
+        return {
+            origem: 'TOTEM',
+            senha,
+            itens,
+            nome_cliente: `Totem #${senha}`,
+            tipo_entrega: 'RETIRADA',
+            tipo_consumo: tipoConsumo || 'RETIRADA',
+            endereco: 'Retirada no balcão',
+            valor_total: valorTotal,
+            hora_pedido: firebase.firestore.FieldValue.serverTimestamp(),
+            data_formatada: new Date().toLocaleString('pt-BR')
+        };
+    }
+
+    async function obterSenha() {
+        if (senhaAtual == null) senhaAtual = await proximaSenha();
+        return senhaAtual;
+    }
+
+    async function chamarFunction(nome, corpo) {
+        const resp = await fetch(`${FUNCTIONS_BASE_URL}/${nome}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(corpo)
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.message || data.error || `erro ${resp.status}`);
+        return data;
+    }
+
+    // Pagar no caixa: comportamento original — pedido fica AGUARDANDO_PAGAMENTO.
+    async function pagarNoCaixa() {
+        try {
+            const senha = await obterSenha();
+            const itens = itensDoPedido();
+            const total = totalCarrinho();
+            await COL_PEDIDOS.add({
+                ...dadosBasePedido(senha, itens, total),
+                forma_pagamento: null,
+                status: 'AGUARDANDO_PAGAMENTO'
+            });
+            mostrarConfirmacao(senha, itens, total, null);
+        } catch (err) {
+            abrirTelaPagamento('Não foi possível enviar o pedido: ' + err.message);
+        }
+    }
+
+    async function pagarCartao() {
+        const total = totalCarrinho();
+        const itens = itensDoPedido();
+        const pedidoRef = COL_PEDIDOS.doc();
+        mostrarAguarda('Pagamento no cartão', 'Preparando a maquininha...', null, total, false);
+        try {
+            const senha = await obterSenha();
+            const cobranca = await chamarFunction('criarCobrancaPoint', {
+                terminal: 'totem',
+                amount: total,
+                externalReference: pedidoRef.id,
+                description: `Totem #${senha}`
+            });
+            if (!cobranca.id) throw new Error('Resposta inesperada da maquininha.');
+            await pedidoRef.set({
+                ...dadosBasePedido(senha, itens, total),
+                forma_pagamento: 'Cartão',
+                status: 'AGUARDANDO_CARTAO',
+                status_pos_pagamento: 'PENDENTE_PREPARO',
+                pagamento_id: cobranca.id
+            });
+            mostrarAguarda('Pagamento no cartão', 'Insira, aproxime ou passe o cartão na maquininha.', null, total, true);
+            aguardarResultado(pedidoRef, senha, itens, total, 'CARTAO', TEMPO_ESPERA_CARTAO_MS);
+        } catch (err) {
+            console.warn('totem cartão:', err.message);
+            pagando = false;
+            abrirTelaPagamento('Não foi possível acionar a maquininha. Escolha outra forma de pagamento.');
+        }
+    }
+
+    async function pagarPix() {
+        const total = totalCarrinho();
+        const itens = itensDoPedido();
+        const pedidoRef = COL_PEDIDOS.doc();
+        mostrarAguarda('Pagamento por PIX', 'Gerando o QR Code...', null, total, false);
+        try {
+            const senha = await obterSenha();
+            const pay = await chamarFunction('processarPagamentoDireto', {
+                item: { total: total.toFixed(2), title: `Pedido totem #${senha}` },
+                nome: 'Cliente Totem'
+            });
+            const dados = pay.point_of_interaction && pay.point_of_interaction.transaction_data;
+            if (!pay.id || !dados || !dados.qr_code_base64) throw new Error('PIX sem QR Code na resposta.');
+            await pedidoRef.set({
+                ...dadosBasePedido(senha, itens, total),
+                forma_pagamento: 'PIX',
+                status: 'AGUARDANDO_PIX',
+                pagamento_id: pay.id,
+                pix_copia_cola: dados.qr_code || null
+            });
+            mostrarAguarda('Pagamento por PIX', 'Abra o app do seu banco, escolha pagar com PIX e leia o QR Code.', dados.qr_code_base64, total, true);
+            aguardarResultado(pedidoRef, senha, itens, total, 'PIX', TEMPO_ESPERA_PIX_MS);
+        } catch (err) {
+            console.warn('totem pix:', err.message);
+            pagando = false;
+            abrirTelaPagamento('Não foi possível gerar o PIX. Escolha outra forma de pagamento.');
+        }
+    }
+
+    function mostrarAguarda(titulo, msg, qrBase64, total, podeCancelar) {
+        pagando = true;
+        $('aguarda-titulo').textContent = titulo;
+        $('aguarda-msg').textContent = msg;
+        $('aguarda-total').textContent = money(total);
+        const img = $('pix-qr');
+        if (qrBase64) { img.src = 'data:image/png;base64,' + qrBase64; img.style.display = ''; }
+        else { img.removeAttribute('src'); img.style.display = 'none'; }
+        $('btn-cancelar-pag').style.display = podeCancelar ? '' : 'none';
+        $('btn-cancelar-pag').disabled = false;
+        $('tela-pagamento').classList.remove('aberta');
+        $('tela-aguarda-pag').classList.add('aberta');
+    }
+
+    function encerrarAguarda() {
+        if (aguardaUnsub) { aguardaUnsub(); aguardaUnsub = null; }
+        clearTimeout(aguardaTimer);
+        aguardaTimer = null;
+        aguardaCtx = null;
+        pagando = false;
+    }
+
+    // Observa o pedido até o webhook (Point ou PIX) aprovar ou o pagamento ser cancelado.
+    function aguardarResultado(pedidoRef, senha, itens, total, tipo, tempoMs) {
+        encerrarAguarda();
+        pagando = true;
+        aguardaCtx = { pedidoId: pedidoRef.id, tipo };
+        aguardaUnsub = pedidoRef.onSnapshot(snap => {
+            const d = snap.data();
+            if (!d || d.status === 'AGUARDANDO_CARTAO' || d.status === 'AGUARDANDO_PIX') return;
+            encerrarAguarda();
+            if (d.status === 'PENDENTE_PREPARO' || d.status === 'CONCLUIDO') {
+                mostrarConfirmacao(senha, itens, total, tipo);
+            } else {
+                abrirTelaPagamento(d.gateway_state === 'CANCELED_BY_OPERATOR' || d.gateway_state === 'CANCELLED_BY_TOTEM'
+                    ? '' : 'O pagamento não foi concluído. Tente novamente ou escolha outra forma.');
+            }
+        }, err => console.error('totem: erro ao observar pagamento', err));
+        aguardaTimer = setTimeout(() => cancelarPagamentoEmAndamento(), tempoMs);
+    }
+
+    async function cancelarPagamentoEmAndamento() {
+        if (!aguardaCtx) return;
+        const { pedidoId, tipo } = aguardaCtx;
+        $('btn-cancelar-pag').disabled = true;
+        try {
+            await chamarFunction(tipo === 'PIX' ? 'cancelarPixTotem' : 'cancelarCobrancaPoint', { pedidoId });
+            // O snapshot do pedido (CANCELADO_PAGAMENTO) leva de volta à escolha de pagamento.
+            // Se já tinha sido pago (cancelado:false), o snapshot leva à confirmação.
+        } catch (err) {
+            console.warn('totem: falha ao cancelar pagamento', err.message);
+            $('aguarda-msg').textContent = 'Não consegui cancelar agora. Aguarde um instante ou chame um atendente.';
+            $('btn-cancelar-pag').disabled = false;
+        }
+    }
+    $('btn-cancelar-pag').addEventListener('click', cancelarPagamentoEmAndamento);
 
     // Contador de senha: reinicia todo dia (chave = data de hoje), transação
     // atômica pra não repetir número se dois clientes confirmarem junto.
@@ -330,18 +506,24 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function mostrarConfirmacao(senha, itens, total) {
+    function mostrarConfirmacao(senha, itens, total, pago) {
         $('overlay-carrinho').classList.remove('aberto');
+        $('tela-pagamento').classList.remove('aberta');
+        $('tela-aguarda-pag').classList.remove('aberta');
         $('senha-numero').textContent = String(senha).padStart(3, '0');
+        $('conf-msg').textContent = pago
+            ? 'Pagamento aprovado! Guarde essa senha e aguarde ser chamado. Seu pedido já foi para a cozinha.'
+            : 'Guarde essa senha e dirija-se ao caixa para efetuar o pagamento. Seu pedido vai para a cozinha assim que o pagamento for confirmado.';
         $('tela-confirmacao').classList.add('aberta');
-        montarCupom(senha, itens, total);
+        senhaAtual = null;
+        montarCupom(senha, itens, total, pago);
         // kiosk-printing (Chrome --kiosk --kiosk-printing) imprime direto,
         // sem diálogo. Em navegador normal abre o diálogo de impressão —
         // funciona igual, só precisa confirmar manualmente nesse caso.
         setTimeout(() => window.print(), 300);
     }
 
-    function montarCupom(senha, itens, total) {
+    function montarCupom(senha, itens, total, pago) {
         const linhas = itens.map(i =>
             `<div class="linha"><span>${escapeHtml(i.nome)}</span><span>${money(i.preco)}</span></div>`
         ).join('');
@@ -355,13 +537,14 @@ document.addEventListener('DOMContentLoaded', () => {
             <hr>
             <div class="linha total"><span>TOTAL</span><span>${money(total)}</span></div>
             <hr>
-            <div style="text-align:center">Pague no caixa e aguarde sua senha</div>
+            <div style="text-align:center">${pago ? 'PAGO (' + (pago === 'PIX' ? 'PIX' : 'cartão') + ') — aguarde sua senha' : 'Pague no caixa e aguarde sua senha'}</div>
             <div style="text-align:center">${new Date().toLocaleString('pt-BR')}</div>
         `;
     }
 
     $('btn-novo-pedido').addEventListener('click', () => {
         carrinho = [];
+        senhaAtual = null;
         categoriaAtiva = 'Todos';
         atualizarBarraCarrinho();
         renderCategorias();
@@ -392,7 +575,10 @@ document.addEventListener('DOMContentLoaded', () => {
         clearTimeout(inatividadeTimer);
         if ($('tela-boas-vindas').classList.contains('aberta')) return;
         inatividadeTimer = setTimeout(() => {
+            if (pagando) return; // esperando cartão/PIX: o próprio pagamento tem timeout
             carrinho = [];
+            senhaAtual = null;
+            $('tela-pagamento').classList.remove('aberta');
             categoriaAtiva = 'Todos';
             atualizarBarraCarrinho();
             renderCategorias();

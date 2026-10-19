@@ -84,7 +84,7 @@ export const processarPagamentoDireto = onRequest(
             transaction_amount: parseFloat(item.total),
             description: item.title,
             payer: {
-                email: email,
+                email: email || clientConfig.emailClienteBalcao, // totem não coleta e-mail
                 first_name: nome || "Cliente",
                 identification: {
                     type: "CPF",
@@ -216,7 +216,6 @@ export const cancelarCobrancaPoint = onRequest(
     if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
 
     try {
-        await exigirUsuario(req);
         const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
         if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
 
@@ -227,6 +226,8 @@ export const cancelarCobrancaPoint = onRequest(
         const pedidoSnap = await pedidoRef.get();
         if (!pedidoSnap.exists) return res.status(404).json({ message: "Pedido não encontrado." });
         const pedido = pedidoSnap.data();
+        // O totem não tem login (cliente cancela sozinho); pedido de balcão exige usuário logado.
+        if (pedido.origem !== 'TOTEM') await exigirUsuario(req);
         if (pedido.status !== 'AGUARDANDO_CARTAO' || !pedido.pagamento_id) {
             return res.status(409).json({ message: "Este pedido não está aguardando pagamento no cartão." });
         }
@@ -256,6 +257,57 @@ export const cancelarCobrancaPoint = onRequest(
     } catch (error) {
         console.error("Erro ao cancelar cobrança Point:", error.response?.data || error.message);
         return res.status(error.status || error.response?.status || 500).json(error.response?.data || { message: error.message });
+    }
+});
+
+// Cancela o PIX de um pedido do totem que o cliente abandonou, para o QR code não
+// poder mais ser pago depois (dinheiro entrando sem pedido na cozinha).
+export const cancelarPixTotem = onRequest(
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN] },
+    async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type');
+        return res.status(204).send('');
+    }
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
+
+    try {
+        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
+        if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
+
+        const pedidoId = String(req.body?.pedidoId || '').trim();
+        if (!pedidoId) return res.status(400).json({ message: "Informe pedidoId." });
+        const pedidoRef = db.collection('pedidos').doc(pedidoId);
+        const pedidoSnap = await pedidoRef.get();
+        const pedido = pedidoSnap.data();
+        if (!pedido || pedido.origem !== 'TOTEM' || pedido.status !== 'AGUARDANDO_PIX' || !pedido.pagamento_id) {
+            return res.status(409).json({ message: "Este pedido não está aguardando PIX no totem." });
+        }
+
+        try {
+            await axios.put(
+                `https://api.mercadopago.com/v1/payments/${pedido.pagamento_id}`,
+                { status: 'cancelled' },
+                { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
+            );
+        } catch (err) {
+            // Se o MP recusou, o PIX provavelmente foi pago agora — deixa o webhook seguir.
+            console.warn('Cancelar PIX do totem recusado:', err.response?.data || err.message);
+            return res.status(200).json({ cancelado: false });
+        }
+
+        const cancelou = await db.runTransaction(async tx => {
+            const atual = await tx.get(pedidoRef);
+            if (atual.data()?.status !== 'AGUARDANDO_PIX') return false;
+            tx.update(pedidoRef, { status: 'CANCELADO_PAGAMENTO', gateway_state: 'CANCELLED_BY_TOTEM' });
+            return true;
+        });
+        return res.status(200).json({ cancelado: cancelou });
+    } catch (error) {
+        console.error("Erro ao cancelar PIX do totem:", error.response?.data || error.message);
+        return res.status(error.response?.status || 500).json(error.response?.data || { message: error.message });
     }
 });
 

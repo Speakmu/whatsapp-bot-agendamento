@@ -322,6 +322,23 @@
         .tela-confirmacao p { color: #7f8c8d; font-size: 1.1rem; max-width: 440px; }
         .tela-confirmacao .btn-primario { max-width: 320px; margin-top: 12px; }
 
+        /* ---------- Forma de pagamento / aguardando ---------- */
+        .tela-pagamento .opcoes-pag { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+        .tela-pagamento .opcao {
+            width: 220px; padding: 36px 20px; border-radius: 22px;
+            border: 2px solid #e1e5ea; background: #fff; cursor: pointer;
+            display: flex; flex-direction: column; align-items: center; gap: 12px;
+        }
+        .tela-pagamento .opcao:active { transform: scale(.97); }
+        .tela-pagamento .opcao .icone { font-size: 3rem; }
+        .tela-pagamento .opcao .rotulo { font-size: 1.15rem; font-weight: 800; color: #2c3e50; }
+        .tela-pagamento .voltar {
+            background: none; border: none; color: #7f8c8d; font-size: .95rem;
+            font-weight: 700; cursor: pointer; text-decoration: underline;
+        }
+        .total-pag { font-size: 1.8rem; font-weight: 900; color: var(--marca); }
+        .aviso-pag { color: #c0392b !important; font-weight: 700; }
+
         /* ---------- Cupom impresso ---------- */
         #cupom-impressao { display: none; }
         @media print {
@@ -428,12 +445,34 @@
         </div>
     </div>
 
+    <!-- Tela: forma de pagamento -->
+    <div class="tela-confirmacao tela-pagamento" id="tela-pagamento">
+        <h2>Como deseja pagar?</h2>
+        <div class="total-pag" id="pag-total"></div>
+        <p class="aviso-pag" id="pag-aviso" style="display:none"></p>
+        <div class="opcoes-pag">
+            <button class="opcao" type="button" data-forma="CARTAO"><span class="icone">💳</span><span class="rotulo">Cartão</span></button>
+            <button class="opcao" type="button" data-forma="PIX"><span class="icone">📱</span><span class="rotulo">PIX</span></button>
+            <button class="opcao" type="button" data-forma="CAIXA"><span class="icone">💵</span><span class="rotulo">Pagar no caixa</span></button>
+        </div>
+        <button class="voltar" id="btn-pag-voltar" type="button">← Voltar ao pedido</button>
+    </div>
+
+    <!-- Tela: aguardando cartão / PIX -->
+    <div class="tela-confirmacao" id="tela-aguarda-pag">
+        <h2 id="aguarda-titulo"></h2>
+        <img id="pix-qr" alt="QR Code PIX" style="display:none;width:280px;height:280px;">
+        <div class="total-pag" id="aguarda-total"></div>
+        <p id="aguarda-msg"></p>
+        <button class="btn btn-secundario" id="btn-cancelar-pag" type="button" style="max-width:320px">Cancelar pagamento</button>
+    </div>
+
     <!-- Tela final: senha -->
     <div class="tela-confirmacao" id="tela-confirmacao">
         <div class="check">✅</div>
         <h2>Pedido confirmado!</h2>
         <div class="senha-numero" id="senha-numero">000</div>
-        <p>Guarde essa senha e dirija-se ao caixa para efetuar o pagamento. Seu pedido vai para a cozinha assim que o pagamento for confirmado.</p>
+        <p id="conf-msg">Guarde essa senha e dirija-se ao caixa para efetuar o pagamento. Seu pedido vai para a cozinha assim que o pagamento for confirmado.</p>
         <button class="btn btn-primario" id="btn-novo-pedido">Fazer novo pedido</button>
     </div>
 
