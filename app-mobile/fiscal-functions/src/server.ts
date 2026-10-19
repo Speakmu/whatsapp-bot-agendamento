@@ -33,6 +33,7 @@ import { prewarmAliquotas } from './ibpt-store';
 import { registroXmlDaNota } from './xml-enviado';
 import { conciliarNotasDoPedido } from './conciliar';
 import { sincronizarDfeServidor, recuperarNsusServidor } from './dfe-sync';
+import { emitirNfceComClassificacao } from './classificacao-fiscal';
 
 const PORT = parseInt(process.env.PORT || '4000', 10);
 const API_KEY = process.env.API_KEY || '';
@@ -180,7 +181,7 @@ app.post('/fiscal/nfce/avulsa', auth, async (req, res) => {
     if (!payload?.emitter?.cnpj) return res.status(400).json({ error: 'Emitente (CNPJ) ausente.' });
     if (!payload.items?.length) return res.status(400).json({ error: 'Nenhum item informado.' });
     const cert = await exigirCert(res); if (!cert) return;
-    const result = await emitirNfceAvulsa(payload, cert, payload.notaId ? registroXmlDaNota(String(payload.notaId)) : undefined);
+    const result = await emitirNfceComClassificacao(payload, cert, payload.notaId ? registroXmlDaNota(String(payload.notaId)) : undefined);
     const httpStatus = (result.status === 'AUTORIZADA' || result.status === 'CONTINGENCIA') ? 200 : 422;
     res.status(httpStatus).json(result);
   } catch (err: any) {

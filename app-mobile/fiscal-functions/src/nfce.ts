@@ -49,6 +49,7 @@ const UF_CODIGO: Record<string, string> = {
 
 export interface AvulsaItem {
   cProd?: string;
+  produtoId?: string; // id do produto no cardápio — liga o item à classificação fiscal dele (classificacao-fiscal.ts)
   xProd: string;
   ncm: string;
   cfop: string;

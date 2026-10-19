@@ -23,6 +23,7 @@ import {
 } from './nfce';
 import { carregarCertificado } from './cert-store';
 import { conciliarNotasDoPedido, auditarDuplicidades, completarXmlsFaltantes } from './conciliar';
+import { emitirNfceComClassificacao } from './classificacao-fiscal';
 import { registroXmlDaNota } from './xml-enviado';
 import { msEmProcessamento, podeGravarResultado, xmlAutorizado, xmlsDaNota } from './regras-fiscais';
 import { nfeProcDe } from './xml-proc';
@@ -60,6 +61,7 @@ function itensDoPedido(pedido: any, cfg: any) {
   const lista = pedido.itens || [];
   const items = (Array.isArray(lista) && lista.length)
     ? lista.map((i: any) => ({
+      produtoId: i.id,
       xProd: i.nome_exibicao || i.nome || 'Item',
       ncm: i.ncm || cfg.ncm,
       cfop: i.cfop || cfg.cfop,
@@ -302,7 +304,7 @@ async function emitirParaPedidoComTravaAdquirida(pedidoId: string, pedido: any, 
   });
 
   try {
-    const resultado = await emitirNfceAvulsa(payload, cert, registroXmlDaNota(ref.id));
+    const resultado = await emitirNfceComClassificacao(payload, cert, registroXmlDaNota(ref.id));
     await gravarResultado(ref, resultado, payload);
   } catch (err: any) {
     // Rejeição/erro da SEFAZ (não falta de rede, já que estamos no servidor) —
@@ -324,7 +326,7 @@ async function reemitirNotaComErroDeRede(
   });
   if (!payload) return;
   try {
-    const resultado = await emitirNfceAvulsa(payload, cert, registroXmlDaNota(ref.id));
+    const resultado = await emitirNfceComClassificacao(payload, cert, registroXmlDaNota(ref.id));
     await gravarResultado(ref, resultado, payload);
   } catch (err: any) {
     await ref.update({ status: 'ERRO_REDE', motivo: err?.message || String(err), payload_pendente: payload });

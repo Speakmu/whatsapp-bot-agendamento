@@ -374,3 +374,30 @@ test('numero informado no pedido tem prioridade; sem numero em lugar nenhum vai 
   await emitirNfceAvulsa(entregaComCpf({ xLgr: 'Rua das Flores' }), cert);
   assert.equal(chamadas.authorize[0][0].match(/<enderDest>[\s\S]*?<nro>([^<]*)<\/nro>/)[1], 'S/N');
 });
+
+// ------------------------------------------- classificação fiscal por item (CFOP 5405)
+
+test('XML da nota sai com o CFOP/CSOSN/NCM de cada produto: refrigerante 5405/500, salgado 5102/102', async () => {
+  const { aplicarClassificacao } = require('../dist/classificacao-fiscal');
+  const cert = certDeTeste();
+  const chamadas = sefazFalsa({ authorize: (xml) => protocolo((xml.match(/Id="NFe(\d{44})"/))[1], digestDe(xml)) });
+  const padraoFiscal = { ncm: '19059090', cfop: '5102', csosn: '102', origem: '0' };   // o que o painel manda hoje para TODO item
+  const items = [
+    { produtoId: 'sal1', xProd: 'Coxinha', qCom: 2, vUnCom: 6, ...padraoFiscal },
+    { produtoId: 'ref1', xProd: 'Coca cola 220ml', qCom: 1, vUnCom: 4, ...padraoFiscal },
+  ];
+  aplicarClassificacao(items, [
+    { id: 'sal1', nome: 'coxinha', cfop: '5102', csosn: '102', ncm: '19059090', origem: '0' },
+    { id: 'ref1', nome: 'coca cola 220ml', cfop: '5405', csosn: '500', ncm: '22021000', origem: '0' },
+  ]);
+  const res = await emitirNfceAvulsa(pedidoDeTeste({ items, payment: { tPag: '17', vPag: 16 } }), cert);
+  assert.equal(res.status, 'AUTORIZADA');
+  const xml = chamadas.authorize[0][0];
+  const dets = xml.match(/<det nItem="\d+">[\s\S]*?<\/det>/g);
+  assert.equal(dets.length, 2);
+  assert.match(dets[0], /<NCM>19059090<\/NCM><CFOP>5102<\/CFOP>/);
+  assert.match(dets[0], /<ICMSSN102><orig>0<\/orig><CSOSN>102<\/CSOSN><\/ICMSSN102>/);
+  assert.match(dets[1], /<NCM>22021000<\/NCM><CFOP>5405<\/CFOP>/);
+  assert.match(dets[1], /<ICMSSN500><orig>0<\/orig><CSOSN>500<\/CSOSN><\/ICMSSN500>/);
+  assert.equal([...xml.matchAll(/<CFOP>(\d+)<\/CFOP>/g)].map((m) => m[1]).join(','), '5102,5405');
+});

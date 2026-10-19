@@ -37,6 +37,8 @@
         const lista = pedido.itens || [];
         const items = (Array.isArray(lista) && lista.length)
             ? lista.map(i => ({
+                // id do produto no cardapio: o servidor usa para aplicar NCM/CFOP/CSOSN do cadastro
+                produtoId: i.id,
                 xProd: i.nome_exibicao || i.nome || 'Item',
                 ncm: i.ncm || cfg.ncm,
                 cfop: i.cfop || cfg.cfop,
