@@ -499,10 +499,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const CANCELAR_COBRANCA_POINT_URL = FUNCTIONS_BASE_URL + "/cancelarCobrancaPoint";
     let provedorPagamentoCartao = "mercadopago";
     let maquininhaAtiva = true;
+    let pointTipoCartao = "credito";
+
+    // A Point exige o tipo do cartão na cobrança. Com a config "quem cobra escolhe",
+    // pergunta ao operador antes de acionar a máquina. Devolve 'credito', 'debito' ou null (desistiu).
+    function escolherTipoCartao() {
+        return new Promise(resolve => {
+            const fundo = document.createElement('div');
+            fundo.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center;';
+            const caixa = document.createElement('div');
+            caixa.style.cssText = 'background:#fff;border-radius:14px;padding:22px;min-width:280px;text-align:center;box-shadow:0 8px 30px rgba(0,0,0,.35);';
+            const titulo = document.createElement('div');
+            titulo.textContent = 'Cartão de crédito ou débito?';
+            titulo.style.cssText = 'font-weight:800;font-size:1.1rem;margin-bottom:16px;color:#2c3e50;';
+            caixa.appendChild(titulo);
+            const fechar = valor => { fundo.remove(); resolve(valor); };
+            [['Crédito', 'credito', '#2c3e50'], ['Débito', 'debito', '#2980b9'], ['Cancelar', null, '#95a5a6']].forEach(([rotulo, valor, cor]) => {
+                const b = document.createElement('button');
+                b.textContent = rotulo;
+                b.style.cssText = `display:block;width:100%;margin-top:8px;padding:12px;border:none;border-radius:9px;color:#fff;font-weight:700;font-size:1rem;cursor:pointer;background:${cor};`;
+                b.addEventListener('click', () => fechar(valor));
+                caixa.appendChild(b);
+            });
+            fundo.appendChild(caixa);
+            document.body.appendChild(fundo);
+        });
+    }
     db.collection('configuracoes').doc('pagamentos').onSnapshot(snap => {
         const d = snap.exists ? snap.data() : null;
         provedorPagamentoCartao = d?.provedorCartao || "mercadopago";
         maquininhaAtiva = d?.maquininhaAtiva !== false;
+        pointTipoCartao = d?.pointTipoCartao || "credito";
     }, err => console.warn('Erro ao ler provedor de pagamento:', err.message));
 
     // Só usa o nome digitado se a caixinha "Identificar cliente" estiver
@@ -643,6 +670,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // confirmado (webhook do backend atualiza o pedido). Não trava a tela esperando —
     // o caixa pode ver o status "Aguardando pagamento..." e o resultado chega sozinho.
     async function finalizarVendaCartaoMaquininha(criarCobrancaUrl, nomeProvedor) {
+        let tipoCartao = null;
+        if (nomeProvedor === 'Point' && pointTipoCartao === 'escolher') {
+            tipoCartao = await escolherTipoCartao();
+            if (!tipoCartao) return; // operador desistiu — nada foi enviado à máquina
+        }
         const btn = $('btn-finalizar');
         btn.disabled = true;
         btn.textContent = 'Aguardando pagamento na maquininha...';
@@ -666,6 +698,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     amount: total,
                     externalReference: pedidoRef.id,
                     terminal: 'caixa',
+                    tipoCartao,
                     description: `Pedido balcão ${pedidoRef.id.slice(0, 6)}`
                 })
             });

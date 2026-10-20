@@ -141,13 +141,14 @@ function deviceIdPoint(cfg, terminal) {
     return String(id || '').trim();
 }
 
-// Tipo de cartão enviado ao terminal. Sem "type" a própria máquina pergunta
-// débito/crédito ao cliente. Parcelas ficam em 1x (a Point não deixa o cliente
-// escolher parcelamento via API de integração).
-function pagamentoPoint(cfg) {
-    const tipo = cfg.pointTipoCartao || 'credito'; // sem config = comportamento antigo (crédito 1x)
+// Tipo de cartão enviado ao terminal. A API da Point EXIGE payment.type (sem ele:
+// "payment: type is required"), então não dá para deixar a máquina perguntar.
+// Config 'escolher' = quem cobra escolhe antes (operador no caixa, cliente no totem)
+// e manda em "escolhido". Parcelas ficam em 1x (a API não deixa escolher parcelamento).
+function pagamentoPoint(cfg, escolhido) {
+    let tipo = cfg.pointTipoCartao || 'credito'; // sem config = comportamento antigo (crédito 1x)
+    if (tipo === 'escolher') tipo = escolhido === 'debito' ? 'debito' : 'credito';
     if (tipo === 'debito') return { type: 'debit_card' };
-    if (tipo === 'escolher') return {};
     return { type: 'credit_card', installments: 1, installments_cost: 'seller' };
 }
 
@@ -197,7 +198,7 @@ export const criarCobrancaPoint = onRequest(
             {
                 amount: amountCentavos,
                 description: description || `Pedido ${externalReference}`,
-                payment: pagamentoPoint(cfgPoint),
+                payment: pagamentoPoint(cfgPoint, req.body.tipoCartao),
                 additional_info: { external_reference: externalReference },
             },
             { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }

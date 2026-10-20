@@ -384,6 +384,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 pointTipoCartao: $('pag-point-tipo').value,
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
+            // Cópia pública só do tipo de cartão: o totem (sem login) precisa saber se
+            // pergunta crédito/débito ao cliente, e só lê app_config.
+            await db.collection('app_config').doc('geral').set({
+                pointTipoCartao: $('pag-point-tipo').value
+            }, { merge: true });
             flash('Configuracoes de pagamento salvas.');
         } catch (err) {
             alert('Erro ao salvar pagamentos: ' + err.message);

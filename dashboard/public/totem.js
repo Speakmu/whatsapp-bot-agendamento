@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let carrinho = []; // [{ id, nome, nome_exibicao, preco, categoria, qtd }]
     let nomeLoja = 'Autoatendimento';
     let tipoConsumo = null; // 'LOCAL' | 'RETIRADA' — escolhido na tela 2
+    let tipoCartaoPoint = 'credito'; // 'credito' | 'debito' | 'escolher' (config do painel)
 
     function money(v) {
         return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ',');
@@ -39,6 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
     DOC_APP_CFG.onSnapshot(snap => {
         const d = snap.exists ? (snap.data() || {}) : {};
         nomeLoja = d.nomeApp || 'Autoatendimento';
+        tipoCartaoPoint = d.pointTipoCartao || 'credito';
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
 
         const usaLogotipo = d.identidadeTipo === 'logo' && !!d.logoUrl;
@@ -376,7 +378,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // A Point exige o tipo do cartão. Com a config "escolher", o cliente decide aqui.
+    function perguntarTipoCartao() {
+        return new Promise(resolve => {
+            const tela = $('tela-tipo-cartao');
+            const btns = tela.querySelectorAll('.opcao');
+            const fechar = valor => {
+                tela.classList.remove('aberta');
+                btns.forEach(b => b.removeEventListener('click', aoEscolher));
+                $('btn-tipo-voltar').removeEventListener('click', aoVoltar);
+                resolve(valor);
+            };
+            const aoEscolher = e => fechar(e.currentTarget.dataset.tipo);
+            const aoVoltar = () => fechar(null);
+            btns.forEach(b => b.addEventListener('click', aoEscolher));
+            $('btn-tipo-voltar').addEventListener('click', aoVoltar);
+            $('tela-pagamento').classList.remove('aberta');
+            tela.classList.add('aberta');
+        });
+    }
+
     async function pagarCartao() {
+        let tipoCartao = null;
+        if (tipoCartaoPoint === 'escolher') {
+            tipoCartao = await perguntarTipoCartao();
+            if (!tipoCartao) { abrirTelaPagamento(''); return; }
+        }
         const total = totalCarrinho();
         const itens = itensDoPedido();
         const pedidoRef = COL_PEDIDOS.doc();
@@ -385,6 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const senha = await obterSenha();
             const cobranca = await chamarFunction('criarCobrancaPoint', {
                 terminal: 'totem',
+                tipoCartao,
                 amount: total,
                 externalReference: pedidoRef.id,
                 description: `Totem #${senha}`
@@ -579,6 +607,7 @@ document.addEventListener('DOMContentLoaded', () => {
             carrinho = [];
             senhaAtual = null;
             $('tela-pagamento').classList.remove('aberta');
+            $('tela-tipo-cartao').classList.remove('aberta');
             categoriaAtiva = 'Todos';
             atualizarBarraCarrinho();
             renderCategorias();

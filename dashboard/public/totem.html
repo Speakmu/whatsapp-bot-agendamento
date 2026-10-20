@@ -458,6 +458,16 @@
         <button class="voltar" id="btn-pag-voltar" type="button">← Voltar ao pedido</button>
     </div>
 
+    <!-- Tela: crédito ou débito (só quando a config pede) -->
+    <div class="tela-confirmacao tela-pagamento" id="tela-tipo-cartao">
+        <h2>Crédito ou débito?</h2>
+        <div class="opcoes-pag">
+            <button class="opcao" type="button" data-tipo="credito"><span class="icone">💳</span><span class="rotulo">Crédito</span></button>
+            <button class="opcao" type="button" data-tipo="debito"><span class="icone">🏧</span><span class="rotulo">Débito</span></button>
+        </div>
+        <button class="voltar" id="btn-tipo-voltar" type="button">← Voltar</button>
+    </div>
+
     <!-- Tela: aguardando cartão / PIX -->
     <div class="tela-confirmacao" id="tela-aguarda-pag">
         <h2 id="aguarda-titulo"></h2>
