@@ -410,18 +410,35 @@ async function confirmarCartaoAprovado(pedidoDoc, pedido, origemLabel, estadoBru
 // O "id" aqui é o payment_intent, não um payment normal — endpoint de consulta é outro.
 // Atualiza pedido + movimento de caixa + totais da sessão diretamente (sem depender
 // do navegador do caixa continuar aberto).
-async function tratarNotificacaoPoint(paymentIntentId, accessToken) {
-    const { data: intent } = await axios.get(
+const ESTADOS_POINT_CANCELADOS = ['CANCELED', 'CANCELLED', 'ERROR', 'FAILED', 'ABANDONED', 'EXPIRED'];
+
+async function tratarNotificacaoPoint(paymentIntentId, accessToken, estadoNotificado) {
+    const consultar = async () => (await axios.get(
         `https://api.mercadopago.com/point/integration-api/payment-intents/${paymentIntentId}`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    // Loga a resposta crua na primeira vez — os nomes exatos dos campos de status
-    // (state/status) serão confirmados no primeiro teste real e ajustados se preciso.
-    console.log('[Point IPN] payment-intent recebido:', JSON.stringify(intent));
+    )).data;
+    const estadoDe = it => String(it.state || it.status || '').toUpperCase();
 
-    const estado = String(intent.state || intent.status || '').toUpperCase();
+    let intent = await consultar();
+    let estado = estadoDe(intent);
+
+    // A consulta logo após a notificação pode devolver o estado ANTERIOR (ex.: aviso de CANCELED
+    // e a consulta ainda ON_TERMINAL). Para cancelamento, espera a consulta alcançar o aviso;
+    // se não alcançar, aceita o aviso só nessa direção (cancelar), nunca para aprovar.
+    const avisoCancelado = ESTADOS_POINT_CANCELADOS.includes(String(estadoNotificado || '').toUpperCase());
+    for (let i = 0; i < 3 && avisoCancelado && !ESTADOS_POINT_CANCELADOS.includes(estado) && estado !== 'FINISHED'; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        intent = await consultar();
+        estado = estadoDe(intent);
+    }
+    if (avisoCancelado && !ESTADOS_POINT_CANCELADOS.includes(estado) && estado !== 'FINISHED') {
+        console.warn('[Point IPN] consulta ainda em', estado, '— aceitando cancelamento notificado:', estadoNotificado);
+        estado = String(estadoNotificado).toUpperCase();
+    }
+    console.log('[Point IPN] payment-intent recebido:', JSON.stringify(intent), '| estado considerado:', estado);
+
     const finalizado = estado === 'FINISHED' || estado === 'APPROVED';
-    const cancelado = ['CANCELED', 'CANCELLED', 'ERROR', 'FAILED', 'ABANDONED', 'EXPIRED'].includes(estado);
+    const cancelado = ESTADOS_POINT_CANCELADOS.includes(estado);
 
     const snap = await db.collection('pedidos')
         .where('pagamento_id', '==', paymentIntentId)
@@ -771,7 +788,7 @@ export const mercadoPagoWebhook = onRequest(
             console.log('[Point notificação] topic:', topic, 'query:', JSON.stringify(req.query), 'body:', JSON.stringify(req.body));
             if (!paymentId) return res.status(200).send('ignorado');
             try {
-                await tratarNotificacaoPoint(paymentId, tokenPoint());
+                await tratarNotificacaoPoint(paymentId, tokenPoint(), req.body?.state);
             } catch (err) {
                 // Intent inexistente/inválido (ex.: botão "Simular" do painel): não adianta o MP reenviar.
                 const st = err.response?.status;
