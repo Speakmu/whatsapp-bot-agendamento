@@ -14,6 +14,15 @@ const db = getFirestore();
 // Configure com: firebase functions:secrets:set MERCADOPAGO_ACCESS_TOKEN
 const MERCADOPAGO_ACCESS_TOKEN = defineSecret("MERCADOPAGO_ACCESS_TOKEN");
 
+// A API da Point só libera para aplicação do Mercado Pago criada com o produto
+// Point — a do app/PIX (Checkout Transparente) recebe 403. Token próprio das
+// maquininhas: firebase functions:secrets:set MERCADOPAGO_POINT_ACCESS_TOKEN
+// Sem ele, as functions da Point caem no token geral (comportamento antigo).
+const MERCADOPAGO_POINT_ACCESS_TOKEN = defineSecret("MERCADOPAGO_POINT_ACCESS_TOKEN");
+function tokenPoint() {
+    return String(MERCADOPAGO_POINT_ACCESS_TOKEN.value() || MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
+}
+
 const GESTORCHEF_ADMIN_EMAIL = clientConfig.adminEmail;
 
 async function exigirUsuario(req) {
@@ -146,7 +155,7 @@ function pagamentoPoint(cfg) {
 // Chamada pelo dashboard (caixa.js) quando o operador finaliza uma venda no Cartão.
 // O resultado chega depois via webhook (topic=point_integration_ipn, ver abaixo).
 export const criarCobrancaPoint = onRequest(
-    { secrets: [MERCADOPAGO_ACCESS_TOKEN] },
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_POINT_ACCESS_TOKEN] },
     async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
 
@@ -157,7 +166,7 @@ export const criarCobrancaPoint = onRequest(
     }
 
     try {
-        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
+        const accessToken = tokenPoint();
         if (!accessToken) {
             console.error("MERCADOPAGO_ACCESS_TOKEN não configurado.");
             return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
@@ -205,7 +214,7 @@ export const criarCobrancaPoint = onRequest(
 // Cancela uma cobrança ainda pendente na Point (operador desistiu / cliente saiu).
 // Só age sobre pedido AGUARDANDO_CARTAO, então não dá pra usar para estornar venda paga.
 export const cancelarCobrancaPoint = onRequest(
-    { secrets: [MERCADOPAGO_ACCESS_TOKEN] },
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_POINT_ACCESS_TOKEN] },
     async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
     if (req.method === 'OPTIONS') {
@@ -216,7 +225,7 @@ export const cancelarCobrancaPoint = onRequest(
     if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
 
     try {
-        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
+        const accessToken = tokenPoint();
         if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
 
         const pedidoId = String(req.body?.pedidoId || '').trim();
@@ -314,7 +323,7 @@ export const cancelarPixTotem = onRequest(
 // Administração dos terminais Point: lista os terminais da conta (para preencher o
 // device_id sozinho) e coloca um terminal em modo PDV (exigido pela API de integração).
 export const terminaisPoint = onRequest(
-    { secrets: [MERCADOPAGO_ACCESS_TOKEN] },
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_POINT_ACCESS_TOKEN] },
     async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
     if (req.method === 'OPTIONS') {
@@ -326,7 +335,7 @@ export const terminaisPoint = onRequest(
 
     try {
         await exigirAdminGenerico(req);
-        const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
+        const accessToken = tokenPoint();
         if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
         const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
 
@@ -741,7 +750,7 @@ export const stoneWebhook = onRequest(async (req, res) => {
 // pontos de fidelidade que ficaram pendentes no pedido.
 // Também recebe notificações da maquininha Point (topic=point_integration_ipn).
 export const mercadoPagoWebhook = onRequest(
-    { secrets: [MERCADOPAGO_ACCESS_TOKEN] },
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_POINT_ACCESS_TOKEN] },
     async (req, res) => {
     try {
         const paymentId = req.query['data.id'] || req.body?.data?.id || req.query.id;
@@ -750,7 +759,7 @@ export const mercadoPagoWebhook = onRequest(
 
         if (topic === 'point_integration_ipn') {
             if (!paymentId) return res.status(200).send('ignorado');
-            await tratarNotificacaoPoint(paymentId, accessToken);
+            await tratarNotificacaoPoint(paymentId, tokenPoint());
             return res.status(200).send('ok');
         }
 
