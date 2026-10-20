@@ -762,7 +762,17 @@ export const mercadoPagoWebhook = onRequest(
         if (topic === 'point_integration_ipn' || topic === 'point_integration_wh') {
             console.log('[Point notificação] topic:', topic, 'query:', JSON.stringify(req.query), 'body:', JSON.stringify(req.body));
             if (!paymentId) return res.status(200).send('ignorado');
-            await tratarNotificacaoPoint(paymentId, tokenPoint());
+            try {
+                await tratarNotificacaoPoint(paymentId, tokenPoint());
+            } catch (err) {
+                // Intent inexistente/inválido (ex.: botão "Simular" do painel): não adianta o MP reenviar.
+                const st = err.response?.status;
+                if (st === 400 || st === 404) {
+                    console.warn('[Point notificação] intent inválido, ignorando:', paymentId, err.response?.data);
+                    return res.status(200).send('ignorado');
+                }
+                throw err;
+            }
             return res.status(200).send('ok');
         }
 
