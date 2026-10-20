@@ -332,15 +332,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 add('Usar no Caixa', () => { $('pag-point-device').value = dv.id; }, 'btn-salvar');
                 add('Usar no Totem', () => { $('pag-point-device-totem').value = dv.id; }, 'btn-salvar');
-                if (dv.operating_mode !== 'PDV') {
-                    add('Ativar modo PDV', async () => {
-                        try {
-                            await chamarTerminaisPoint({ acao: 'pdv', deviceId: dv.id });
-                            alert('Modo PDV ativado. Reinicie a máquina para aplicar.');
-                            listarTerminaisPoint();
-                        } catch (err) { alert('Não consegui ativar o modo PDV: ' + err.message); }
-                    }, 'btn-cinza');
-                }
+                // Sempre disponível: se a máquina não aplicou o modo (mesmo o Mercado Pago
+                // dizendo PDV), reenviar o comando força a sincronização.
+                add(dv.operating_mode === 'PDV' ? 'Reenviar modo PDV' : 'Ativar modo PDV', async () => {
+                    try {
+                        await chamarTerminaisPoint({ acao: 'pdv', deviceId: dv.id });
+                        alert('Comando de modo PDV enviado. Reinicie a máquina para aplicar.');
+                        listarTerminaisPoint();
+                    } catch (err) { alert('Não consegui enviar o modo PDV: ' + err.message); }
+                }, 'btn-cinza');
                 box.appendChild(linha);
             });
         } catch (err) {
