@@ -24,6 +24,7 @@ import {
 import { carregarCertificado } from './cert-store';
 import { conciliarNotasDoPedido, auditarDuplicidades, completarXmlsFaltantes } from './conciliar';
 import { emitirNfceComClassificacao } from './classificacao-fiscal';
+import { gravarResultado } from './resultado-nota';
 import { registroXmlDaNota } from './xml-enviado';
 import { msEmProcessamento, podeGravarResultado, xmlAutorizado, xmlsDaNota } from './regras-fiscais';
 import { nfeProcDe } from './xml-proc';
@@ -192,42 +193,6 @@ async function liberarTravaEmissao(pedidoId: string): Promise<void> {
 // payload = o que foi enviado: sem veredito da SEFAZ (transitorio), a nota volta
 // pra ERRO_REDE COM o payload, e é reenviada com o mesmo número — nunca vira
 // rejeição (que liberaria número novo).
-async function gravarResultado(ref: admin.firestore.DocumentReference, data: AvulsaResult, payload: AvulsaRequest): Promise<void> {
-  const emContingencia = data.status === 'CONTINGENCIA';
-  await db().runTransaction(async (tx) => {
-    const snap = await tx.get(ref);
-    const atual = snap.exists ? (snap.data() as any).status : undefined;
-    if (!podeGravarResultado(atual, data.status)) {
-      console.warn(`[retry fiscal] nota ${ref.id} já está ${atual} — resultado ${data.status} de envio concorrente descartado.`);
-      return;
-    }
-    if (data.transitorio) {
-      tx.update(ref, {
-        status: 'ERRO_REDE', cStat: data.cStat || null,
-        motivo: `SEFAZ sem veredito (${data.cStat || '-'}: ${data.motivo || 'sem resposta'}) — reenviando a mesma nota automaticamente.`,
-        payload_pendente: JSON.parse(JSON.stringify(payload)),
-      });
-      return;
-    }
-    tx.update(ref, {
-      status: data.status,
-      chave: data.chave || null,
-      protocolo: data.protocolo || null,
-      cStat: data.cStat || null,
-      motivo: data.motivo || null,
-      danfeBase64: data.danfeBase64 || null,
-      xml: data.xml || null,
-      xmlProc: data.xmlProc || null,
-      formaEmissao: emContingencia ? 'CONTINGENCIA' : 'NORMAL',
-      contingencia: !!data.contingencia,
-      xmlAssinado: emContingencia ? (data.xml || null) : null,
-      payload_pendente: admin.firestore.FieldValue.delete(),
-      // Os XMLs de cada envio só servem pra reconhecer uma autorização perdida.
-      ...(data.status === 'AUTORIZADA' ? { xml_enviado: admin.firestore.FieldValue.delete() } : {}),
-    });
-  });
-}
-
 async function emitirParaPedido(pedidoId: string, pedido: any, cfg: any, cert: CertInput): Promise<void> {
   try {
     await adquirirTravaEmissao(pedidoId);
