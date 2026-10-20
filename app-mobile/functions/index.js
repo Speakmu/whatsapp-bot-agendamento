@@ -757,7 +757,10 @@ export const mercadoPagoWebhook = onRequest(
         const topic = req.query.topic || req.query.type || req.body?.type;
         const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
 
-        if (topic === 'point_integration_ipn') {
+        // Webhook da Point (painel de integrações) manda point_integration_wh; o IPN antigo,
+        // point_integration_ipn. Os dois trazem o id do payment_intent.
+        if (topic === 'point_integration_ipn' || topic === 'point_integration_wh') {
+            console.log('[Point notificação] topic:', topic, 'query:', JSON.stringify(req.query), 'body:', JSON.stringify(req.body));
             if (!paymentId) return res.status(200).send('ignorado');
             await tratarNotificacaoPoint(paymentId, tokenPoint());
             return res.status(200).send('ok');
