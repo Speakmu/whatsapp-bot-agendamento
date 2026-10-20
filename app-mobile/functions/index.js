@@ -253,6 +253,13 @@ export const cancelarCobrancaPoint = onRequest(
             );
         } catch (err) {
             // 404 = a cobrança já saiu da máquina (expirou/foi cancelada lá). Segue e cancela o pedido.
+            if (err.response?.status === 409) {
+                // ON_TERMINAL: já está na tela da máquina e a API não deixa retirar de lá.
+                // Cancelando na própria máquina, o webhook (CANCELED) cancela o pedido sozinho.
+                return res.status(409).json({
+                    message: "A cobrança já está na maquininha. Para cancelar, use o botão cancelar/voltar na própria máquina — o pedido será cancelado automaticamente."
+                });
+            }
             if (err.response?.status !== 404) throw err;
         }
 
