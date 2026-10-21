@@ -290,6 +290,10 @@ export const cancelarCobrancaPoint = onRequest(
             console.warn('Cancelar cobrança Point recusado:', err.response?.status, JSON.stringify(err.response?.data || err.message));
             // 404 = a cobrança já saiu da máquina (expirou/foi cancelada lá). Segue e cancela o pedido.
             const st = err.response?.status;
+            // Order já cancelada (na máquina, por expiração...): segue e cancela o pedido aqui também.
+            const jaCancelada = (err.response?.data?.errors || []).some(e => e.code === 'order_already_canceled');
+            if (jaCancelada) { /* cai no cancelamento do pedido abaixo */ }
+            else {
             const orderNaoCancelavel = String(pedido.pagamento_id).startsWith('ORD') && [400, 409, 422].includes(st);
             if (st === 409 || orderNaoCancelavel) {
                 // ON_TERMINAL: já está na tela da máquina e a API não deixa retirar de lá.
@@ -299,6 +303,7 @@ export const cancelarCobrancaPoint = onRequest(
                 });
             }
             if (err.response?.status !== 404) throw err;
+            }
         }
 
         // Re-confere dentro de transação: o webhook pode ter aprovado nesse meio tempo.
