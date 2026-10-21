@@ -393,6 +393,54 @@ document.addEventListener('DOMContentLoaded', () => {
                     } catch (err) { alert('Não consegui: ' + err.message); }
                 });
                 linha.appendChild(b);
+
+                // Teste: cria ordem de R$ 1,00 e acompanha ~40s sem tocar na máquina.
+                const teste = document.createElement('button');
+                teste.type = 'button';
+                teste.className = 'btn btn-azul';
+                teste.style.cssText = 'margin:6px 0 0 6px;padding:6px 12px;font-size:.8rem;';
+                teste.textContent = 'Testar entrega automática (R$ 1,00)';
+                const saida = document.createElement('pre');
+                saida.style.cssText = 'white-space:pre-wrap;font-size:.8rem;margin-top:8px;display:none;';
+                teste.addEventListener('click', async () => {
+                    if (!confirm('Vai criar uma cobrança de R$ 1,00 nessa máquina e acompanhar por ~40s. NÃO toque na máquina durante o teste. Continuar?')) return;
+                    teste.disabled = true;
+                    saida.style.display = 'block';
+                    saida.textContent = 'Criando a ordem e acompanhando por ~40s... não toque na máquina.';
+                    try {
+                        const r = await chamarTerminaisPoint({ acao: 'testeOrder', deviceId: t.id });
+                        const tl = r.linhaDoTempo.map(x => `${x.segundos}s: ${x.status}${x.detalhe && x.detalhe !== x.status ? ' (' + x.detalhe + ')' : ''}`).join('\n');
+                        saida.textContent = `Ordem ${r.orderId}\n${tl}\n\nAgora toque em "Atualizar" na máquina e clique em "Consultar agora".`;
+                        const consultar = document.createElement('button');
+                        consultar.type = 'button';
+                        consultar.className = 'btn btn-cinza';
+                        consultar.style.cssText = 'margin:6px 6px 0 0;padding:6px 12px;font-size:.8rem;';
+                        consultar.textContent = 'Consultar agora';
+                        consultar.addEventListener('click', async () => {
+                            try {
+                                const c = await chamarTerminaisPoint({ acao: 'consultarOrder', orderId: r.orderId });
+                                alert(`Status agora: ${c.status} (${c.detalhe || '-'})\nAtualizada em ${c.ultimaAtualizacao || '-'}`);
+                            } catch (err) { alert('Não consegui consultar: ' + err.message); }
+                        });
+                        const cancelar = document.createElement('button');
+                        cancelar.type = 'button';
+                        cancelar.className = 'btn btn-vermelho';
+                        cancelar.style.cssText = 'margin:6px 0 0;padding:6px 12px;font-size:.8rem;';
+                        cancelar.textContent = 'Cancelar ordem de teste';
+                        cancelar.addEventListener('click', async () => {
+                            try {
+                                const c = await chamarTerminaisPoint({ acao: 'cancelarOrder', orderId: r.orderId });
+                                alert(`Status: ${c.status}`);
+                            } catch (err) { alert('Não consegui cancelar (se já está na máquina, cancele por lá): ' + err.message); }
+                        });
+                        linha.append(consultar, cancelar);
+                    } catch (err) {
+                        saida.textContent = '❌ ' + err.message;
+                    } finally {
+                        teste.disabled = false;
+                    }
+                });
+                linha.append(teste, saida);
                 box.appendChild(linha);
             });
         } catch (err) {

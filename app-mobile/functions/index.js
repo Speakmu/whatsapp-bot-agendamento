@@ -374,7 +374,7 @@ export const cancelarPixTotem = onRequest(
 // Administração dos terminais Point: lista os terminais da conta (para preencher o
 // device_id sozinho) e coloca um terminal em modo PDV (exigido pela API de integração).
 export const terminaisPoint = onRequest(
-    { secrets: [MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_POINT_ACCESS_TOKEN] },
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_POINT_ACCESS_TOKEN], timeoutSeconds: 120 },
     async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
     if (req.method === 'OPTIONS') {
@@ -389,6 +389,42 @@ export const terminaisPoint = onRequest(
         const accessToken = tokenPoint();
         if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
         const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+
+        // Teste de entrega da Orders API: cria uma order de R$ 1,00 no terminal e consulta o status
+        // por ~40s SEM ninguém tocar na máquina, para ver se vira at_terminal sozinha.
+        if (req.body?.acao === 'testeOrder') {
+            const deviceId = String(req.body.deviceId || '').trim();
+            if (!deviceId) return res.status(400).json({ message: "Informe deviceId." });
+            const criada = await axios.post(
+                'https://api.mercadopago.com/v1/orders',
+                {
+                    type: 'point',
+                    external_reference: 'teste-entrega-' + Date.now(),
+                    description: 'Teste de entrega automatica',
+                    transactions: { payments: [{ amount: '1.00' }] },
+                    config: { point: { terminal_id: deviceId } }
+                },
+                { headers: { ...headers, 'X-Idempotency-Key': randomBytes(16).toString('hex') } }
+            );
+            const orderId = criada.data.id;
+            const linha = [{ segundos: 0, status: criada.data.status, detalhe: criada.data.status_detail }];
+            const inicio = Date.now();
+            for (let i = 0; i < 10; i++) {
+                await new Promise(r => setTimeout(r, 4000));
+                const o = (await axios.get(`https://api.mercadopago.com/v1/orders/${orderId}`, { headers })).data;
+                linha.push({ segundos: Math.round((Date.now() - inicio) / 1000), status: o.status, detalhe: o.status_detail });
+                if (o.status !== 'created') break;
+            }
+            return res.status(200).json({ orderId, linhaDoTempo: linha });
+        }
+        if (req.body?.acao === 'consultarOrder' || req.body?.acao === 'cancelarOrder') {
+            const orderId = String(req.body.orderId || '').trim();
+            if (!orderId.startsWith('ORD')) return res.status(400).json({ message: "Informe orderId (ORD...)." });
+            const r = req.body.acao === 'consultarOrder'
+                ? await axios.get(`https://api.mercadopago.com/v1/orders/${orderId}`, { headers })
+                : await axios.post(`https://api.mercadopago.com/v1/orders/${orderId}/cancel`, {}, { headers: { ...headers, 'X-Idempotency-Key': randomBytes(16).toString('hex') } });
+            return res.status(200).json({ id: r.data.id, status: r.data.status, detalhe: r.data.status_detail, ultimaAtualizacao: r.data.last_updated_date });
+        }
 
         // API nova (Orders): lista com loja/caixa/modo como a Orders API enxerga, e troca de modo
         // pelo endpoint dela (/terminals/v1/setup). Cada caixa (pos_id) só pode ter um terminal.
