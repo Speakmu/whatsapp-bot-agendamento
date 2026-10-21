@@ -190,6 +190,32 @@ export const criarCobrancaPoint = onRequest(
             return res.status(500).json({ message: `Terminal Point do ${terminal} não configurado (device_id ausente).` });
         }
 
+        // Orders API (pointApi='orders'): a order é enviada ao terminal sozinha, sem toque na
+        // máquina. A API antiga (payment-intents) exige o operador tocar para buscar a cobrança.
+        if (cfgPoint.pointApi === 'orders') {
+            const pag = pagamentoPoint(cfgPoint, req.body.tipoCartao);
+            const order = await axios.post(
+                'https://api.mercadopago.com/v1/orders',
+                {
+                    type: 'point',
+                    external_reference: String(externalReference).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64),
+                    description: description || `Pedido ${externalReference}`,
+                    transactions: { payments: [{ amount: Number(amount).toFixed(2) }] },
+                    config: {
+                        point: { terminal_id: deviceId },
+                        payment_method: { default_type: pag.type }
+                    }
+                },
+                { headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                    'X-Idempotency-Key': randomBytes(16).toString('hex')
+                } }
+            );
+            console.log('[Point Orders] order criada:', JSON.stringify(order.data));
+            return res.status(200).json({ ...order.data, api: 'orders' });
+        }
+
         // amount em centavos, conforme a API do Point.
         const amountCentavos = Math.round(Number(amount) * 100);
 
@@ -247,13 +273,25 @@ export const cancelarCobrancaPoint = onRequest(
         if (!deviceId) return res.status(500).json({ message: "Terminal Point não configurado." });
 
         try {
-            await axios.delete(
-                `https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents/${pedido.pagamento_id}`,
-                { headers: { Authorization: `Bearer ${accessToken}` } }
-            );
+            if (String(pedido.pagamento_id).startsWith('ORD')) {
+                // Cobrança criada pela Orders API.
+                await axios.post(
+                    `https://api.mercadopago.com/v1/orders/${pedido.pagamento_id}/cancel`,
+                    {},
+                    { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': randomBytes(16).toString('hex') } }
+                );
+            } else {
+                await axios.delete(
+                    `https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents/${pedido.pagamento_id}`,
+                    { headers: { Authorization: `Bearer ${accessToken}` } }
+                );
+            }
         } catch (err) {
+            console.warn('Cancelar cobrança Point recusado:', err.response?.status, JSON.stringify(err.response?.data || err.message));
             // 404 = a cobrança já saiu da máquina (expirou/foi cancelada lá). Segue e cancela o pedido.
-            if (err.response?.status === 409) {
+            const st = err.response?.status;
+            const orderNaoCancelavel = String(pedido.pagamento_id).startsWith('ORD') && [400, 409, 422].includes(st);
+            if (st === 409 || orderNaoCancelavel) {
                 // ON_TERMINAL: já está na tela da máquina e a API não deixa retirar de lá.
                 // Cancelando na própria máquina, o webhook (CANCELED) cancela o pedido sozinho.
                 return res.status(409).json({
@@ -412,7 +450,57 @@ async function confirmarCartaoAprovado(pedidoDoc, pedido, origemLabel, estadoBru
 // O "id" aqui é o payment_intent, não um payment normal — endpoint de consulta é outro.
 // Atualiza pedido + movimento de caixa + totais da sessão diretamente (sem depender
 // do navegador do caixa continuar aberto).
-const ESTADOS_POINT_CANCELADOS = ['CANCELED', 'CANCELLED', 'ERROR', 'FAILED', 'ABANDONED', 'EXPIRED'];
+// Notificação da Orders API (tópico "order"): aprova só se a CONSULTA à order confirmar
+// (status processed + accredited); cancelamento pode vir só do aviso se a consulta atrasar.
+async function tratarNotificacaoOrder(orderId, accessToken, acao) {
+    const consultar = async () => (await axios.get(
+        `https://api.mercadopago.com/v1/orders/${orderId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+    )).data;
+    const CANC = ['canceled', 'expired', 'failed'];
+    const stDe = o => String(o.status || '').toLowerCase();
+
+    let order = await consultar();
+    let st = stDe(order);
+    const avisoCancelado = ['order.canceled', 'order.expired', 'order.failed'].includes(acao);
+    for (let i = 0; i < 3 && avisoCancelado && !CANC.includes(st) && st !== 'processed'; i++) {
+        await new Promise(r => setTimeout(r, 1500));
+        order = await consultar();
+        st = stDe(order);
+    }
+    if (avisoCancelado && !CANC.includes(st) && st !== 'processed') {
+        console.warn('[Point Orders] consulta ainda em', st, '— aceitando cancelamento notificado:', acao);
+        st = 'canceled';
+    }
+    console.log('[Point Orders] order consultada:', JSON.stringify(order), '| status considerado:', st);
+
+    const aprovado = st === 'processed' && String(order.status_detail || '').toLowerCase() === 'accredited';
+    const cancelado = CANC.includes(st);
+    if (!aprovado && !cancelado) return; // created / at_terminal / action_required: aguarda
+
+    const snap = await db.collection('pedidos').where('pagamento_id', '==', orderId).limit(1).get();
+    if (snap.empty) {
+        console.warn('Webhook Point Orders: pedido não encontrado para order', orderId);
+        return;
+    }
+    const pedidoDoc = snap.docs[0];
+    const pedido = pedidoDoc.data();
+    if (pedido.status !== 'AGUARDANDO_CARTAO') return; // já processado
+
+    if (cancelado) {
+        await pedidoDoc.ref.update({ status: 'CANCELADO_PAGAMENTO', gateway_state: st.toUpperCase() });
+        return;
+    }
+    await confirmarCartaoAprovado(pedidoDoc, pedido, 'Point', 'ORDER_PROCESSED');
+    const pag = (order.transactions && order.transactions.payments && order.transactions.payments[0]) || {};
+    const tipo = pag.payment_method && pag.payment_method.type;
+    await pedidoDoc.ref.update({
+        ...(pag.id ? { point_payment_id: String(pag.id) } : {}),
+        ...(tipo ? { point_payment_type: String(tipo) } : {}),
+    });
+}
+
+const ESTADOS_POINT_CANCELADOS =['CANCELED', 'CANCELLED', 'ERROR', 'FAILED', 'ABANDONED', 'EXPIRED'];
 
 async function tratarNotificacaoPoint(paymentIntentId, accessToken, estadoNotificado) {
     const consultar = async () => (await axios.get(
@@ -783,6 +871,23 @@ export const mercadoPagoWebhook = onRequest(
         const paymentId = req.query['data.id'] || req.body?.data?.id || req.query.id;
         const topic = req.query.topic || req.query.type || req.body?.type;
         const accessToken = String(MERCADOPAGO_ACCESS_TOKEN.value() || '').trim();
+
+        // Orders API (Point): tópico "order", ação em req.body.action (order.processed, order.canceled...)
+        if (topic === 'order') {
+            console.log('[Point Orders notificação] query:', JSON.stringify(req.query), 'body:', JSON.stringify(req.body));
+            if (!paymentId) return res.status(200).send('ignorado');
+            try {
+                await tratarNotificacaoOrder(paymentId, tokenPoint(), req.body?.action);
+            } catch (err) {
+                const st = err.response?.status;
+                if (st === 400 || st === 404) {
+                    console.warn('[Point Orders] order inválida, ignorando:', paymentId, err.response?.data);
+                    return res.status(200).send('ignorado');
+                }
+                throw err;
+            }
+            return res.status(200).send('ok');
+        }
 
         // Webhook da Point (painel de integrações) manda point_integration_wh; o IPN antigo,
         // point_integration_ipn. Os dois trazem o id do payment_intent.

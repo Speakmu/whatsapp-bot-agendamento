@@ -111,6 +111,12 @@
                     <option value="debito">Somente d&eacute;bito</option>
                     <option value="escolher">Quem cobra escolhe (operador no Caixa, cliente no Totem)</option>
                 </select>
+                <label style="margin-top:10px;">Envio da cobran&ccedil;a &agrave; m&aacute;quina</label>
+                <select id="pag-point-api">
+                    <option value="legacy">Antigo &mdash; o operador toca na m&aacute;quina para buscar a cobran&ccedil;a</option>
+                    <option value="orders">Autom&aacute;tico (Orders) &mdash; a cobran&ccedil;a aparece sozinha na m&aacute;quina</option>
+                </select>
+                <small>No modo autom&aacute;tico, cadastre tamb&eacute;m o evento <b>Order (Mercado Pago)</b> nos Webhooks da aplica&ccedil;&atilde;o Point.</small>
                 <div style="margin-top:10px;">
                     <button type="button" class="btn btn-azul" id="listar-point">Buscar terminais da conta</button>
                     <div id="point-terminais" style="display:none;margin-top:8px;"></div>

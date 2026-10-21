@@ -367,6 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
             $('pag-point-device').value = d.pointDeviceIdCaixa || d.pointDeviceId || '';
             $('pag-point-device-totem').value = d.pointDeviceIdTotem || '';
             $('pag-point-tipo').value = d.pointTipoCartao || 'credito';
+            $('pag-point-api').value = d.pointApi || 'legacy';
             $('pag-stone-serial').value = d.stoneDeviceSerial || '';
             $('pag-stone-code').value = d.stoneCode || '';
             $('pag-stone-referer').value = d.stoneServiceRefererName || '';
@@ -392,6 +393,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pointDeviceIdCaixa: $('pag-point-device').value.trim(),
                 pointDeviceIdTotem: $('pag-point-device-totem').value.trim(),
                 pointTipoCartao: $('pag-point-tipo').value,
+                pointApi: $('pag-point-api').value,
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
             // Cópia pública só do tipo de cartão: o totem (sem login) precisa saber se
