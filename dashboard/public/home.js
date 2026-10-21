@@ -15,7 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const hoje = new Date();
     const inicioDia = new Date(); inicioDia.setHours(0, 0, 0, 0);
     const STATUS_ATIVOS = ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"];
-    const STATUS_NAO_VENDA = new Set(["CANCELADO", "AGUARDANDO_PAGAMENTO", "AGUARDANDO_PIX"]);
+    // Regra unica de "o que e venda" (status-venda.js): cartao nao aprovado/pendente tambem nao fatura.
+    const STATUS_NAO_VENDA = StatusVenda.NAO_VENDA;
 
     const estado = {
         comandasCaixa: 0,
@@ -423,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
             let totCupom = 0, totPontos = 0;
             snap.forEach(doc => {
                 const p = doc.data();
-                if (p.status === 'CANCELADO') return;
+                if (StatusVenda.naoEVenda(p.status)) return;
                 const c = num(p.desconto_cupom), pt = num(p.desconto_pontos);
                 if (!c && !pt) return;
                 const d = p.hora_pedido && p.hora_pedido.toDate ? p.hora_pedido.toDate() : null;

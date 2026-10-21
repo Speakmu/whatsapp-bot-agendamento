@@ -79,12 +79,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const qtdItem = (i) => (typeof i === 'object' && i.quantidade) ? Number(i.quantidade) : 1;
 
     function somaValidos(pedidos) {
-        return pedidos.filter(p => p.status !== 'CANCELADO').reduce((s, p) => s + (Number(p.valor_total) || 0), 0);
+        return pedidos.filter(p => StatusVenda.eVenda(p.status)).reduce((s, p) => s + (Number(p.valor_total) || 0), 0);
     }
 
     function render(pedidos, anteriores, ini, fim) {
-        const validos = pedidos.filter(p => p.status !== 'CANCELADO');
-        const cancelados = pedidos.filter(p => p.status === 'CANCELADO');
+        const validos = pedidos.filter(p => StatusVenda.eVenda(p.status));
+        const cancelados = pedidos.filter(p => StatusVenda.cancelado(p.status));
         const fat = validos.reduce((s, p) => s + (Number(p.valor_total) || 0), 0);
         const qtd = validos.length;
         const tkt = qtd ? fat / qtd : 0;
@@ -94,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // comparativo
         const fatAnt = somaValidos(anteriores);
-        const qtdAnt = anteriores.filter(p => p.status !== 'CANCELADO').length;
+        const qtdAnt = anteriores.filter(p => StatusVenda.eVenda(p.status)).length;
         delta('k-fat-d', fat, fatAnt);
         delta('k-ped-d', qtd, qtdAnt);
 

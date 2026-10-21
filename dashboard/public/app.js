@@ -171,7 +171,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Backend real do bot, agora no Cloud Run (migrado do Render).
     const ngrokUrl = (window.__CLIENT_CONFIG__ || {}).botBaseUrl || "";
     const STATUS_ATIVOS_PEDIDOS = ["AGUARDANDO_PIX", "PENDENTE_PREPARO", "PENDENTE_VALIDACAO", "EM_PREPARO", "PRONTO_PARA_ENTREGA", "SAIU_PARA_ENTREGA"];
-    const STATUS_NAO_FATURA = new Set(["CANCELADO", "AGUARDANDO_PAGAMENTO", "AGUARDANDO_PIX"]);
+    // Regra unica de "o que e venda" (status-venda.js): cartao nao aprovado/pendente tambem nao fatura.
+    const STATUS_NAO_FATURA = StatusVenda.NAO_VENDA;
     const moneyBR = (v) => "R$ " + (Number(v) || 0).toFixed(2).replace('.', ',');
 
     // --- ELEMENTOS DO PAINEL E CARDÁPIO ---
@@ -820,7 +821,7 @@ document.addEventListener('DOMContentLoaded', () => {
             snapshot.forEach(doc => pedidos.push({ id: doc.id, ...doc.data() }));
 
             // Filtra cancelados para não sujar a inteligência de vendas
-            pedidos = pedidos.filter(p => p.status !== 'CANCELADO');
+            pedidos = pedidos.filter(p => StatusVenda.eVenda(p.status));
 
             processarERenderizarRelatorio(pedidos, ranking);
 
@@ -1121,7 +1122,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 snapshot.forEach(doc => {
                     const pedido = doc.data() || {};
-                    if (pedido.status === 'CANCELADO') return;
+                    if (StatusVenda.cancelado(pedido.status)) return;
 
                     totalPedidos++;
                     if (STATUS_ATIVOS_PEDIDOS.includes(pedido.status)) pedidosAtivos++;

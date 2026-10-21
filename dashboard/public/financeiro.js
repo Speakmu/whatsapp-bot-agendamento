@@ -79,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let total = 0;
         snap.forEach(doc => {
             const p = doc.data();
-            if (p.status === "CANCELADO") return;
+            if (StatusVenda.naoEVenda(p.status)) return;
             total += Number(p.valor_total) || 0;
         });
         return total;
