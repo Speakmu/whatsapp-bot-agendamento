@@ -390,6 +390,24 @@ export const terminaisPoint = onRequest(
         if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
         const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
 
+        // API nova (Orders): lista com loja/caixa/modo como a Orders API enxerga, e troca de modo
+        // pelo endpoint dela (/terminals/v1/setup). Cada caixa (pos_id) só pode ter um terminal.
+        if (req.body?.acao === 'listarV2') {
+            const r = await axios.get('https://api.mercadopago.com/terminals/v1/list?limit=50&offset=0', { headers });
+            return res.status(200).json(r.data);
+        }
+        if (req.body?.acao === 'modoV2') {
+            const deviceId = String(req.body.deviceId || '').trim();
+            const modo = req.body.modo === 'STANDALONE' ? 'STANDALONE' : 'PDV';
+            if (!deviceId) return res.status(400).json({ message: "Informe deviceId." });
+            const r = await axios.patch(
+                'https://api.mercadopago.com/terminals/v1/setup',
+                { terminals: [{ id: deviceId, operating_mode: modo }] },
+                { headers }
+            );
+            return res.status(200).json(r.data);
+        }
+
         // 'pdv' liga o modo de integração; 'standalone' devolve a máquina ao modo normal
         // (aceita valor digitado nela). Em PDV a máquina NÃO aceita venda digitada.
         if (req.body?.acao === 'pdv' || req.body?.acao === 'standalone') {

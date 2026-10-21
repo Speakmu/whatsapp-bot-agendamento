@@ -67,6 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('pag-maquininha-ativa').addEventListener('change', aplicarVisibilidadeMaquininha);
         $('testar-stone').addEventListener('click', testarMaquininhaStone);
         $('listar-point').addEventListener('click', listarTerminaisPoint);
+        $('diagnostico-point').addEventListener('click', diagnosticoPoint);
         $('salvar-ifood').addEventListener('click', salvarIfood);
         $('testar-ifood').addEventListener('click', testarIfood);
         $('salvar-exibicao').addEventListener('click', salvarExibicao);
@@ -351,6 +352,47 @@ document.addEventListener('DOMContentLoaded', () => {
                         } catch (err) { alert('Não consegui devolver ao modo normal: ' + err.message); }
                     }, 'btn-vermelho');
                 }
+                box.appendChild(linha);
+            });
+        } catch (err) {
+            box.textContent = '❌ ' + err.message;
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // Mostra os terminais como a Orders API os enxerga: modo, loja e caixa (pos_id).
+    // Dois terminais no mesmo pos_id, ou modo diferente de PDV, explicam cobrança que não chega.
+    async function diagnosticoPoint() {
+        const btn = $('diagnostico-point');
+        const box = $('point-terminais');
+        btn.disabled = true;
+        box.style.display = 'block';
+        box.textContent = 'Consultando a API nova...';
+        try {
+            const data = await chamarTerminaisPoint({ acao: 'listarV2' });
+            const terminais = (data.data && data.data.terminals) || [];
+            if (!terminais.length) { box.textContent = 'A API nova não retornou terminais.'; return; }
+            box.innerHTML = '';
+            terminais.forEach(t => {
+                const linha = document.createElement('div');
+                linha.style.cssText = 'padding:8px 0;border-bottom:1px solid #eee;font-size:.85rem;word-break:break-all;';
+                const txt = document.createElement('div');
+                txt.textContent = `${t.id} — modo ${t.operating_mode} — loja ${t.store_id || '?'} — caixa (pos) ${t.pos_id || '?'}`;
+                linha.appendChild(txt);
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'btn btn-cinza';
+                b.style.cssText = 'margin-top:6px;padding:6px 12px;font-size:.8rem;';
+                b.textContent = 'Ativar PDV (API nova)';
+                b.addEventListener('click', async () => {
+                    try {
+                        const r = await chamarTerminaisPoint({ acao: 'modoV2', deviceId: t.id, modo: 'PDV' });
+                        alert('Resposta: ' + JSON.stringify(r) + '\nReinicie a máquina.');
+                        diagnosticoPoint();
+                    } catch (err) { alert('Não consegui: ' + err.message); }
+                });
+                linha.appendChild(b);
                 box.appendChild(linha);
             });
         } catch (err) {
