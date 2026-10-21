@@ -347,12 +347,14 @@ export const terminaisPoint = onRequest(
         if (!accessToken) return res.status(500).json({ message: "Configuração de pagamento ausente no servidor." });
         const headers = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
 
-        if (req.body?.acao === 'pdv') {
+        // 'pdv' liga o modo de integração; 'standalone' devolve a máquina ao modo normal
+        // (aceita valor digitado nela). Em PDV a máquina NÃO aceita venda digitada.
+        if (req.body?.acao === 'pdv' || req.body?.acao === 'standalone') {
             const deviceId = String(req.body.deviceId || '').trim();
             if (!deviceId) return res.status(400).json({ message: "Informe deviceId." });
             const r = await axios.patch(
                 `https://api.mercadopago.com/point/integration-api/devices/${deviceId}`,
-                { operating_mode: 'PDV' },
+                { operating_mode: req.body.acao === 'pdv' ? 'PDV' : 'STANDALONE' },
                 { headers }
             );
             return res.status(200).json(r.data);

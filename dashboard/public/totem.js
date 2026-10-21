@@ -41,6 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const d = snap.exists ? (snap.data() || {}) : {};
         nomeLoja = d.nomeApp || 'Autoatendimento';
         tipoCartaoPoint = d.pointTipoCartao || 'credito';
+        // Sem a Point em uso, esconde o Cartão (o cliente ainda tem PIX e caixa).
+        const btnCartao = document.querySelector('#tela-pagamento .opcao[data-forma="CARTAO"]');
+        if (btnCartao) btnCartao.style.display = d.pointAtiva === false ? 'none' : '';
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
 
         const usaLogotipo = d.identidadeTipo === 'logo' && !!d.logoUrl;

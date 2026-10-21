@@ -341,6 +341,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         listarTerminaisPoint();
                     } catch (err) { alert('Não consegui enviar o modo PDV: ' + err.message); }
                 }, 'btn-cinza');
+                if (dv.operating_mode === 'PDV') {
+                    add('Voltar ao modo normal', async () => {
+                        if (!confirm('Devolver esta máquina ao modo normal? Ela volta a aceitar valor digitado, e o Caixa/Totem deixam de cobrar nela até você ativar o PDV de novo.')) return;
+                        try {
+                            await chamarTerminaisPoint({ acao: 'standalone', deviceId: dv.id });
+                            alert('Máquina devolvida ao modo normal. Reinicie a máquina para aplicar.');
+                            listarTerminaisPoint();
+                        } catch (err) { alert('Não consegui devolver ao modo normal: ' + err.message); }
+                    }, 'btn-vermelho');
+                }
                 box.appendChild(linha);
             });
         } catch (err) {
@@ -387,7 +397,9 @@ document.addEventListener('DOMContentLoaded', () => {
             // Cópia pública só do tipo de cartão: o totem (sem login) precisa saber se
             // pergunta crédito/débito ao cliente, e só lê app_config.
             await db.collection('app_config').doc('geral').set({
-                pointTipoCartao: $('pag-point-tipo').value
+                pointTipoCartao: $('pag-point-tipo').value,
+                // Totem esconde o Cartão quando a Point não está em uso (Stone não atende o totem).
+                pointAtiva: maquininhaAtiva && $('pag-provedor').value !== 'stone'
             }, { merge: true });
             flash('Configuracoes de pagamento salvas.');
         } catch (err) {
