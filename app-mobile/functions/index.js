@@ -202,6 +202,7 @@ export const criarCobrancaPoint = onRequest(
                     type: 'point',
                     external_reference: String(externalReference).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64),
                     description: description || `Pedido ${externalReference}`,
+                    expiration_time: 'PT5M', // cobrança esquecida não trava o terminal por 15 min
                     transactions: { payments: [{ amount: Number(amount).toFixed(2) }] },
                     config: {
                         point: { terminal_id: deviceId }
@@ -235,6 +236,9 @@ export const criarCobrancaPoint = onRequest(
 
     } catch (error) {
         console.error("Erro ao criar cobrança Point:", error.response?.data || error.message);
+        if ((error.response?.data?.errors || []).some(e => e.code === 'already_queued_order_on_terminal')) {
+            return res.status(409).json({ message: "A maquininha já tem uma cobrança pendente. Cancele-a na própria máquina ou aguarde alguns minutos e tente de novo." });
+        }
         return res.status(error.response?.status || 500).json(error.response?.data || { message: error.message });
     }
 });
@@ -402,6 +406,7 @@ export const terminaisPoint = onRequest(
                     type: 'point',
                     external_reference: 'teste-entrega-' + Date.now(),
                     description: 'Teste de entrega automatica',
+                    expiration_time: 'PT2M',
                     transactions: { payments: [{ amount: '1.00' }] },
                     config: { point: { terminal_id: deviceId } }
                 },
@@ -462,6 +467,8 @@ export const terminaisPoint = onRequest(
         return res.status(200).json(r.data);
     } catch (error) {
         console.error("Erro nos terminais Point:", error.response?.data || error.message);
+        const e0 = (error.response?.data?.errors || [])[0];
+        if (e0) return res.status(error.response?.status || 500).json({ message: `${e0.code}: ${e0.message}` });
         return res.status(error.status || error.response?.status || 500).json(error.response?.data || { message: error.message });
     }
 });
