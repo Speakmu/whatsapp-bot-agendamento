@@ -205,7 +205,9 @@ export const criarCobrancaPoint = onRequest(
                     expiration_time: 'PT5M', // cobrança esquecida não trava o terminal por 15 min
                     transactions: { payments: [{ amount: Number(amount).toFixed(2) }] },
                     config: {
-                        point: { terminal_id: deviceId }
+                        point: { terminal_id: deviceId },
+                        // PIX pela máquina (QR na tela dela). Cartão segue sem tipo (a máquina pergunta).
+                        ...(req.body.metodo === 'qr' ? { payment_method: { default_type: 'qr' } } : {})
                     }
                 },
                 { headers: {
@@ -506,7 +508,7 @@ async function confirmarCartaoAprovado(pedidoDoc, pedido, origemLabel, estadoBru
             tipo: 'VENDA',
             valor: pedido.valor_total,
             forma_pagamento: pedido.forma_pagamento,
-            descricao: `Venda balcão (cartão via ${origemLabel})`,
+            descricao: `Venda balcão (${pedido.forma_pagamento === 'PIX' ? 'PIX' : 'cartão'} via ${origemLabel})`,
             pedido_id: pedidoDoc.id,
             operador: pedido.operador || null,
             hora: FieldValue.serverTimestamp(),

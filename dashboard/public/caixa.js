@@ -501,6 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let maquininhaAtiva = true;
     let pointTipoCartao = "credito";
     let pointApi = "legacy";
+    let pixNaMaquina = false;
 
     // A Point exige o tipo do cartão na cobrança. Com a config "quem cobra escolhe",
     // pergunta ao operador antes de acionar a máquina. Devolve 'credito', 'debito' ou null (desistiu).
@@ -532,6 +533,7 @@ document.addEventListener('DOMContentLoaded', () => {
         maquininhaAtiva = d?.maquininhaAtiva !== false;
         pointTipoCartao = d?.pointTipoCartao || "credito";
         pointApi = d?.pointApi || "legacy";
+        pixNaMaquina = d?.pixNaMaquina === true;
     }, err => console.warn('Erro ao ler provedor de pagamento:', err.message));
 
     // Só usa o nome digitado se a caixinha "Identificar cliente" estiver
@@ -549,6 +551,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Com a maquininha desativada, o Cartão segue o mesmo caminho manual de
         // Dinheiro/PIX abaixo: forma_pagamento continua "Cartão" (conta certo nos
         // relatórios), só não tenta acionar nenhum terminal físico.
+        // PIX pela máquina: só na Orders API (tipo qr), com a opção ligada em Configurações.
+        if (formaPagamento === "PIX" && maquininhaAtiva && provedorPagamentoCartao !== "stone" && pointApi === "orders" && pixNaMaquina) {
+            return finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_POINT_URL, "Point");
+        }
         if (formaPagamento === "Cartão" && maquininhaAtiva) {
             return provedorPagamentoCartao === "stone" ? finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_STONE_URL, "Stone") : finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_POINT_URL, "Point");
         }
@@ -628,7 +634,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Faixa fixa com "Cancelar cobrança" enquanto a Point espera o cartão — sem ela,
     // se o cliente desiste a cobrança fica pendurada na máquina. Devolve a função que remove a faixa.
-    function mostrarAvisoCartaoPendente(pedidoId, total) {
+    function mostrarAvisoCartaoPendente(pedidoId, total, rotulo) {
         let wrap = document.getElementById('cartao-pendentes');
         if (!wrap) {
             wrap = document.createElement('div');
@@ -639,7 +645,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const item = document.createElement('div');
         item.style.cssText = 'background:#2c3e50;color:#fff;padding:10px 14px;border-radius:10px;display:flex;align-items:center;gap:12px;box-shadow:0 4px 14px rgba(0,0,0,.3);';
         const txt = document.createElement('span');
-        txt.textContent = `💳 Aguardando cartão na maquininha • ${money(total)}`;
+        txt.textContent = `${rotulo === 'PIX' ? '📱 Aguardando PIX' : '💳 Aguardando cartão'} na maquininha • ${money(total)}`;
         const btn = document.createElement('button');
         btn.textContent = 'Cancelar cobrança';
         btn.style.cssText = 'background:#e74c3c;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-weight:700;cursor:pointer;';
@@ -701,6 +707,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     externalReference: pedidoRef.id,
                     terminal: 'caixa',
                     tipoCartao,
+                    metodo: formaPagamento === "PIX" ? "qr" : undefined,
                     description: `Pedido balcão ${pedidoRef.id.slice(0, 6)}`
                 })
             });
@@ -758,17 +765,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Observa o pedido até a confirmação (ou cancelamento) chegar pelo webhook,
         // para então dar baixa no estoque e emitir a NFC-e — só uma vez.
-        const removerAviso = nomeProvedor === 'Point' ? mostrarAvisoCartaoPendente(pedidoRef.id, total) : () => {};
+        const removerAviso = nomeProvedor === 'Point' ? mostrarAvisoCartaoPendente(pedidoRef.id, total, formaPagamento) : () => {};
         const unsub = pedidoRef.onSnapshot(snap => {
             const d = snap.data();
             if (!d || d.status === 'AGUARDANDO_CARTAO') return;
             unsub();
             removerAviso();
             if (d.status === 'CANCELADO_PAGAMENTO') {
-                flash(`❌ Pagamento no cartão não aprovado (pedido ${pedidoRef.id.slice(0, 6)})`);
+                flash(`❌ Pagamento ${formaPagamento === 'PIX' ? 'por PIX' : 'no cartão'} não aprovado (pedido ${pedidoRef.id.slice(0, 6)})`);
                 return;
             }
-            flash(`✅ Cartão aprovado • ${money(d.valor_total)}`);
+            flash(`✅ ${formaPagamento === 'PIX' ? 'PIX aprovado' : 'Cartão aprovado'} • ${money(d.valor_total)}`);
             if (window.GestorChefEstoque) {
                 window.GestorChefEstoque.baixarDoPedido(db, pedidoRef.id).then(avisarPratosDesativados).catch(() => {});
             }
