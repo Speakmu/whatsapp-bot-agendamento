@@ -408,11 +408,18 @@ export const terminaisPoint = onRequest(
                     description: 'Teste de entrega automatica',
                     expiration_time: 'PT2M',
                     transactions: { payments: [{ amount: '1.00' }] },
-                    config: { point: { terminal_id: deviceId } }
+                    config: {
+                        point: { terminal_id: deviceId },
+                        // Teste opcional de tipo pré-escolhido (credit_card | debit_card | qr):
+                        // serve para ver se a entrega automática continua com o tipo definido.
+                        ...(['credit_card', 'debit_card', 'qr'].includes(req.body.tipo)
+                            ? { payment_method: { default_type: req.body.tipo } } : {})
+                    }
                 },
                 { headers: { ...headers, 'X-Idempotency-Key': randomBytes(16).toString('hex') } }
             );
             const orderId = criada.data.id;
+            console.log('[Point teste] order de teste criada:', orderId, 'tipo:', req.body.tipo || 'nenhum', 'terminal:', deviceId);
             const linha = [{ segundos: 0, status: criada.data.status, detalhe: criada.data.status_detail }];
             const inicio = Date.now();
             for (let i = 0; i < 10; i++) {
