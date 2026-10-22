@@ -400,6 +400,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 teste.className = 'btn btn-azul';
                 teste.style.cssText = 'margin:6px 0 0 6px;padding:6px 12px;font-size:.8rem;';
                 teste.textContent = 'Testar entrega automática (R$ 1,00)';
+                const tipoTeste = document.createElement('select');
+                tipoTeste.style.cssText = 'margin:6px 0 0 6px;padding:6px;font-size:.8rem;';
+                [['', 'sem tipo (máquina pergunta)'], ['credit_card', 'crédito'], ['debit_card', 'débito'], ['qr', 'PIX (qr)']].forEach(([v, r]) => {
+                    const o = document.createElement('option'); o.value = v; o.textContent = r; tipoTeste.appendChild(o);
+                });
                 const saida = document.createElement('pre');
                 saida.style.cssText = 'white-space:pre-wrap;font-size:.8rem;margin-top:8px;display:none;';
                 teste.addEventListener('click', async () => {
@@ -408,9 +413,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     saida.style.display = 'block';
                     saida.textContent = 'Criando a ordem e acompanhando por ~40s... não toque na máquina.';
                     try {
-                        const r = await chamarTerminaisPoint({ acao: 'testeOrder', deviceId: t.id });
+                        const r = await chamarTerminaisPoint({ acao: 'testeOrder', deviceId: t.id, tipo: tipoTeste.value });
                         const tl = r.linhaDoTempo.map(x => `${x.segundos}s: ${x.status}${x.detalhe && x.detalhe !== x.status ? ' (' + x.detalhe + ')' : ''}`).join('\n');
-                        saida.textContent = `Ordem ${r.orderId}\n${tl}\n\nAgora toque em "Atualizar" na máquina e clique em "Consultar agora".`;
+                        saida.textContent = `Ordem ${r.orderId} (tipo: ${tipoTeste.value || 'nenhum'})\n${tl}\n\nAgora toque em "Atualizar" na máquina e clique em "Consultar agora".`;
                         const consultar = document.createElement('button');
                         consultar.type = 'button';
                         consultar.className = 'btn btn-cinza';
@@ -440,7 +445,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         teste.disabled = false;
                     }
                 });
-                linha.append(teste, saida);
+                linha.append(teste, tipoTeste, saida);
                 box.appendChild(linha);
             });
         } catch (err) {
