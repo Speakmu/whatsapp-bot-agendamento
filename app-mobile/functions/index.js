@@ -152,6 +152,15 @@ function pagamentoPoint(cfg, escolhido) {
     return { type: 'credit_card', installments: 1, installments_cost: 'seller' };
 }
 
+function tipoDefaultOrder(cfg, body) {
+    if (body.metodo === 'qr') return 'qr';
+    const mapa = { credito: 'credit_card', debito: 'debit_card' };
+    const fixo = cfg.pointTipoCartao;
+    if (fixo === 'credito' || fixo === 'debito') return mapa[fixo];
+    if (fixo === 'escolher') return mapa[body.tipoCartao] || null;
+    return null;
+}
+
 // Cria uma cobrança na maquininha Point (Cartão no balcão/caixa físico).
 // Chamada pelo dashboard (caixa.js) quando o operador finaliza uma venda no Cartão.
 // O resultado chega depois via webhook (topic=point_integration_ipn, ver abaixo).
@@ -206,8 +215,10 @@ export const criarCobrancaPoint = onRequest(
                     transactions: { payments: [{ amount: Number(amount).toFixed(2) }] },
                     config: {
                         point: { terminal_id: deviceId },
-                        // PIX pela máquina (QR na tela dela). Cartão segue sem tipo (a máquina pergunta).
-                        ...(req.body.metodo === 'qr' ? { payment_method: { default_type: 'qr' } } : {})
+                        // Tipo já enviado à máquina (testado: qr e credit_card chegam sozinhos).
+                        // PIX = qr; cartão = tipo fixo da config, ou o escolhido no Caixa quando a
+                        // config é "escolher"; sem tipo, a própria máquina pergunta (ex.: totem).
+                        ...(tipoDefaultOrder(cfgPoint, req.body) ? { payment_method: { default_type: tipoDefaultOrder(cfgPoint, req.body) } } : {})
                     }
                 },
                 { headers: {

@@ -253,6 +253,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 $('pag-grid').querySelectorAll('.pag-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 formaPagamento = btn.dataset.pag;
+                atualizarTipoCartaoVisivel();
                 renderComandasPendentes();
             });
         });
@@ -502,6 +503,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let pointTipoCartao = "credito";
     let pointApi = "legacy";
 
+    // Na Orders API o tipo (crédito/débito) vai pronto para a máquina; o seletor só aparece quando
+    // Cartão está escolhido e a config é "quem cobra escolhe".
+    function tipoCartaoNoCaixa() {
+        return formaPagamento === "Cartão" && maquininhaAtiva && provedorPagamentoCartao !== "stone"
+            && pointApi === "orders" && pointTipoCartao === "escolher";
+    }
+    function atualizarTipoCartaoVisivel() {
+        const wrap = document.getElementById('tipo-cartao-wrap');
+        if (wrap) wrap.classList.toggle('hidden', !tipoCartaoNoCaixa());
+    }
+
     // A Point exige o tipo do cartão na cobrança. Com a config "quem cobra escolhe",
     // pergunta ao operador antes de acionar a máquina. Devolve 'credito', 'debito' ou null (desistiu).
     function escolherTipoCartao() {
@@ -532,6 +544,7 @@ document.addEventListener('DOMContentLoaded', () => {
         maquininhaAtiva = d?.maquininhaAtiva !== false;
         pointTipoCartao = d?.pointTipoCartao || "credito";
         pointApi = d?.pointApi || "legacy";
+        atualizarTipoCartaoVisivel();
     }, err => console.warn('Erro ao ler provedor de pagamento:', err.message));
 
     // Só usa o nome digitado se a caixinha "Identificar cliente" estiver
@@ -677,7 +690,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // o caixa pode ver o status "Aguardando pagamento..." e o resultado chega sozinho.
     async function finalizarVendaCartaoMaquininha(criarCobrancaUrl, nomeProvedor) {
         let tipoCartao = null;
-        if (nomeProvedor === 'Point' && pointTipoCartao === 'escolher' && pointApi !== 'orders') {
+        if (nomeProvedor === 'Point' && tipoCartaoNoCaixa()) {
+            tipoCartao = $('tipo-cartao').value; // Orders: já vai pronto, a máquina não pergunta
+        } else if (nomeProvedor === 'Point' && pointTipoCartao === 'escolher' && pointApi !== 'orders') {
             tipoCartao = await escolherTipoCartao();
             if (!tipoCartao) return; // operador desistiu — nada foi enviado à máquina
         }
