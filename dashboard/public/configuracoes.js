@@ -445,7 +445,38 @@ document.addEventListener('DOMContentLoaded', () => {
                         teste.disabled = false;
                     }
                 });
-                linha.append(teste, tipoTeste, saida);
+                // Teste na API antiga (payment-intents): vê se a Pro 3 busca nessa fila.
+                const testeAntigo = document.createElement('button');
+                testeAntigo.type = 'button';
+                testeAntigo.className = 'btn btn-cinza';
+                testeAntigo.style.cssText = 'margin:6px 0 0 6px;padding:6px 12px;font-size:.8rem;';
+                testeAntigo.textContent = 'Testar API antiga (R$ 1,00)';
+                testeAntigo.addEventListener('click', async () => {
+                    if (!confirm('Cria uma cobrança de R$ 1,00 pela API ANTIGA nessa máquina e acompanha por ~40s. Depois toque em Atualizar na máquina. Continuar?')) return;
+                    testeAntigo.disabled = true;
+                    saida.style.display = 'block';
+                    saida.textContent = 'Criando a cobrança (API antiga) e acompanhando por ~40s...';
+                    try {
+                        const r = await chamarTerminaisPoint({ acao: 'testeIntent', deviceId: t.id });
+                        const tl = r.linhaDoTempo.map(x => `${x.segundos}s: ${x.status}`).join('\n');
+                        saida.textContent = `Cobrança (API antiga) ${r.orderId}\n${tl}\n\nAgora toque em "Atualizar" na máquina. Se a cobrança aparecer, a máquina busca nessa fila.`;
+                        const cancelar = document.createElement('button');
+                        cancelar.type = 'button';
+                        cancelar.className = 'btn btn-vermelho';
+                        cancelar.style.cssText = 'margin:6px 0 0;padding:6px 12px;font-size:.8rem;';
+                        cancelar.textContent = 'Cancelar cobrança de teste (API antiga)';
+                        cancelar.addEventListener('click', async () => {
+                            try { await chamarTerminaisPoint({ acao: 'cancelarIntent', deviceId: t.id, orderId: r.orderId }); alert('Cancelada.'); }
+                            catch (err) { alert('Não consegui cancelar (se já está na máquina, cancele por lá): ' + err.message); }
+                        });
+                        linha.append(cancelar);
+                    } catch (err) {
+                        saida.textContent = '❌ ' + err.message;
+                    } finally {
+                        testeAntigo.disabled = false;
+                    }
+                });
+                linha.append(teste, tipoTeste, testeAntigo, saida);
                 box.appendChild(linha);
             });
         } catch (err) {

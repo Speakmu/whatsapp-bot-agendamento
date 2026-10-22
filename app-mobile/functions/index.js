@@ -443,6 +443,35 @@ export const terminaisPoint = onRequest(
             }
             return res.status(200).json({ orderId, linhaDoTempo: linha });
         }
+        // Teste na API ANTIGA (payment-intents): a Pro 3 pode estar no modo PDV antigo, que busca
+        // nessa fila (tela "Atualize esta tela para cobrar"). Cria intent de R$ 1,00 e acompanha ~40s.
+        if (req.body?.acao === 'testeIntent') {
+            const deviceId = String(req.body.deviceId || '').trim();
+            if (!deviceId) return res.status(400).json({ message: "Informe deviceId." });
+            const criada = await axios.post(
+                `https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents`,
+                { amount: 100, description: 'Teste API antiga', payment: { type: 'credit_card', installments: 1, installments_cost: 'seller' },
+                  additional_info: { external_reference: 'teste-intent-' + Date.now() } },
+                { headers }
+            );
+            const intentId = criada.data.id;
+            console.log('[Point teste] intent de teste criada:', intentId, 'terminal:', deviceId);
+            const linha = [{ segundos: 0, status: criada.data.state || 'OPEN' }];
+            const inicio = Date.now();
+            for (let i = 0; i < 10; i++) {
+                await new Promise(r => setTimeout(r, 4000));
+                const o = (await axios.get(`https://api.mercadopago.com/point/integration-api/payment-intents/${intentId}`, { headers })).data;
+                linha.push({ segundos: Math.round((Date.now() - inicio) / 1000), status: o.state });
+                if (o.state !== 'OPEN') break;
+            }
+            return res.status(200).json({ orderId: intentId, linhaDoTempo: linha, api: 'antiga' });
+        }
+        if (req.body?.acao === 'cancelarIntent') {
+            const deviceId = String(req.body.deviceId || '').trim();
+            const intentId = String(req.body.orderId || '').trim();
+            await axios.delete(`https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents/${intentId}`, { headers });
+            return res.status(200).json({ id: intentId, status: 'cancelada' });
+        }
         if (req.body?.acao === 'consultarOrder' || req.body?.acao === 'cancelarOrder') {
             const orderId = String(req.body.orderId || '').trim();
             if (!orderId.startsWith('ORD')) return res.status(400).json({ message: "Informe orderId (ORD...)." });
