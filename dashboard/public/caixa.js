@@ -500,6 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let provedorPagamentoCartao = "mercadopago";
     let maquininhaAtiva = true;
     let pointTipoCartao = "credito";
+    let pointApi = "legacy";
 
     // A Point exige o tipo do cartão na cobrança. Com a config "quem cobra escolhe",
     // pergunta ao operador antes de acionar a máquina. Devolve 'credito', 'debito' ou null (desistiu).
@@ -530,6 +531,7 @@ document.addEventListener('DOMContentLoaded', () => {
         provedorPagamentoCartao = d?.provedorCartao || "mercadopago";
         maquininhaAtiva = d?.maquininhaAtiva !== false;
         pointTipoCartao = d?.pointTipoCartao || "credito";
+        pointApi = d?.pointApi || "legacy";
     }, err => console.warn('Erro ao ler provedor de pagamento:', err.message));
 
     // Só usa o nome digitado se a caixinha "Identificar cliente" estiver
@@ -671,7 +673,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // o caixa pode ver o status "Aguardando pagamento..." e o resultado chega sozinho.
     async function finalizarVendaCartaoMaquininha(criarCobrancaUrl, nomeProvedor) {
         let tipoCartao = null;
-        if (nomeProvedor === 'Point' && pointTipoCartao === 'escolher') {
+        if (nomeProvedor === 'Point' && pointTipoCartao === 'escolher' && pointApi !== 'orders') {
             tipoCartao = await escolherTipoCartao();
             if (!tipoCartao) return; // operador desistiu — nada foi enviado à máquina
         }

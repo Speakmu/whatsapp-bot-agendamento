@@ -193,7 +193,9 @@ export const criarCobrancaPoint = onRequest(
         // Orders API (pointApi='orders'): a order é enviada ao terminal sozinha, sem toque na
         // máquina. A API antiga (payment-intents) exige o operador tocar para buscar a cobrança.
         if (cfgPoint.pointApi === 'orders') {
-            const pag = pagamentoPoint(cfgPoint, req.body.tipoCartao);
+            // NÃO enviar config.payment_method.default_type: com ele a order ficava em "created" e a
+            // máquina só a pegava com toque; sem ele vira at_terminal em segundos (testado). A máquina
+            // pergunta débito/crédito ao cliente.
             const order = await axios.post(
                 'https://api.mercadopago.com/v1/orders',
                 {
@@ -202,8 +204,7 @@ export const criarCobrancaPoint = onRequest(
                     description: description || `Pedido ${externalReference}`,
                     transactions: { payments: [{ amount: Number(amount).toFixed(2) }] },
                     config: {
-                        point: { terminal_id: deviceId },
-                        payment_method: { default_type: pag.type }
+                        point: { terminal_id: deviceId }
                     }
                 },
                 { headers: {

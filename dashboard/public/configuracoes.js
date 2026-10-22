@@ -490,6 +490,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // pergunta crédito/débito ao cliente, e só lê app_config.
             await db.collection('app_config').doc('geral').set({
                 pointTipoCartao: $('pag-point-tipo').value,
+                pointApi: $('pag-point-api').value,
                 // Totem esconde o Cartão quando a Point não está em uso (Stone não atende o totem).
                 pointAtiva: maquininhaAtiva && $('pag-provedor').value !== 'stone'
             }, { merge: true });
