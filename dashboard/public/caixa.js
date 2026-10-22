@@ -501,7 +501,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let maquininhaAtiva = true;
     let pointTipoCartao = "credito";
     let pointApi = "legacy";
-    let pixNaMaquina = false;
 
     // A Point exige o tipo do cartão na cobrança. Com a config "quem cobra escolhe",
     // pergunta ao operador antes de acionar a máquina. Devolve 'credito', 'debito' ou null (desistiu).
@@ -533,7 +532,6 @@ document.addEventListener('DOMContentLoaded', () => {
         maquininhaAtiva = d?.maquininhaAtiva !== false;
         pointTipoCartao = d?.pointTipoCartao || "credito";
         pointApi = d?.pointApi || "legacy";
-        pixNaMaquina = d?.pixNaMaquina === true;
     }, err => console.warn('Erro ao ler provedor de pagamento:', err.message));
 
     // Só usa o nome digitado se a caixinha "Identificar cliente" estiver
@@ -551,8 +549,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Com a maquininha desativada, o Cartão segue o mesmo caminho manual de
         // Dinheiro/PIX abaixo: forma_pagamento continua "Cartão" (conta certo nos
         // relatórios), só não tenta acionar nenhum terminal físico.
-        // PIX pela máquina: só na Orders API (tipo qr), com a opção ligada em Configurações.
-        if (formaPagamento === "PIX" && maquininhaAtiva && provedorPagamentoCartao !== "stone" && pointApi === "orders" && pixNaMaquina) {
+        // Maquininha ativa: PIX (tipo qr, só na Orders API) e Cartão vão para a máquina; desativada, tudo manual.
+        if (formaPagamento === "PIX" && maquininhaAtiva && provedorPagamentoCartao !== "stone" && pointApi === "orders") {
             return finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_POINT_URL, "Point");
         }
         if (formaPagamento === "Cartão" && maquininhaAtiva) {
