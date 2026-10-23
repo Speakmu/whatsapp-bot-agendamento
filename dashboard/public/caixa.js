@@ -675,6 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok) throw new Error(data.message || `erro ${resp.status}`);
                 if (data.cancelado === false) flash('A cobrança já havia sido finalizada.');
+                if (data.pendente) flash('Cancelamento solicitado à máquina. Aguarde a confirmação dela.');
             } catch (err) {
                 alert('Não consegui cancelar a cobrança: ' + err.message);
                 btn.disabled = false;

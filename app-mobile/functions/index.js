@@ -293,11 +293,18 @@ export const cancelarCobrancaPoint = onRequest(
         try {
             if (String(pedido.pagamento_id).startsWith('ORD')) {
                 // Cobrança criada pela Orders API.
-                await axios.post(
+                // x-allow-cancelable-status: at_terminal permite cancelar pela API mesmo com a ordem já
+                // na máquina (Smart 1/2 com software atualizado); a conclusão vem pelo webhook.
+                const canc = await axios.post(
                     `https://api.mercadopago.com/v1/orders/${pedido.pagamento_id}/cancel`,
                     {},
-                    { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': randomBytes(16).toString('hex') } }
+                    { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', 'X-Idempotency-Key': randomBytes(16).toString('hex'), 'x-allow-cancelable-status': 'at_terminal' } }
                 );
+                console.log('[Point Orders] cancelamento solicitado:', JSON.stringify(canc.data));
+                if (String(canc.data?.status || '').toLowerCase() !== 'canceled') {
+                    // Cancelamento aceito mas ainda não concluído (cancellation_requested): o webhook fecha o pedido.
+                    return res.status(202).json({ pendente: true, message: "Cancelamento solicitado à máquina. O pedido será cancelado assim que ela confirmar." });
+                }
             } else {
                 await axios.delete(
                     `https://api.mercadopago.com/point/integration-api/devices/${deviceId}/payment-intents/${pedido.pagamento_id}`,
@@ -516,7 +523,7 @@ export const terminaisPoint = onRequest(
             if (!orderId.startsWith('ORD')) return res.status(400).json({ message: "Informe orderId (ORD...)." });
             const r = req.body.acao === 'consultarOrder'
                 ? await axios.get(`https://api.mercadopago.com/v1/orders/${orderId}`, { headers })
-                : await axios.post(`https://api.mercadopago.com/v1/orders/${orderId}/cancel`, {}, { headers: { ...headers, 'X-Idempotency-Key': randomBytes(16).toString('hex') } });
+                : await axios.post(`https://api.mercadopago.com/v1/orders/${orderId}/cancel`, {}, { headers: { ...headers, 'X-Idempotency-Key': randomBytes(16).toString('hex'), 'x-allow-cancelable-status': 'at_terminal' } });
             return res.status(200).json({ id: r.data.id, status: r.data.status, detalhe: r.data.status_detail, ultimaAtualizacao: r.data.last_updated_date });
         }
 
