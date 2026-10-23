@@ -415,7 +415,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     try {
                         const r = await chamarTerminaisPoint({ acao: 'testeOrder', deviceId: t.id, tipo: tipoTeste.value });
                         const tl = r.linhaDoTempo.map(x => `${x.segundos}s: ${x.status}${x.detalhe && x.detalhe !== x.status ? ' (' + x.detalhe + ')' : ''}`).join('\n');
-                        saida.textContent = `Ordem ${r.orderId} (tipo: ${tipoTeste.value || 'nenhum'})\n${tl}\n\nAgora toque em "Atualizar" na máquina e clique em "Consultar agora".`;
+                        const chegou = r.linhaDoTempo.some(x => x.status && x.status !== 'created');
+                        saida.textContent = `Ordem ${r.orderId} (tipo: ${tipoTeste.value || 'nenhum'})\n${tl}\n\n` + (chegou
+                            ? '✅ CHEGOU SOZINHA à máquina (sem toque).'
+                            : '❌ NÃO chegou sozinha: ficou em "created". (Só para diagnóstico: se tocar em Atualizar/Inserir valor na máquina e clicar em "Consultar agora", vê-se se ela busca com toque.)');
                         const consultar = document.createElement('button');
                         consultar.type = 'button';
                         consultar.className = 'btn btn-cinza';
