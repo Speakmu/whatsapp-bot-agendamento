@@ -690,7 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let tentativas = 0;
         const sonda = setInterval(async () => {
             tentativas++;
-            if (tentativas > 15) { clearInterval(sonda); return; }
+            if (tentativas > 80) { clearInterval(sonda); return; } // ~5 min (validade da ordem)
             try {
                 const user = firebase.auth().currentUser;
                 if (!user) return;
@@ -705,7 +705,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (tentativas >= 2) txt.textContent = `${textoBase} — ⚠️ ainda não chegou: toque em "Inserir valor" na máquina`;
                 } else {
                     txt.textContent = textoBase;
-                    if (d.status !== 'created') clearInterval(sonda);
+                    // Terminou (paga/cancelada/expirada): o servidor já fechou o pedido, o aviso some pelo snapshot.
+                    if (['processed', 'canceled', 'expired', 'failed'].includes(d.status)) clearInterval(sonda);
                 }
             } catch (_) { /* silencioso: é só um aviso */ }
         }, 4000);

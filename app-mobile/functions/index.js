@@ -1,6 +1,7 @@
 import axios from "axios";
 import { randomBytes } from "crypto";
 import { onRequest } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import { defineSecret } from "firebase-functions/params";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -417,9 +418,9 @@ export const statusCobrancaPoint = onRequest(
         if (!pedido) return res.status(404).json({ message: "Pedido não encontrado." });
         if (pedido.origem !== 'TOTEM') await exigirUsuario(req);
         if (!String(pedido.pagamento_id || '').startsWith('ORD')) return res.status(200).json({ status: null });
-        const r = await axios.get(`https://api.mercadopago.com/v1/orders/${pedido.pagamento_id}`,
-            { headers: { Authorization: `Bearer ${tokenPoint()}` } });
-        return res.status(200).json({ status: r.data.status });
+        // Consulta a order e, se já terminou (paga/cancelada/expirada), fecha o pedido aqui mesmo.
+        const st = await tratarNotificacaoOrder(pedido.pagamento_id, tokenPoint(), undefined);
+        return res.status(200).json({ status: st });
     } catch (error) {
         return res.status(error.status || error.response?.status || 500).json({ message: error.message });
     }
@@ -638,20 +639,20 @@ async function tratarNotificacaoOrder(orderId, accessToken, acao) {
 
     const aprovado = st === 'processed' && String(order.status_detail || '').toLowerCase() === 'accredited';
     const cancelado = CANC.includes(st);
-    if (!aprovado && !cancelado) return; // created / at_terminal / action_required: aguarda
+    if (!aprovado && !cancelado) return st; // created / at_terminal / action_required: aguarda
 
     const snap = await db.collection('pedidos').where('pagamento_id', '==', orderId).limit(1).get();
     if (snap.empty) {
         console.warn('Webhook Point Orders: pedido não encontrado para order', orderId);
-        return;
+        return st;
     }
     const pedidoDoc = snap.docs[0];
     const pedido = pedidoDoc.data();
-    if (pedido.status !== 'AGUARDANDO_CARTAO') return; // já processado
+    if (pedido.status !== 'AGUARDANDO_CARTAO') return st; // já processado
 
     if (cancelado) {
         await pedidoDoc.ref.update({ status: 'CANCELADO_PAGAMENTO', gateway_state: st.toUpperCase() });
-        return;
+        return st;
     }
     await confirmarCartaoAprovado(pedidoDoc, pedido, 'Point', 'ORDER_PROCESSED');
     const pag = (order.transactions && order.transactions.payments && order.transactions.payments[0]) || {};
@@ -660,7 +661,26 @@ async function tratarNotificacaoOrder(orderId, accessToken, acao) {
         ...(pag.id ? { point_payment_id: String(pag.id) } : {}),
         ...(tipo ? { point_payment_type: String(tipo) } : {}),
     });
+    return st;
 }
+
+// Rede de segurança: o aviso (webhook) das ordens pode não chegar. A cada minuto, consulta as ordens
+// dos pedidos ainda "aguardando cartão" e fecha os que foram pagos, cancelados na máquina ou expiraram.
+export const reconciliarOrdersPoint = onSchedule(
+    { schedule: 'every 1 minutes', secrets: [MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_POINT_ACCESS_TOKEN] },
+    async () => {
+        const snap = await db.collection('pedidos').where('status', '==', 'AGUARDANDO_CARTAO').limit(50).get();
+        for (const doc of snap.docs) {
+            const id = String(doc.data().pagamento_id || '');
+            if (!id.startsWith('ORD')) continue;
+            try {
+                await tratarNotificacaoOrder(id, tokenPoint(), undefined);
+            } catch (err) {
+                console.warn('[reconciliarOrdersPoint]', id, err.response?.status || err.message);
+            }
+        }
+    }
+);
 
 const ESTADOS_POINT_CANCELADOS =['CANCELED', 'CANCELLED', 'ERROR', 'FAILED', 'ABANDONED', 'EXPIRED'];
 
