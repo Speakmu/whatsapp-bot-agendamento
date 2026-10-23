@@ -415,7 +415,17 @@ export const terminaisPoint = onRequest(
             if (!deviceId) return res.status(400).json({ message: "Informe deviceId." });
             const criada = await axios.post(
                 'https://api.mercadopago.com/v1/orders',
-                {
+                req.body.tipo === 'caixa'
+                    // Reproduz EXATAMENTE a ordem que o Caixa envia (mesmos campos e formatos).
+                    ? {
+                        type: 'point',
+                        external_reference: randomBytes(10).toString('hex'),
+                        description: 'Pedido balcão ' + randomBytes(3).toString('hex'),
+                        expiration_time: 'PT5M',
+                        transactions: { payments: [{ amount: '1.00' }] },
+                        config: { point: { terminal_id: deviceId }, payment_method: { default_type: 'credit_card' } }
+                    }
+                    : {
                     type: 'point',
                     external_reference: 'teste-entrega-' + Date.now(),
                     description: 'Teste de entrega automatica',

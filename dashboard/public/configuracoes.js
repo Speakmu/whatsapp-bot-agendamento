@@ -402,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 teste.textContent = 'Testar entrega automática (R$ 1,00)';
                 const tipoTeste = document.createElement('select');
                 tipoTeste.style.cssText = 'margin:6px 0 0 6px;padding:6px;font-size:.8rem;';
-                [['', 'sem tipo (máquina pergunta)'], ['credit_card', 'crédito'], ['debit_card', 'débito'], ['qr', 'PIX (qr)']].forEach(([v, r]) => {
+                [['', 'sem tipo (máquina pergunta)'], ['credit_card', 'crédito'], ['debit_card', 'débito'], ['qr', 'PIX (qr)'], ['caixa', 'igual ao do Caixa (crédito)']].forEach(([v, r]) => {
                     const o = document.createElement('option'); o.value = v; o.textContent = r; tipoTeste.appendChild(o);
                 });
                 const saida = document.createElement('pre');
