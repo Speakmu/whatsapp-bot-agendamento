@@ -389,6 +389,35 @@ export const cancelarPixTotem = onRequest(
     }
 });
 
+// Status da order Point de um pedido (created / at_terminal / ...). O Caixa usa para avisar o
+// operador quando a cobrança não chegou à máquina (ela fica em "created" se a máquina não está na
+// tela de espera do PDV).
+export const statusCobrancaPoint = onRequest(
+    { secrets: [MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_POINT_ACCESS_TOKEN] },
+    async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    if (req.method === 'OPTIONS') {
+        res.set('Access-Control-Allow-Methods', 'POST');
+        res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        return res.status(204).send('');
+    }
+    if (req.method !== 'POST') return res.status(405).json({ message: 'Metodo nao permitido.' });
+    try {
+        const pedidoId = String(req.body?.pedidoId || '').trim();
+        if (!pedidoId) return res.status(400).json({ message: "Informe pedidoId." });
+        const snap = await db.collection('pedidos').doc(pedidoId).get();
+        const pedido = snap.data();
+        if (!pedido) return res.status(404).json({ message: "Pedido não encontrado." });
+        if (pedido.origem !== 'TOTEM') await exigirUsuario(req);
+        if (!String(pedido.pagamento_id || '').startsWith('ORD')) return res.status(200).json({ status: null });
+        const r = await axios.get(`https://api.mercadopago.com/v1/orders/${pedido.pagamento_id}`,
+            { headers: { Authorization: `Bearer ${tokenPoint()}` } });
+        return res.status(200).json({ status: r.data.status });
+    } catch (error) {
+        return res.status(error.status || error.response?.status || 500).json({ message: error.message });
+    }
+});
+
 // Administração dos terminais Point: lista os terminais da conta (para preencher o
 // device_id sozinho) e coloca um terminal em modo PDV (exigido pela API de integração).
 export const terminaisPoint = onRequest(

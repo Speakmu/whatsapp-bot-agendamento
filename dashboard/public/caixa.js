@@ -498,6 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const CRIAR_COBRANCA_POINT_URL = FUNCTIONS_BASE_URL + "/criarCobrancaPoint";
     const CRIAR_COBRANCA_STONE_URL = FUNCTIONS_BASE_URL + "/criarCobrancaStone";
     const CANCELAR_COBRANCA_POINT_URL = FUNCTIONS_BASE_URL + "/cancelarCobrancaPoint";
+    const STATUS_COBRANCA_POINT_URL = FUNCTIONS_BASE_URL + "/statusCobrancaPoint";
     let provedorPagamentoCartao = "mercadopago";
     let maquininhaAtiva = true;
     let pointTipoCartao = "credito";
@@ -681,7 +682,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         item.append(txt, btn);
         wrap.appendChild(item);
-        return () => { item.remove(); if (!wrap.children.length) wrap.remove(); };
+
+        // A Smart 2 só recebe a cobrança sozinha quando está na tela de espera do PDV ("inicie a
+        // opção pela frente do caixa"). Se a order seguir em "created", avisa o operador.
+        const textoBase = txt.textContent;
+        let tentativas = 0;
+        const sonda = setInterval(async () => {
+            tentativas++;
+            if (tentativas > 15) { clearInterval(sonda); return; }
+            try {
+                const user = firebase.auth().currentUser;
+                if (!user) return;
+                const resp = await fetch(STATUS_COBRANCA_POINT_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
+                    body: JSON.stringify({ pedidoId })
+                });
+                const d = await resp.json().catch(() => ({}));
+                if (!resp.ok || !d.status) return;
+                if (d.status === 'created') {
+                    if (tentativas >= 2) txt.textContent = `${textoBase} — ⚠️ ainda não chegou: toque em "Inserir valor" na máquina`;
+                } else {
+                    txt.textContent = textoBase;
+                    if (d.status !== 'created') clearInterval(sonda);
+                }
+            } catch (_) { /* silencioso: é só um aviso */ }
+        }, 4000);
+        return () => { clearInterval(sonda); item.remove(); if (!wrap.children.length) wrap.remove(); };
     }
 
     // Venda no Cartão via maquininha física (Point/Mercado Pago ou Stone): dispara a
