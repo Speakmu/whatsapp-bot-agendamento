@@ -16,20 +16,6 @@ const SNIPPET = `
       target.build_configurations.each do |config|
         config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
       end
-      # @react-native-firebase/* (RNFBApp, RNFBMessaging, RNFBAuth...) nao
-      # entram na lista de pods que a Expo ja modulariza sozinha com
-      # use_frameworks:static — cada um importa RCTPromiseRejectBlock (do
-      # React-Core) por fora de um modulo Clang proprio, e o compilador
-      # reclama "must be imported from module X before it is required"
-      # porque dois pods RNFB diferentes "disputam" a mesma declaracao.
-      # Forcar DEFINES_MODULE/CLANG_ENABLE_MODULES neles resolve a
-      # ambiguidade, igual a Expo ja faz pros pods dela.
-      if target.name.start_with?('RNFB')
-        target.build_configurations.each do |config|
-          config.build_settings['DEFINES_MODULE'] = 'YES'
-          config.build_settings['CLANG_ENABLE_MODULES'] = 'YES'
-        end
-      end
     end
 `;
 
