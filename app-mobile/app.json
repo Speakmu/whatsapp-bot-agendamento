@@ -59,7 +59,8 @@
             "useFrameworks": "static"
           }
         }
-      ]
+      ],
+      "./plugins/withPodfilePostInstall.js"
     ],
     "experiments": {
       "typedRoutes": true,
