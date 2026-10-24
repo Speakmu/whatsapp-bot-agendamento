@@ -258,7 +258,10 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
         $('btn-finalizar').addEventListener('click', finalizarVenda);
-        $('chk-manual').addEventListener('change', atualizarTipoCartaoVisivel);
+        $('btn-manual').addEventListener('click', () => {
+            $('chk-manual').checked = !$('chk-manual').checked;
+            atualizarTipoCartaoVisivel();
+        });
     }
 
     function atualizarBotaoFinalizar() {
@@ -520,6 +523,15 @@ document.addEventListener('DOMContentLoaded', () => {
     function atualizarTipoCartaoVisivel() {
         const wrap = document.getElementById('tipo-cartao-wrap');
         if (wrap) wrap.classList.toggle('hidden', !tipoCartaoNoCaixa() || manualSemMaquina());
+        const bm = document.getElementById('btn-manual');
+        if (bm) {
+            const on = manualSemMaquina();
+            bm.setAttribute('aria-pressed', on ? 'true' : 'false');
+            bm.style.background = on ? '#e67e22' : '#fff';
+            bm.style.color = on ? '#fff' : '#2c3e50';
+            bm.style.borderColor = on ? '#e67e22' : '#d5dbe1';
+            bm.textContent = on ? '✍️ Manual ATIVADO — toque para voltar à máquina' : '✍️ Lançar manual (sem acionar a máquina)';
+        }
         const mw = document.getElementById('manual-wrap');
         if (mw) {
             const aplica = maquininhaAtiva && (formaPagamento === 'Cartão' || formaPagamento === 'PIX');

@@ -253,10 +253,12 @@
                             <input type="checkbox" id="chk-cozinha"> Enviar p/ cozinha
                         </label>
                     </div>
-                    <div class="checks-row hidden" id="manual-wrap">
-                        <label class="chk-inline" title="Registra a venda sem acionar a maquininha integrada. Cobre em outra máquina, digitando o valor.">
-                            <input type="checkbox" id="chk-manual"> Lan&ccedil;ar manual (sem acionar a m&aacute;quina)
-                        </label>
+                    <div class="hidden" id="manual-wrap" style="margin-bottom:8px;">
+                        <input type="checkbox" id="chk-manual" style="display:none">
+                        <button type="button" id="btn-manual" aria-pressed="false" title="Registra a venda sem acionar a maquininha integrada. Cobre em outra m&aacute;quina, digitando o valor."
+                            style="width:100%;padding:12px;border:2px solid #d5dbe1;border-radius:10px;background:#fff;color:#2c3e50;font-size:1rem;font-weight:700;cursor:pointer;">
+                            &#9997;&#65039; Lan&ccedil;ar manual (sem acionar a m&aacute;quina)
+                        </button>
                     </div>
                     <div class="campo hidden" id="campo-cliente">
                         <input id="cliente-nome" placeholder="Nome do cliente">
