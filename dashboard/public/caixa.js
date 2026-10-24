@@ -258,10 +258,14 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
         $('btn-finalizar').addEventListener('click', finalizarVenda);
+        // Modo manual: fica ligado até desligar, e é lembrado neste navegador.
+        try { $('chk-manual').checked = localStorage.getItem('caixa_modo_manual') === '1'; } catch (_) {}
         $('btn-manual').addEventListener('click', () => {
             $('chk-manual').checked = !$('chk-manual').checked;
+            try { localStorage.setItem('caixa_modo_manual', $('chk-manual').checked ? '1' : '0'); } catch (_) {}
             atualizarTipoCartaoVisivel();
         });
+        atualizarTipoCartaoVisivel();
     }
 
     function atualizarBotaoFinalizar() {
@@ -530,14 +534,10 @@ document.addEventListener('DOMContentLoaded', () => {
             bm.style.background = on ? '#e67e22' : '#fff';
             bm.style.color = on ? '#fff' : '#2c3e50';
             bm.style.borderColor = on ? '#e67e22' : '#d5dbe1';
-            bm.textContent = on ? '✍️ Manual ATIVADO — toque para voltar à máquina' : '✍️ Lançar manual (sem acionar a máquina)';
+            bm.textContent = on ? '✍️ MODO MANUAL LIGADO — Cartão e PIX NÃO vão para a máquina (toque para desligar)' : '✍️ Lançar manual (sem acionar a máquina)';
         }
         const mw = document.getElementById('manual-wrap');
-        if (mw) {
-            const aplica = maquininhaAtiva && (formaPagamento === 'Cartão' || formaPagamento === 'PIX');
-            mw.classList.toggle('hidden', !aplica);
-            if (!aplica) { const c = document.getElementById('chk-manual'); if (c) c.checked = false; }
-        }
+        if (mw) mw.classList.toggle('hidden', !maquininhaAtiva); // sem máquina ativa já é tudo manual
     }
 
     // A Point exige o tipo do cartão na cobrança. Com a config "quem cobra escolhe",
@@ -659,7 +659,6 @@ document.addEventListener('DOMContentLoaded', () => {
         $('chk-identificar-cliente').checked = false;
         $('campo-cliente').classList.add('hidden');
         $('chk-cozinha').checked = false;
-        if ($('chk-manual')) $('chk-manual').checked = false;
         atualizarTipoCartaoVisivel();
         renderCarrinho();
         atualizarBotaoFinalizar();
