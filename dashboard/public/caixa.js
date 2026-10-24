@@ -258,6 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
         $('btn-finalizar').addEventListener('click', finalizarVenda);
+        $('chk-manual').addEventListener('change', atualizarTipoCartaoVisivel);
     }
 
     function atualizarBotaoFinalizar() {
@@ -510,9 +511,21 @@ document.addEventListener('DOMContentLoaded', () => {
         return formaPagamento === "Cartão" && maquininhaAtiva && provedorPagamentoCartao !== "stone"
             && pointApi === "orders" && pointTipoCartao === "escolher";
     }
+    // "Lançar manual": com a máquina integrada ativa, deixa o operador registrar Cartão/PIX sem acionar
+    // a máquina (cobra em outra máquina digitando o valor, ou quando a integrada está indisponível).
+    function manualSemMaquina() {
+        const chk = document.getElementById('chk-manual');
+        return !!(chk && chk.checked);
+    }
     function atualizarTipoCartaoVisivel() {
         const wrap = document.getElementById('tipo-cartao-wrap');
-        if (wrap) wrap.classList.toggle('hidden', !tipoCartaoNoCaixa());
+        if (wrap) wrap.classList.toggle('hidden', !tipoCartaoNoCaixa() || manualSemMaquina());
+        const mw = document.getElementById('manual-wrap');
+        if (mw) {
+            const aplica = maquininhaAtiva && (formaPagamento === 'Cartão' || formaPagamento === 'PIX');
+            mw.classList.toggle('hidden', !aplica);
+            if (!aplica) { const c = document.getElementById('chk-manual'); if (c) c.checked = false; }
+        }
     }
 
     // A Point exige o tipo do cartão na cobrança. Com a config "quem cobra escolhe",
@@ -564,10 +577,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // Dinheiro/PIX abaixo: forma_pagamento continua "Cartão" (conta certo nos
         // relatórios), só não tenta acionar nenhum terminal físico.
         // Maquininha ativa: PIX (tipo qr, só na Orders API) e Cartão vão para a máquina; desativada, tudo manual.
-        if (formaPagamento === "PIX" && maquininhaAtiva && provedorPagamentoCartao !== "stone" && pointApi === "orders") {
+        if (formaPagamento === "PIX" && maquininhaAtiva && !manualSemMaquina() && provedorPagamentoCartao !== "stone" && pointApi === "orders") {
             return finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_POINT_URL, "Point");
         }
-        if (formaPagamento === "Cartão" && maquininhaAtiva) {
+        if (formaPagamento === "Cartão" && maquininhaAtiva && !manualSemMaquina()) {
             return provedorPagamentoCartao === "stone" ? finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_STONE_URL, "Stone") : finalizarVendaCartaoMaquininha(CRIAR_COBRANCA_POINT_URL, "Point");
         }
 
@@ -634,6 +647,8 @@ document.addEventListener('DOMContentLoaded', () => {
         $('chk-identificar-cliente').checked = false;
         $('campo-cliente').classList.add('hidden');
         $('chk-cozinha').checked = false;
+        if ($('chk-manual')) $('chk-manual').checked = false;
+        atualizarTipoCartaoVisivel();
         renderCarrinho();
         atualizarBotaoFinalizar();
         flash(`✅ Venda registrada • ${money(total)} (${formaPagamento})`);
