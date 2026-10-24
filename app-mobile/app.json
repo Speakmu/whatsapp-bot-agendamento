@@ -46,21 +46,9 @@
           }
         }
       ],
-      "@react-native-firebase/app",
       "expo-secure-store",
-      "@react-native-firebase/messaging",
-      "@react-native-firebase/auth",
       "expo-font",
-      "expo-web-browser",
-      [
-        "expo-build-properties",
-        {
-          "ios": {
-            "useFrameworks": "dynamic"
-          }
-        }
-      ],
-      "./plugins/withPodfilePostInstall.js"
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
