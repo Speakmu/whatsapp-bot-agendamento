@@ -134,6 +134,7 @@
         .split-linha input { flex:1; padding:9px; border:1px solid var(--line); border-radius:8px; font-size:1rem; min-width:0; }
         .split-linha button { padding:9px 12px; border:none; border-radius:8px; background:#2c3e50; color:#fff; font-weight:700; cursor:pointer; }
         .split-troco { font-weight:800; font-size:.85rem; }
+        .split-rotulo { font-size:.8rem; font-weight:700; color:#2c3e50; }
         .split-dica { font-size:.74rem; color:var(--muted); }
         .split-sair { background:#fff; color:var(--muted); border:1px solid var(--line); border-radius:8px; padding:7px; cursor:pointer; font-size:.8rem; }
         .checks-row { display:flex; gap:6px 10px; margin-bottom:8px; flex-wrap:wrap; }
@@ -272,13 +273,18 @@
                             <span>Falta <b id="split-falta">R$ 0,00</b></span>
                         </div>
                         <div id="split-lista" class="split-lista"></div>
+                        <label class="split-rotulo" for="split-valor">Quanto esta pessoa vai pagar?</label>
                         <div class="split-linha">
-                            <input id="split-valor" inputmode="decimal" placeholder="Valor desta parte (R$)">
+                            <input id="split-valor" inputmode="decimal" placeholder="R$ 0,00">
                             <button type="button" id="btn-split-resto">Restante</button>
                         </div>
-                        <div class="split-linha hidden" id="split-recebido-wrap">
-                            <input id="split-recebido" inputmode="decimal" placeholder="Dinheiro recebido (opcional)">
-                            <span id="split-troco" class="split-troco"></span>
+                        <button type="button" class="split-sair hidden" id="btn-split-troco-toggle">&#128181; Calcular troco</button>
+                        <div class="hidden" id="split-recebido-wrap">
+                            <label class="split-rotulo" for="split-recebido">Cliente entregou (s&oacute; para o troco)</label>
+                            <div class="split-linha">
+                                <input id="split-recebido" inputmode="decimal" placeholder="R$ 0,00">
+                                <span id="split-troco" class="split-troco"></span>
+                            </div>
                         </div>
                         <div class="split-dica">Escolha a forma abaixo (Dinheiro, PIX ou Cart&atilde;o). PIX e cart&atilde;o s&atilde;o lan&ccedil;ados pelo valor j&aacute; aprovado na m&aacute;quina.</div>
                         <button type="button" class="btn-finalizar" id="btn-split-pagar" disabled>Registrar pagamento</button>

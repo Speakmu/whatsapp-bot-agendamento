@@ -48,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let unsubMovs = null;
     let comandasPendentes = [];
     let categoriaAtiva = "";  // "" = todas
+    let trocoAberto = false;  // campo "cliente entregou" visível
     let dividir = false;      // modo "Dividir conta" ligado
     let contaAtiva = null;    // pedido em aberto carregado no painel de divisão (null = só o carrinho)
 
@@ -254,6 +255,7 @@ document.addEventListener('DOMContentLoaded', () => {
             atualizarSplit();
         });
         $('btn-split-pagar').addEventListener('click', registrarParte);
+        $('btn-split-troco-toggle').addEventListener('click', () => { trocoAberto = true; atualizarSplit(); $('split-recebido').focus(); });
         $('btn-split-sair').addEventListener('click', limparPainelConta);
         $('chk-identificar-cliente').addEventListener('change', e => {
             const marcado = e.target.checked;
@@ -961,7 +963,9 @@ document.addEventListener('DOMContentLoaded', () => {
         $('split-lista').innerHTML = v.pagamentos.map((p, i) =>
             `<div class="linha"><span>${i + 1}. ${escapeHtml(p.forma)}</span><span>${money(p.valor)}</span></div>`).join('');
         const dinheiro = /dinheiro/i.test(formaPagamento);
-        $('split-recebido-wrap').classList.toggle('hidden', !dinheiro);
+        // Troco: só aparece em dinheiro, e só depois de pedir ("Calcular troco") — não é obrigatório.
+        $('btn-split-troco-toggle').classList.toggle('hidden', !dinheiro || trocoAberto);
+        $('split-recebido-wrap').classList.toggle('hidden', !dinheiro || !trocoAberto);
         const valor = lerValor($('split-valor'));
         const rec = lerValor($('split-recebido'));
         $('split-troco').textContent = dinheiro && rec > valor && valor > 0 ? `Troco ${money(r2(rec - valor))}` : '';
@@ -977,6 +981,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function limparPainelConta() {
         contaAtiva = null;
         dividir = false;
+        trocoAberto = false;
         carrinho = [];
         $('chk-dividir').checked = false;
         $('split-valor').value = '';
@@ -1090,6 +1095,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         $('split-valor').value = '';
         $('split-recebido').value = '';
+        trocoAberto = false;
         if (!quita) {
             contaAtiva = { id: pedidoRef.id, ...pedidoLocal };
             flash(`✅ ${money(valor)} (${formaPagamento}) recebido • falta ${money(r2(v.falta - valor))}`);
