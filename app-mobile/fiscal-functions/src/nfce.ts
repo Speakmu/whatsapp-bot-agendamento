@@ -12,6 +12,7 @@ import { SefazTransport } from './engine/sefaz-transport.service';
 import { getDistribuicaoDFeEndpoint, getSefazEndpoints } from './engine/sefaz-endpoints';
 import { DanfeNfceService } from './engine/danfe-nfce.service';
 import { obterAliquotaIBPT } from './ibpt-store';
+import { detPagParaNota } from './pagamentos-nota';
 import { nfeProcDe, extrairProtNFe, montarNfeProc, extrairEventosCancelamento } from './xml-proc';
 import { cStatTransitorio, servicoParalisado, digestDoXml, xmlAutorizado } from './regras-fiscais';
 
@@ -94,6 +95,9 @@ export interface AvulsaRequest {
   indPres?: '0' | '1' | '2' | '3' | '4' | '9';
   indIntermed?: '0' | '1';
   payment: { tPag: string; vPag?: number; vTroco?: number };
+  // Conta dividida: varios pagamentos (tem prioridade sobre `payment`). `valor` quita a conta;
+  // `recebido` (so dinheiro) e quanto o cliente entregou — a diferenca e o troco. Ver pagamentos-nota.ts.
+  pagamentos?: Array<{ forma: string; valor: number; recebido?: number | null }>;
   items: AvulsaItem[];
   infAdic?: string;
   // Alíquota aproximada (%) da carga tributária total, para a linha exigida pela
@@ -339,11 +343,20 @@ async function montarInputNFe(req: AvulsaRequest): Promise<{ input: NfeXmlInput;
       vProd, vFrete: 0, vSeg: 0, vDesc: vDescTotal, vII: 0, vIPI: 0, vIPIDevol: 0,
       vPIS: 0, vCOFINS: 0, vOutro: 0, vNF, vTotTrib,
     },
-    payment: {
-      tPag: req.payment.tPag || '01',
-      vPag: round2(req.payment.vPag != null ? req.payment.vPag : vNF),
-      vTroco: req.payment.vTroco ? round2(req.payment.vTroco) : undefined,
-    },
+    ...(req.pagamentos && req.pagamentos.length
+      ? (() => {
+        // Conta dividida: soma(vPag) - vTroco precisa fechar o vNF (senao falha aqui, antes da SEFAZ).
+        const { detPag, vTroco } = detPagParaNota(
+          req.pagamentos.map((p) => ({ forma: p.forma, valor: p.valor, recebido: p.recebido ?? null })), vNF);
+        return { payments: detPag, vTroco: vTroco || undefined };
+      })()
+      : {
+        payment: {
+          tPag: req.payment.tPag || '01',
+          vPag: round2(req.payment.vPag != null ? req.payment.vPag : vNF),
+          vTroco: req.payment.vTroco ? round2(req.payment.vTroco) : undefined,
+        },
+      }),
     infAdic: tpAmb === '2' ? AVISO_HOMOLOGACAO_DEST : req.infAdic,
     respTec: RESP_TEC,
   };

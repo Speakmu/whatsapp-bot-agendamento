@@ -401,3 +401,57 @@ test('XML da nota sai com o CFOP/CSOSN/NCM de cada produto: refrigerante 5405/50
   assert.match(dets[1], /<ICMSSN500><orig>0<\/orig><CSOSN>500<\/CSOSN><\/ICMSSN500>/);
   assert.equal([...xml.matchAll(/<CFOP>(\d+)<\/CFOP>/g)].map((m) => m[1]).join(','), '5102,5405');
 });
+
+// ---------------------------------------------- conta dividida: vários <detPag> na mesma nota
+
+test('conta dividida (dinheiro + cartão): a nota leva um detPag por pagamento, troco no <pag> e soma - troco = total', async () => {
+  const cert = certDeTeste();
+  const chamadas = sefazFalsa({ authorize: (xml) => protocolo((xml.match(/Id="NFe(\d{44})"/))[1], digestDe(xml)) });
+  // itens: 3 x 5,50 + 1 x 9,00 = 25,50  ->  dinheiro 10 (entregou 20) + cartão 15,50
+  const res = await emitirNfceAvulsa(pedidoDeTeste({
+    payment: { tPag: '01', vPag: 25.5 },                                   // o campo antigo continua indo; `pagamentos` tem prioridade
+    pagamentos: [{ forma: 'Dinheiro', valor: 10, recebido: 20 }, { forma: 'Cartão', valor: 15.5 }],
+  }), cert);
+  assert.equal(res.status, 'AUTORIZADA');
+  const xml = chamadas.authorize[0][0];
+  const pag = xml.match(/<pag>[\s\S]*?<\/pag>/)[0];
+  const dets = pag.match(/<detPag>[\s\S]*?<\/detPag>/g);
+  assert.equal(dets.length, 2);
+  assert.match(dets[0], /<tPag>01<\/tPag><vPag>20\.00<\/vPag>/);
+  assert.doesNotMatch(dets[0], /<card>/, 'dinheiro não leva grupo de cartão');
+  assert.match(dets[1], /<tPag>03<\/tPag><vPag>15\.50<\/vPag><card><tpIntegra>2<\/tpIntegra><tBand>99<\/tBand><\/card>/);
+  assert.match(pag, /<\/detPag><vTroco>10\.00<\/vTroco><\/pag>$/, 'vTroco fica no nível <pag>, depois dos detPag');
+  const somaVPag = [...pag.matchAll(/<vPag>([\d.]+)<\/vPag>/g)].reduce((s, m) => s + Number(m[1]), 0);
+  const vNF = Number(xml.match(/<vNF>([\d.]+)<\/vNF>/)[1]);
+  assert.equal(Math.round((somaVPag - 10) * 100) / 100, vNF, 'soma(vPag) - vTroco = vNF');
+});
+
+test('conta dividida em 3 pagamentos (cartão, PIX, cartão) sem troco', async () => {
+  const cert = certDeTeste();
+  const chamadas = sefazFalsa({ authorize: (xml) => protocolo((xml.match(/Id="NFe(\d{44})"/))[1], digestDe(xml)) });
+  const res = await emitirNfceAvulsa(pedidoDeTeste({
+    pagamentos: [{ forma: 'Cartão', valor: 10 }, { forma: 'PIX', valor: 10 }, { forma: 'Cartão', valor: 5.5 }],
+  }), cert);
+  assert.equal(res.status, 'AUTORIZADA');
+  const pag = chamadas.authorize[0][0].match(/<pag>[\s\S]*?<\/pag>/)[0];
+  assert.deepEqual([...pag.matchAll(/<tPag>(\d+)<\/tPag>/g)].map((m) => m[1]), ['03', '17', '03']);
+  assert.doesNotMatch(pag, /vTroco/);
+});
+
+test('conta dividida que NÃO fecha o total não chega à SEFAZ', async () => {
+  const cert = certDeTeste();
+  const chamadas = sefazFalsa({ authorize: () => { throw new Error('não devia transmitir'); } });
+  await assert.rejects(
+    emitirNfceAvulsa(pedidoDeTeste({ pagamentos: [{ forma: 'Cartão', valor: 10 }] }), cert),
+    /nao fecham o total/);
+  assert.equal(chamadas.authorize.length, 0, 'nada foi transmitido');
+});
+
+test('pedido SEM pagamentos (todo o fluxo atual) continua com um detPag só, exatamente como antes', async () => {
+  const cert = certDeTeste();
+  const chamadas = sefazFalsa({ authorize: (xml) => protocolo((xml.match(/Id="NFe(\d{44})"/))[1], digestDe(xml)) });
+  await emitirNfceAvulsa(pedidoDeTeste({ payment: { tPag: '17', vPag: 25.5 } }), cert);
+  const pag = chamadas.authorize[0][0].match(/<pag>[\s\S]*?<\/pag>/)[0];
+  assert.equal((pag.match(/<detPag>/g) || []).length, 1);
+  assert.match(pag, /<tPag>17<\/tPag><vPag>25\.50<\/vPag>/);
+});

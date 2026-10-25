@@ -102,6 +102,16 @@ export interface NfeXmlInput {
     vTotTrib: number;
   };
 
+  // Pagamentos da nota (conta dividida): um <detPag> por item. Tem prioridade sobre `payment`.
+  // vTroco = soma dos trocos (vai no nivel <pag>); soma(vPag) - vTroco = vNF.
+  payments?: Array<{
+    tPag: string;
+    xPag?: string;
+    vPag: number;
+    card?: { tpIntegra: '1' | '2'; tBand: string; CNPJ?: string; cAut?: string };
+  }>;
+  vTroco?: number;
+
   // Payment (required for modelo 65; for 55 can be "sem pagamento")
   payment?: {
     indPag?: '0' | '1';
@@ -434,29 +444,34 @@ export class NfeXmlBuilder {
     // ── cobr / pag ────────────────────────────────────────
    // ── cobr / pag ────────────────────────────────────────
     const pag = infNFe.ele('pag');
-    if (input.payment) {
-      const detPag = pag.ele('detPag');
-      detPag.ele('tPag').txt(input.payment.tPag);
-      if (input.payment.tPag === '99' && input.payment.xPag) {
-        detPag.ele('xPag').txt(input.payment.xPag.slice(0, 60));
-      }
-      detPag.ele('vPag').txt(this.fmt2(input.payment.vPag));
+    // `payments` (conta dividida) tem prioridade; senao o pagamento unico de sempre.
+    const pagamentos = input.payments && input.payments.length ? input.payments : (input.payment ? [input.payment] : []);
+    if (pagamentos.length) {
+      pagamentos.forEach((pg) => {
+        const detPag = pag.ele('detPag');
+        detPag.ele('tPag').txt(pg.tPag);
+        if (pg.tPag === '99' && pg.xPag) {
+          detPag.ele('xPag').txt(pg.xPag.slice(0, 60));
+        }
+        detPag.ele('vPag').txt(this.fmt2(pg.vPag));
 
-      // xPag deve ser informado apenas para tPag='99' (Outros).
-      // card: obrigatório para tPag='03' (crédito), '04' (débito), '17' (PIX) e
-      // '20' — sem isso a SEFAZ rejeita com "391: Não informados os dados do
-      // cartão de crédito/débito nas Formas de Pagamento da Nota Fiscal".
-      if (['03', '04', '17', '20'].includes(input.payment.tPag)) {
-        const card = input.payment.card ?? { tpIntegra: '2' as const, tBand: '99' };
-        const cardEle = detPag.ele('card');
-        cardEle.ele('tpIntegra').txt(card.tpIntegra);
-        if (card.CNPJ) cardEle.ele('CNPJ').txt(card.CNPJ.replace(/\D/g, ''));
-        cardEle.ele('tBand').txt(card.tBand);
-        if (card.cAut) cardEle.ele('cAut').txt(card.cAut);
-      }
+        // xPag deve ser informado apenas para tPag='99' (Outros).
+        // card: obrigatório para tPag='03' (crédito), '04' (débito), '17' (PIX) e
+        // '20' — sem isso a SEFAZ rejeita com "391: Não informados os dados do
+        // cartão de crédito/débito nas Formas de Pagamento da Nota Fiscal".
+        if (['03', '04', '17', '20'].includes(pg.tPag)) {
+          const card = (pg as any).card ?? { tpIntegra: '2' as const, tBand: '99' };
+          const cardEle = detPag.ele('card');
+          cardEle.ele('tpIntegra').txt(card.tpIntegra);
+          if (card.CNPJ) cardEle.ele('CNPJ').txt(card.CNPJ.replace(/\D/g, ''));
+          cardEle.ele('tBand').txt(card.tBand);
+          if (card.cAut) cardEle.ele('cAut').txt(card.cAut);
+        }
+      });
 
       // vTroco no nível <pag>, não dentro de <detPag> (schema NF-e 4.00)
-      if (input.payment.vTroco) pag.ele('vTroco').txt(this.fmt2(input.payment.vTroco));
+      const vTroco = input.payments && input.payments.length ? input.vTroco : input.payment?.vTroco;
+      if (vTroco) pag.ele('vTroco').txt(this.fmt2(vTroco));
     } else {
       const detPag = pag.ele('detPag');
       detPag.ele('tPag').txt('90'); // sem pagamento

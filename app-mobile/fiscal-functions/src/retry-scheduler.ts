@@ -24,6 +24,7 @@ import {
 import { carregarCertificado } from './cert-store';
 import { conciliarNotasDoPedido, auditarDuplicidades, completarXmlsFaltantes } from './conciliar';
 import { emitirNfceComClassificacao } from './classificacao-fiscal';
+import { pagamentosDoPedido } from './pagamentos-nota';
 import { gravarResultado } from './resultado-nota';
 import { registroXmlDaNota } from './xml-enviado';
 import { msEmProcessamento, podeGravarResultado, xmlAutorizado, xmlsDaNota } from './regras-fiscais';
@@ -239,6 +240,8 @@ async function emitirParaPedidoComTravaAdquirida(pedidoId: string, pedido: any, 
     indPres: entregaComCpf ? '4' : '1',
     indIntermed: entregaComCpf ? '0' : undefined,
     payment: { tPag: mapTPag(pedido.forma_pagamento), vPag: Number(pedido.valor_total) || 0 },
+    // Conta dividida: a nota leva cada pagamento (so quando o pedido tem `pagamentos`).
+    ...(Array.isArray(pedido.pagamentos) && pedido.pagamentos.length ? { pagamentos: pagamentosDoPedido(pedido) } : {}),
     items: itensDoPedido(pedido, cfg),
     recipient: pedido.cpf_cliente ? {
       cpf: pedido.cpf_cliente, xNome: pedido.nome_cliente,

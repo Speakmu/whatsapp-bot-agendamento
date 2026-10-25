@@ -242,6 +242,8 @@
             indPres: entregaComCpf ? '4' : '1',
             indIntermed: entregaComCpf ? '0' : undefined,
             payment: { tPag: mapTPag(pedido.forma_pagamento), vPag: Number(pedido.valor_total) || 0 },
+            // Conta dividida: a nota leva cada pagamento (so quando o pedido tem `pagamentos`).
+            ...(Array.isArray(pedido.pagamentos) && pedido.pagamentos.length && window.PagamentosPedido ? { pagamentos: PagamentosPedido.doPedido(pedido) } : {}),
             items: itensDoPedido(pedido, cfg),
             recipient: pedido.cpf_cliente ? {
                 cpf: pedido.cpf_cliente, xNome: pedido.nome_cliente,
@@ -384,12 +386,19 @@
     // o registro da nota. Por isso, se a emissão falhar aqui, marcamos o PEDIDO
     // (escrita simples, funciona offline) como pendente, para o retry automático
     // tentar de novo quando a conexão voltar.
+    // "So dinheiro" (conta inteira em dinheiro): nao emite sozinha. Conta dividida com cartao/PIX emite.
+    // Um criterio para o emitirAutomatico e para o retry (antes um usava includes e o outro ===).
+    function somenteDinheiro(pedido) {
+        if (window.PagamentosPedido) return PagamentosPedido.somenteDinheiro(pedido);
+        return String(pedido.forma_pagamento || '').toLowerCase().includes('dinheiro');
+    }
+
     async function emitirAutomatico(pedidoId, pedido) {
         // Venda em dinheiro nunca emite sozinha (só PIX/Cartão). Quem quiser
         // uma NFC-e de uma venda em dinheiro emite manualmente na tela Fiscal.
         // Usa includes() (não igualdade exata) pra cobrir variações que vêm do
         // bot/app, ex.: "DINHEIRO NA ENTREGA", "Entrega/Dinheiro".
-        if (String(pedido.forma_pagamento || '').toLowerCase().includes('dinheiro')) return null;
+        if (somenteDinheiro(pedido)) return null;
         let cfg;
         try { cfg = await getConfig(); } catch { return null; }
         if (!cfg || !cfg.ativo) return null;
@@ -415,7 +424,7 @@
         const pendentes = await db().collection('pedidos').where('nfce_pendente', '==', true).get();
         for (const doc of pendentes.docs) {
             const pedido = doc.data();
-            if (String(pedido.forma_pagamento || '').trim().toLowerCase() === 'dinheiro') {
+            if (somenteDinheiro(pedido)) {
                 await doc.ref.update({ nfce_pendente: firebase.firestore.FieldValue.delete() }).catch(() => {});
                 continue;
             }
