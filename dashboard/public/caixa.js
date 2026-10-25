@@ -48,7 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let unsubMovs = null;
     let comandasPendentes = [];
     let categoriaAtiva = "";  // "" = todas
-    let trocoAberto = false;  // campo "cliente entregou" visível
+    let pessoas = 2;          // quantas pessoas dividem a conta (inclui as que já pagaram)
+    let linhas = [];          // pessoas que ainda vão pagar: {valor, forma, recebido, troco}
     let dividir = false;      // modo "Dividir conta" ligado
     let contaAtiva = null;    // pedido em aberto carregado no painel de divisão (null = só o carrinho)
 
@@ -247,15 +248,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (contaAtiva) { flash('Conta em aberto: use "Sair desta conta" ou cancele-a na lista de comandas.'); return; }
             carrinho = []; renderCarrinho();
         });
-        $('chk-dividir').addEventListener('change', e => { dividir = e.target.checked; atualizarSplit(); });
-        ['split-taxa', 'split-valor', 'split-recebido'].forEach(id => $(id).addEventListener('input', atualizarSplit));
-        $('btn-split-resto').addEventListener('click', () => {
-            const v = valoresConta();
-            $('split-valor').value = v.falta > 0 ? String(v.falta).replace('.', ',') : '';
-            atualizarSplit();
-        });
-        $('btn-split-pagar').addEventListener('click', registrarParte);
-        $('btn-split-troco-toggle').addEventListener('click', () => { trocoAberto = true; atualizarSplit(); $('split-recebido').focus(); });
+        $('chk-dividir').addEventListener('change', e => { dividir = e.target.checked; if (dividir) { pessoas = 2; linhas = []; } atualizarSplit(); });
+        $('split-taxa').addEventListener('input', () => { distribuirIgual(); renderSplit(); });
+        $('btn-pessoas-menos').addEventListener('click', () => mudarPessoas(-1));
+        $('btn-pessoas-mais').addEventListener('click', () => mudarPessoas(+1));
+        $('btn-split-igual').addEventListener('click', () => { distribuirIgual(); renderSplit(); });
         $('btn-split-sair').addEventListener('click', limparPainelConta);
         $('chk-identificar-cliente').addEventListener('change', e => {
             const marcado = e.target.checked;
@@ -948,30 +945,106 @@ document.addEventListener('DOMContentLoaded', () => {
         return { pagamentos, travada, subtotal, pct, taxa, total, pago, falta: r2(Math.max(0, total - pago)) };
     }
 
-    function atualizarSplit() {
-        $('split-wrap').classList.toggle('hidden', !dividir);
-        $('btn-finalizar').classList.toggle('hidden', dividir);
-        atualizarTipoCartaoVisivel();
-        if (!dividir) return;
+    const FORMAS_SPLIT = ['Dinheiro', 'PIX', 'Cartão'];
+
+    function novaLinha() { return { valor: '', forma: 'Dinheiro', recebido: '', troco: false }; }
+
+    // Quantas pessoas ainda vão pagar = total de pessoas - quem já pagou (sempre ao menos uma enquanto falta valor).
+    function ajustarLinhas() {
         const v = valoresConta();
-        $('split-taxa').disabled = v.travada;
-        if (v.travada) $('split-taxa').value = v.pct;
+        const pendentes = v.falta > 0 ? Math.max(1, pessoas - v.pagamentos.length) : 0;
+        while (linhas.length < pendentes) linhas.push(novaLinha());
+        if (linhas.length > pendentes) linhas.length = pendentes;
+        return v;
+    }
+
+    // Divide o que falta igualmente entre as pessoas pendentes; os centavos que sobram vão para a última.
+    function distribuirIgual() {
+        const v = ajustarLinhas();
+        const n = linhas.length;
+        if (!n) return;
+        const parte = Math.floor((v.falta / n) * 100) / 100;
+        linhas.forEach((l, i) => { l.valor = String(i === n - 1 ? r2(v.falta - parte * (n - 1)) : parte).replace('.', ','); });
+    }
+
+    function mudarPessoas(delta) {
+        const v = valoresConta();
+        pessoas = Math.min(20, Math.max(v.pagamentos.length + 1, pessoas + delta));
+        distribuirIgual();
+        renderSplit();
+    }
+
+    function valorLinha(l) { return lerValor({ value: l.valor }); }
+
+    // Resumo e botões "Receber" — sem recriar os campos (não rouba o foco de quem está digitando).
+    function atualizarResumoSplit() {
+        const v = valoresConta();
         $('split-total').textContent = money(v.total);
         $('split-pago').textContent = money(v.pago);
         $('split-falta').textContent = money(v.falta);
         $('cart-total').textContent = money(v.total);
-        $('split-lista').innerHTML = v.pagamentos.map((p, i) =>
-            `<div class="linha"><span>${i + 1}. ${escapeHtml(p.forma)}</span><span>${money(p.valor)}</span></div>`).join('');
-        const dinheiro = /dinheiro/i.test(formaPagamento);
-        // Troco: só aparece em dinheiro, e só depois de pedir ("Calcular troco") — não é obrigatório.
-        $('btn-split-troco-toggle').classList.toggle('hidden', !dinheiro || trocoAberto);
-        $('split-recebido-wrap').classList.toggle('hidden', !dinheiro || !trocoAberto);
-        const valor = lerValor($('split-valor'));
-        const rec = lerValor($('split-recebido'));
-        $('split-troco').textContent = dinheiro && rec > valor && valor > 0 ? `Troco ${money(r2(rec - valor))}` : '';
-        $('btn-split-pagar').disabled = !(sessaoAtual && v.total > 0 && v.falta > 0 && valor > 0 && valor <= v.falta + 0.004);
-        $('btn-split-pagar').textContent = !sessaoAtual ? 'Abra o caixa para vender'
-            : (valor > 0 ? `Registrar ${money(valor)} (${formaPagamento})` : 'Registrar pagamento');
+        const wrap = $('split-linhas');
+        wrap.querySelectorAll('.split-pessoa[data-i]').forEach(el => {
+            const l = linhas[Number(el.dataset.i)];
+            if (!l) return;
+            const valor = valorLinha(l);
+            const btn = el.querySelector('.sp-receber');
+            btn.disabled = !(sessaoAtual && v.falta > 0 && valor > 0 && valor <= v.falta + 0.004);
+            btn.textContent = !sessaoAtual ? 'Abra o caixa para vender' : `Receber ${money(valor)}`;
+            const t = el.querySelector('.sp-troco');
+            if (t) { const rec = lerValor({ value: l.recebido }); t.textContent = rec > valor && valor > 0 ? `Troco ${money(r2(rec - valor))}` : ''; }
+        });
+        const soma = r2(linhas.reduce((t, l) => t + valorLinha(l), 0));
+        const av = $('split-aviso');
+        if (av) av.textContent = v.falta > 0 && Math.abs(soma - v.falta) > 0.004 ? `As partes somam ${money(soma)}, mas faltam ${money(v.falta)}.` : '';
+    }
+
+    // Monta as linhas: quem já pagou (travado) e uma linha por pessoa que ainda vai pagar.
+    function renderSplit() {
+        if (!dividir) return;
+        const v = ajustarLinhas();
+        $('split-taxa').disabled = v.travada;
+        if (v.travada) $('split-taxa').value = v.pct;
+        $('split-pessoas').textContent = String(Math.max(pessoas, v.pagamentos.length + linhas.length));
+        const wrap = $('split-linhas');
+        const pagas = v.pagamentos.map((p, i) =>
+            `<div class="split-pessoa paga"><span>✔ Pessoa ${i + 1} • ${escapeHtml(p.forma)}</span><span>${money(p.valor)}</span></div>`).join('');
+        const pendentes = linhas.map((l, i) => `
+            <div class="split-pessoa" data-i="${i}">
+                <div class="sp-top"><span>Pessoa ${v.pagamentos.length + i + 1}</span>
+                    <input class="sp-valor" inputmode="decimal" placeholder="R$ 0,00" value="${escapeHtml(l.valor)}" aria-label="Valor da pessoa ${v.pagamentos.length + i + 1}"></div>
+                <div class="sp-formas">${FORMAS_SPLIT.map(f => `<button type="button" data-f="${f}" class="${l.forma === f ? 'active' : ''}">${f}</button>`).join('')}</div>
+                ${/dinheiro/i.test(l.forma) ? (l.troco
+                    ? `<div class="sp-troco-linha"><input class="sp-rec" inputmode="decimal" placeholder="Cliente entregou (R$)" value="${escapeHtml(l.recebido)}"><span class="sp-troco"></span></div>`
+                    : '<button type="button" class="sp-troco-btn">💵 Calcular troco</button>') : ''}
+                <button type="button" class="sp-receber">Receber</button>
+            </div>`).join('');
+        wrap.innerHTML = pagas + pendentes + '<div class="split-aviso" id="split-aviso"></div>';
+        wrap.querySelectorAll('.split-pessoa[data-i]').forEach(el => {
+            const i = Number(el.dataset.i);
+            el.querySelector('.sp-valor').addEventListener('input', e => { linhas[i].valor = e.target.value; atualizarResumoSplit(); });
+            el.querySelectorAll('.sp-formas button').forEach(b => b.addEventListener('click', () => {
+                linhas[i].forma = b.dataset.f; if (!/dinheiro/i.test(b.dataset.f)) { linhas[i].troco = false; linhas[i].recebido = ''; }
+                renderSplit();
+            }));
+            const tb = el.querySelector('.sp-troco-btn');
+            if (tb) tb.addEventListener('click', () => { linhas[i].troco = true; renderSplit(); const r = $('split-linhas').querySelector(`.split-pessoa[data-i="${i}"] .sp-rec`); if (r) r.focus(); });
+            const rec = el.querySelector('.sp-rec');
+            if (rec) rec.addEventListener('input', e => { linhas[i].recebido = e.target.value; atualizarResumoSplit(); });
+            el.querySelector('.sp-receber').addEventListener('click', () => registrarParte(i));
+        });
+        atualizarResumoSplit();
+    }
+
+    function atualizarSplit() {
+        $('split-wrap').classList.toggle('hidden', !dividir);
+        $('btn-finalizar').classList.toggle('hidden', dividir);
+        $('pag-grid').classList.toggle('hidden', dividir); // na divisão a forma é escolhida em cada pessoa
+        atualizarTipoCartaoVisivel();
+        if (!dividir) return;
+        // Carrinho/taxa mudaram: refaz a divisão igual (só enquanto ninguém pagou).
+        if (!valoresConta().travada || !linhas.length) distribuirIgual();
+        renderSplit();
         $('btn-split-sair').classList.toggle('hidden', !contaAtiva);
         $('chk-dividir').disabled = !!contaAtiva;
         $('chk-cozinha').disabled = !!contaAtiva;
@@ -981,11 +1054,10 @@ document.addEventListener('DOMContentLoaded', () => {
     function limparPainelConta() {
         contaAtiva = null;
         dividir = false;
-        trocoAberto = false;
+        pessoas = 2;
+        linhas = [];
         carrinho = [];
         $('chk-dividir').checked = false;
-        $('split-valor').value = '';
-        $('split-recebido').value = '';
         $('split-taxa').value = '0';
         $('cliente-nome').value = '';
         $('chk-identificar-cliente').checked = false;
@@ -1012,30 +1084,32 @@ document.addEventListener('DOMContentLoaded', () => {
         dividir = true;
         $('chk-dividir').checked = true;
         $('chk-cozinha').checked = p.status_pos_pagamento === 'PENDENTE_PREPARO';
-        $('split-valor').value = '';
-        $('split-recebido').value = '';
+        pessoas = Math.max(Number(p.pessoas_total) || 0, PagamentosPedido.doPedido({ ...p, conta_dividida: true }).length + 1);
+        linhas = [];
         const modal = $('comandas-modal');
         if (modal) modal.classList.add('hidden');
         renderCarrinho();
     }
 
-    async function registrarParte() {
+    async function registrarParte(idx) {
         if (!sessaoAtual || !dividir) return;
+        const linha = linhas[idx];
+        if (!linha) return;
+        const forma = linha.forma;
         const v = valoresConta();
-        let valor = lerValor($('split-valor'));
+        let valor = valorLinha(linha);
         if (valor <= 0 || valor > v.falta + 0.004) { alert(`Informe um valor entre R$ 0,01 e ${money(v.falta)}.`); return; }
         if (valor > v.falta) valor = v.falta;
-        const dinheiro = /dinheiro/i.test(formaPagamento);
         let recebido = null;
-        if (dinheiro) {
-            const rec = lerValor($('split-recebido'));
+        if (/dinheiro/i.test(forma)) {
+            const rec = lerValor({ value: linha.recebido });
             if (rec > 0) {
                 if (rec < valor) { alert('O dinheiro recebido é menor que o valor desta parte.'); return; }
                 recebido = rec;
             }
         }
-        const chave = CHAVE_PAG[formaPagamento] || 'Dinheiro';
-        const pagamento = { forma: formaPagamento, valor, recebido, hora: firebase.firestore.Timestamp.now(), sessao_id: sessaoAtual.id, operador: usuarioEmail };
+        const chave = CHAVE_PAG[forma] || 'Dinheiro';
+        const pagamento = { forma: forma, valor, recebido, hora: firebase.firestore.Timestamp.now(), sessao_id: sessaoAtual.id, operador: usuarioEmail };
         const quita = r2(v.falta - valor) <= 0.004;
         const novoPago = r2(v.pago + valor);
 
@@ -1053,7 +1127,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 origem: 'BALCAO',
                 nome_cliente: nomeClienteAtual(),
                 itens: carrinho.map(c => ({ id: c.id, nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
-                subtotal_itens: v.subtotal, taxa_servico: v.taxa, taxa_servico_pct: v.pct, valor_total: v.total,
+                subtotal_itens: v.subtotal, taxa_servico: v.taxa, taxa_servico_pct: v.pct, valor_total: v.total, pessoas_total: pessoas,
                 forma_pagamento: 'Dividido', conta_dividida: true, conta_aberta: !quita,
                 status: quita ? statusFinal : 'AGUARDANDO_PAGAMENTO',
                 status_pos_pagamento: posPagamento,
@@ -1066,12 +1140,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!v.travada) Object.assign(upd, { subtotal_itens: v.subtotal, taxa_servico: v.taxa, taxa_servico_pct: v.pct, valor_total: v.total, forma_pagamento: 'Dividido', conta_dividida: true });
             if (quita) Object.assign(upd, { status: statusFinal, caixa_sessao_id: sessaoAtual.id, pago_em: FieldValue.serverTimestamp() });
             batch.update(pedidoRef, upd);
-            pedidoLocal = { ...contaAtiva, subtotal_itens: v.subtotal, taxa_servico: v.taxa, taxa_servico_pct: v.pct, valor_total: v.total,
+            pedidoLocal = { ...contaAtiva, subtotal_itens: v.subtotal, taxa_servico: v.taxa, taxa_servico_pct: v.pct, valor_total: v.total, pessoas_total: pessoas,
                 forma_pagamento: 'Dividido', conta_dividida: true, conta_aberta: !quita, status: quita ? statusFinal : contaAtiva.status,
                 pagamentos: [...(Array.isArray(contaAtiva.pagamentos) ? contaAtiva.pagamentos : []), pagamento], valor_pago: novoPago };
         }
         batch.set(db.collection(COL_MOVS).doc(), {
-            sessao_id: sessaoAtual.id, tipo: 'VENDA', valor, forma_pagamento: formaPagamento,
+            sessao_id: sessaoAtual.id, tipo: 'VENDA', valor, forma_pagamento: forma,
             descricao: `Conta dividida ${rotulo.toLowerCase()} (${quita ? 'última parte' : 'parte'})`,
             pedido_id: pedidoRef.id, operador: usuarioEmail, hora: FieldValue.serverTimestamp()
         });
@@ -1093,12 +1167,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Sem await no commit (persistência offline): vale o mesmo cuidado das outras vendas.
         batch.commit().catch(err => flash(`⚠️ Falha ao sincronizar o pagamento de ${money(valor)}: ${err.message}`));
 
-        $('split-valor').value = '';
-        $('split-recebido').value = '';
-        trocoAberto = false;
+        linhas.splice(idx, 1); // essa pessoa já pagou
         if (!quita) {
             contaAtiva = { id: pedidoRef.id, ...pedidoLocal };
-            flash(`✅ ${money(valor)} (${formaPagamento}) recebido • falta ${money(r2(v.falta - valor))}`);
+            flash(`✅ ${money(valor)} (${forma}) recebido • falta ${money(r2(v.falta - valor))}`);
+            pessoas = Math.max(pessoas, v.pagamentos.length + 1 + linhas.length);
             renderCarrinho();
             return;
         }

@@ -135,6 +135,23 @@
         .split-linha button { padding:9px 12px; border:none; border-radius:8px; background:#2c3e50; color:#fff; font-weight:700; cursor:pointer; }
         .split-troco { font-weight:800; font-size:.85rem; }
         .split-rotulo { font-size:.8rem; font-weight:700; color:#2c3e50; }
+        .split-pessoas-linha { display:flex; align-items:center; gap:8px; font-size:.85rem; font-weight:700; flex-wrap:wrap; }
+        .split-pessoas-linha button { width:34px; height:34px; border:none; border-radius:8px; background:#2c3e50; color:#fff; font-size:1.1rem; font-weight:800; cursor:pointer; }
+        .split-pessoas-linha .split-igual { width:auto; padding:0 10px; font-size:.78rem; margin-left:auto; }
+        .split-pessoa { background:#fff; border:1px solid var(--line); border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+        .split-pessoa.paga { background:#e8f8ee; border-color:var(--ok); font-size:.85rem; font-weight:700; flex-direction:row; justify-content:space-between; }
+        .split-pessoa .sp-top { display:flex; align-items:center; gap:8px; font-weight:800; font-size:.88rem; }
+        .split-pessoa .sp-valor, .split-pessoa .sp-rec { flex:1; min-width:0; padding:8px; border:1px solid var(--line); border-radius:8px; font-size:1rem; }
+        .split-pessoa .sp-formas { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+        .split-pessoa .sp-formas button { padding:8px 4px; border:2px solid #d5dbe1; border-radius:8px; background:#fff; font-weight:700; font-size:.82rem; cursor:pointer; }
+        .split-pessoa .sp-formas button.active { border-color:var(--accent); background:#fff3ed; color:var(--accent); }
+        .split-pessoa .sp-troco-btn { background:none; border:none; color:var(--blue); font-size:.8rem; font-weight:700; cursor:pointer; text-align:left; padding:0; }
+        .split-pessoa .sp-troco-linha { display:flex; align-items:center; gap:8px; }
+        .split-pessoa .sp-troco { font-weight:800; font-size:.85rem; }
+        .split-pessoa .sp-receber { padding:10px; border:none; border-radius:8px; background:var(--ok); color:#fff; font-weight:800; cursor:pointer; font-size:.95rem; }
+        .split-pessoa .sp-receber:disabled { background:#bdc3c7; cursor:not-allowed; }
+        #split-linhas { display:flex; flex-direction:column; gap:8px; max-height:46vh; overflow-y:auto; }
+        .split-aviso { font-size:.78rem; color:var(--danger); font-weight:700; }
         .split-dica { font-size:.74rem; color:var(--muted); }
         .split-sair { background:#fff; color:var(--muted); border:1px solid var(--line); border-radius:8px; padding:7px; cursor:pointer; font-size:.8rem; }
         .checks-row { display:flex; gap:6px 10px; margin-bottom:8px; flex-wrap:wrap; }
@@ -272,22 +289,15 @@
                             <span>Pago <b id="split-pago">R$ 0,00</b></span>
                             <span>Falta <b id="split-falta">R$ 0,00</b></span>
                         </div>
-                        <div id="split-lista" class="split-lista"></div>
-                        <label class="split-rotulo" for="split-valor">Quanto esta pessoa vai pagar?</label>
-                        <div class="split-linha">
-                            <input id="split-valor" inputmode="decimal" placeholder="R$ 0,00">
-                            <button type="button" id="btn-split-resto">Restante</button>
+                        <div class="split-pessoas-linha">
+                            <span>Quantas pessoas?</span>
+                            <button type="button" id="btn-pessoas-menos" aria-label="Menos uma pessoa">&minus;</button>
+                            <b id="split-pessoas">2</b>
+                            <button type="button" id="btn-pessoas-mais" aria-label="Mais uma pessoa">+</button>
+                            <button type="button" id="btn-split-igual" class="split-igual">Dividir igualmente</button>
                         </div>
-                        <button type="button" class="split-sair hidden" id="btn-split-troco-toggle">&#128181; Calcular troco</button>
-                        <div class="hidden" id="split-recebido-wrap">
-                            <label class="split-rotulo" for="split-recebido">Cliente entregou (s&oacute; para o troco)</label>
-                            <div class="split-linha">
-                                <input id="split-recebido" inputmode="decimal" placeholder="R$ 0,00">
-                                <span id="split-troco" class="split-troco"></span>
-                            </div>
-                        </div>
-                        <div class="split-dica">Escolha a forma abaixo (Dinheiro, PIX ou Cart&atilde;o). PIX e cart&atilde;o s&atilde;o lan&ccedil;ados pelo valor j&aacute; aprovado na m&aacute;quina.</div>
-                        <button type="button" class="btn-finalizar" id="btn-split-pagar" disabled>Registrar pagamento</button>
+                        <div id="split-linhas"></div>
+                        <div class="split-dica">PIX e cart&atilde;o s&atilde;o lan&ccedil;ados pelo valor j&aacute; aprovado na m&aacute;quina.</div>
                         <button type="button" class="split-sair hidden" id="btn-split-sair">Sair desta conta (continua em aberto)</button>
                     </div>
                     <div class="checks-row">
