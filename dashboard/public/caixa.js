@@ -48,6 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let unsubMovs = null;
     let comandasPendentes = [];
     let categoriaAtiva = "";  // "" = todas
+    let dividir = false;      // modo "Dividir conta" ligado
+    let contaAtiva = null;    // pedido em aberto carregado no painel de divisão (null = só o carrinho)
 
     // Emoji de fallback por categoria, pra quando o item não tem imagem
     // cadastrada — não é pra ser "o" ícone certo, só dar uma pista visual
@@ -189,6 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {
     //  CARRINHO
     // ============================================================
     function addAoCarrinho(id) {
+        if (contaAtiva) { flash("Esta conta já está aberta — saia dela para montar outra venda."); return; }
         const item = cardapio.find(i => i.id === id);
         if (!item) return;
         const existente = carrinho.find(c => c.id === id);
@@ -205,6 +208,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     function mudarQtd(id, delta) {
+        if (contaAtiva) return;
         const c = carrinho.find(x => x.id === id);
         if (!c) return;
         c.qtd += delta;
@@ -232,12 +236,25 @@ document.addEventListener('DOMContentLoaded', () => {
         wrap.querySelectorAll('[data-menos]').forEach(b => b.onclick = () => mudarQtd(b.dataset.menos, -1));
         $('cart-total').textContent = money(totalCarrinho());
         atualizarBotaoFinalizar();
+        atualizarSplit();
     }
 
     function configurarPDV() {
         $('busca-produto').addEventListener('input', e => renderCardapio(e.target.value));
         configurarBuscaEComandas();
-        $('btn-limpar').addEventListener('click', () => { carrinho = []; renderCarrinho(); });
+        $('btn-limpar').addEventListener('click', () => {
+            if (contaAtiva) { flash('Conta em aberto: use "Sair desta conta" ou cancele-a na lista de comandas.'); return; }
+            carrinho = []; renderCarrinho();
+        });
+        $('chk-dividir').addEventListener('change', e => { dividir = e.target.checked; atualizarSplit(); });
+        ['split-taxa', 'split-valor', 'split-recebido'].forEach(id => $(id).addEventListener('input', atualizarSplit));
+        $('btn-split-resto').addEventListener('click', () => {
+            const v = valoresConta();
+            $('split-valor').value = v.falta > 0 ? String(v.falta).replace('.', ',') : '';
+            atualizarSplit();
+        });
+        $('btn-split-pagar').addEventListener('click', registrarParte);
+        $('btn-split-sair').addEventListener('click', limparPainelConta);
         $('chk-identificar-cliente').addEventListener('change', e => {
             const marcado = e.target.checked;
             $('campo-cliente').classList.toggle('hidden', !marcado);
@@ -255,6 +272,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 formaPagamento = btn.dataset.pag;
                 atualizarTipoCartaoVisivel();
                 renderComandasPendentes();
+                atualizarSplit();
             });
         });
         $('btn-finalizar').addEventListener('click', finalizarVenda);
@@ -286,8 +304,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     const data = doc.data();
                     // MESA = comanda de mesa fechada pedindo pagamento; TOTEM = pedido
                     // feito no autoatendimento, também esperando pagamento no caixa.
-                    if (data.origem === "MESA" || data.origem === "TOTEM") comandasPendentes.push({ id: doc.id, ...data });
+                    // BALCAO só entra quando é conta dividida em andamento (balcão comum nunca fica aguardando aqui).
+                    if (data.origem === "MESA" || data.origem === "TOTEM" || (data.origem === "BALCAO" && data.conta_dividida)) comandasPendentes.push({ id: doc.id, ...data });
                 });
+                if (contaAtiva) {
+                    const atual = comandasPendentes.find(c => c.id === contaAtiva.id);
+                    if (atual) contaAtiva = { ...atual };
+                    else if (snap.metadata && !snap.metadata.fromCache) { flash("Esta conta foi encerrada em outro lugar."); limparPainelConta(); }
+                }
                 comandasPendentes.sort((a, b) => Number(a.mesa_numero || a.senha || 0) - Number(b.mesa_numero || b.senha || 0));
                 renderComandasPendentes();
             }, err => console.error("Erro comandas pendentes:", err));
@@ -358,28 +382,35 @@ document.addEventListener('DOMContentLoaded', () => {
             const disabled = sessaoAtual ? '' : 'disabled';
             const label = sessaoAtual ? 'Receber' : 'Abra o caixa';
             const consumoTotem = p.tipo_consumo === 'LOCAL' ? ' · Comer aqui' : (p.origem === 'TOTEM' ? ' · Levar' : '');
-            const rotulo = p.origem === 'TOTEM' ? `Senha ${escapeHtml(p.senha || '-')}${consumoTotem}` : `Mesa ${escapeHtml(p.mesa_numero || '-')}`;
+            const rotulo = escapeHtml(rotuloPedido(p));
+            const parcial = !!p.conta_dividida && PagamentosPedido.doPedido(p).length > 0;
+            const saldoAberto = PagamentosPedido.saldo(p);
+            const soDividida = p.origem === 'BALCAO' || parcial; // não dá para receber "inteira" uma conta que já tem parte paga
             return `<div class="mesa-pendente">
                 <div class="linha-topo">
                     <span class="mesa-num">${rotulo}</span>
                     <span class="valor">${money(p.valor_total)}</span>
                 </div>
-                <div class="meta">${qtd} item(ns) na comanda</div>
+                <div class="meta">${qtd} item(ns) na comanda${parcial ? ` • <strong>pago ${money(Number(p.valor_total) - saldoAberto)} • falta ${money(saldoAberto)}</strong>` : ''}</div>
                 <details class="mesa-itens">
                     <summary>Ver itens</summary>
                     <ul>${itensHtml || '<li><span>Sem itens listados</span><strong>R$ 0,00</strong></li>'}</ul>
                 </details>
                 <div class="acoes-mini">
-                    <select class="mesa-pagamento" data-pag-mesa="${p.id}" ${disabled}>
+                    ${soDividida ? '' : `<select class="mesa-pagamento" data-pag-mesa="${p.id}" ${disabled}>
                         <option value="Dinheiro">Dinheiro</option>
                         <option value="PIX">PIX</option>
                         <option value="Cartão">Cartão</option>
                     </select>
-                    <button data-receber-mesa="${p.id}" ${disabled}>${label}</button>
+                    <button data-receber-mesa="${p.id}" ${disabled}>${label}</button>`}
+                    <button data-dividir-mesa="${p.id}" ${disabled} style="background:#2f6fed;">${parcial ? 'Continuar divisão' : 'Dividir'}</button>
                     <button class="btn-cancelar-mesa" data-cancelar-mesa="${p.id}">Cancelar</button>
                 </div>
             </div>`;
         }).join('');
+        lista.querySelectorAll('[data-dividir-mesa]').forEach(btn => {
+            btn.addEventListener('click', () => carregarConta(btn.dataset.dividirMesa));
+        });
         lista.querySelectorAll('[data-cancelar-mesa]').forEach(btn => {
             btn.addEventListener('click', () => cancelarComandaPendente(btn.dataset.cancelarMesa));
         });
@@ -396,6 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!sessaoAtual) { alert("Abra o caixa para receber comandas."); return; }
         const pedido = comandasPendentes.find(p => p.id === pedidoId);
         if (!pedido) return;
+        if (pedido.conta_dividida && PagamentosPedido.doPedido(pedido).length) { alert('Esta conta já tem parte paga: use "Continuar divisão".'); return; }
         const total = Number(pedido.valor_total) || 0;
         const consumoTotem = pedido.tipo_consumo === 'LOCAL' ? ' (Comer aqui)' : (pedido.origem === 'TOTEM' ? ' (Levar)' : '');
         const rotulo = pedido.origem === 'TOTEM' ? `Senha ${pedido.senha}${consumoTotem}` : `Mesa ${pedido.mesa_numero}`;
@@ -471,13 +503,40 @@ document.addEventListener('DOMContentLoaded', () => {
     async function cancelarComandaPendente(pedidoId) {
         const pedido = comandasPendentes.find(p => p.id === pedidoId);
         if (!pedido) return;
-        const consumoTotem = pedido.tipo_consumo === 'LOCAL' ? ' (Comer aqui)' : (pedido.origem === 'TOTEM' ? ' (Levar)' : '');
-        const rotulo = pedido.origem === 'TOTEM' ? `Senha ${pedido.senha}${consumoTotem}` : `Mesa ${pedido.mesa_numero}`;
-        if (!confirm(`Cancelar ${rotulo}? O pedido será descartado sem cobrança.`)) return;
+        const rotulo = rotuloPedido(pedido);
+        // Conta dividida com parte já recebida: o cancelamento devolve esse dinheiro, lançado como estorno no caixa aberto.
+        const recebidos = pedido.conta_dividida ? PagamentosPedido.doPedido(pedido) : [];
+        if (recebidos.length) {
+            if (!sessaoAtual) { alert('Abra o caixa para cancelar uma conta com pagamentos: a devolução é lançada nele.'); return; }
+            const porForma = {};
+            recebidos.forEach(x => { porForma[x.forma] = r2((porForma[x.forma] || 0) + x.valor); });
+            const linhas = Object.entries(porForma).map(([f, vlr]) => `${f}: ${money(vlr)}`).join('\n');
+            if (!confirm(`Cancelar ${rotulo}?\nJá foram recebidos:\n${linhas}\n\nDevolva esse valor aos clientes. O estorno será lançado no caixa.`)) return;
+        } else if (!confirm(`Cancelar ${rotulo}? O pedido será descartado sem cobrança.`)) return;
 
         const batch = db.batch();
+        if (recebidos.length) {
+            let somaEstorno = 0;
+            const porChave = {};
+            recebidos.forEach(x => {
+                const k = CHAVE_PAG[x.forma] || 'Dinheiro';
+                porChave[k] = r2((porChave[k] || 0) + x.valor);
+                somaEstorno = r2(somaEstorno + x.valor);
+            });
+            Object.entries(porChave).forEach(([k, vlr]) => {
+                batch.set(db.collection(COL_MOVS).doc(), {
+                    sessao_id: sessaoAtual.id, tipo: 'ESTORNO', valor: vlr, forma_pagamento: k === 'Cartao' ? 'Cartão' : k,
+                    descricao: `Estorno: conta dividida cancelada (${rotulo})`, pedido_id: pedidoId,
+                    operador: usuarioEmail, hora: FieldValue.serverTimestamp()
+                });
+            });
+            const dec = { total_vendas: FieldValue.increment(-somaEstorno) };
+            Object.entries(porChave).forEach(([k, vlr]) => { dec['totais.' + k] = FieldValue.increment(-vlr); });
+            batch.update(db.collection(COL_SESSOES).doc(sessaoAtual.id), dec);
+        }
         batch.update(db.collection(COL_PEDIDOS).doc(pedidoId), {
             status: "CANCELADO",
+            conta_aberta: false,
             cancelado_em: FieldValue.serverTimestamp()
         });
         if (pedido.comanda_id) {
@@ -497,6 +556,7 @@ document.addEventListener('DOMContentLoaded', () => {
         batch.commit().catch(err => {
             flash(`⚠️ Falha ao sincronizar cancelamento de ${rotulo}: ${err.message}`);
         });
+        if (contaAtiva && contaAtiva.id === pedidoId) limparPainelConta();
         flash(`${rotulo} cancelada.`);
     }
     // URLs das Cloud Functions que criam a cobrança na maquininha (Point ou Stone).
@@ -537,7 +597,8 @@ document.addEventListener('DOMContentLoaded', () => {
             bm.textContent = on ? '✍️ MODO MANUAL LIGADO — Cartão e PIX NÃO vão para a máquina (toque para desligar)' : '✍️ Lançar manual (sem acionar a máquina)';
         }
         const mw = document.getElementById('manual-wrap');
-        if (mw) mw.classList.toggle('hidden', !maquininhaAtiva); // sem máquina ativa já é tudo manual
+        if (mw) mw.classList.toggle('hidden', !maquininhaAtiva || dividir); // sem máquina ativa já é tudo manual
+        if (dividir && wrap) wrap.classList.add('hidden');
     }
 
     // A Point exige o tipo do cartão na cobrança. Com a config "quem cobra escolhe",
@@ -852,6 +913,201 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ============================================================
+    //  CONTA DIVIDIDA (rateio entre vários clientes)
+    //  O pedido nasce no 1º pagamento como conta em aberto (AGUARDANDO_PAGAMENTO, que nenhuma tela
+    //  de faturamento conta como venda) e só vira venda — com baixa de estoque e NFC-e — quando a
+    //  última parte quita o total. Cada parte é gravada junto com o movimento do caixa, num lote só.
+    // ============================================================
+    const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
+    function lerValor(el) {
+        const n = parseFloat(String(el.value).replace(',', '.'));
+        return isFinite(n) ? r2(n) : 0;
+    }
+    function rotuloPedido(p) {
+        if (p.origem === 'TOTEM') return `Senha ${p.senha || '-'}${p.tipo_consumo === 'LOCAL' ? ' (Comer aqui)' : ' (Levar)'}`;
+        if (p.origem === 'MESA') return `Mesa ${p.mesa_numero || '-'}`;
+        return `Balcão • ${p.nome_cliente || 'Balcão'}`;
+    }
+
+    // Números da conta que está no painel: carrinho novo, ou pedido em aberto carregado.
+    function valoresConta() {
+        // conta_dividida:true evita que uma mesa/totem ainda sem pagamento "ganhe" um pagamento do valor_total.
+        const pagamentos = contaAtiva ? PagamentosPedido.doPedido({ ...contaAtiva, conta_dividida: true }) : [];
+        const travada = pagamentos.length > 0; // com pagamento recebido, total e taxa não mudam mais
+        const subtotal = contaAtiva
+            ? r2(Number(contaAtiva.subtotal_itens != null ? contaAtiva.subtotal_itens : contaAtiva.valor_total) || 0)
+            : r2(totalCarrinho());
+        const pct = travada
+            ? Number(contaAtiva.taxa_servico_pct) || 0
+            : Math.min(30, Math.max(0, parseFloat(String($('split-taxa').value).replace(',', '.')) || 0));
+        const taxa = travada ? r2(Number(contaAtiva.taxa_servico) || 0) : r2(subtotal * pct / 100);
+        const total = travada ? r2(Number(contaAtiva.valor_total) || 0) : r2(subtotal + taxa);
+        const pago = r2(pagamentos.reduce((s, x) => s + x.valor, 0));
+        return { pagamentos, travada, subtotal, pct, taxa, total, pago, falta: r2(Math.max(0, total - pago)) };
+    }
+
+    function atualizarSplit() {
+        $('split-wrap').classList.toggle('hidden', !dividir);
+        $('btn-finalizar').classList.toggle('hidden', dividir);
+        atualizarTipoCartaoVisivel();
+        if (!dividir) return;
+        const v = valoresConta();
+        $('split-taxa').disabled = v.travada;
+        if (v.travada) $('split-taxa').value = v.pct;
+        $('split-total').textContent = money(v.total);
+        $('split-pago').textContent = money(v.pago);
+        $('split-falta').textContent = money(v.falta);
+        $('cart-total').textContent = money(v.total);
+        $('split-lista').innerHTML = v.pagamentos.map((p, i) =>
+            `<div class="linha"><span>${i + 1}. ${escapeHtml(p.forma)}</span><span>${money(p.valor)}</span></div>`).join('');
+        const dinheiro = /dinheiro/i.test(formaPagamento);
+        $('split-recebido-wrap').classList.toggle('hidden', !dinheiro);
+        const valor = lerValor($('split-valor'));
+        const rec = lerValor($('split-recebido'));
+        $('split-troco').textContent = dinheiro && rec > valor && valor > 0 ? `Troco ${money(r2(rec - valor))}` : '';
+        $('btn-split-pagar').disabled = !(sessaoAtual && v.total > 0 && v.falta > 0 && valor > 0 && valor <= v.falta + 0.004);
+        $('btn-split-pagar').textContent = !sessaoAtual ? 'Abra o caixa para vender'
+            : (valor > 0 ? `Registrar ${money(valor)} (${formaPagamento})` : 'Registrar pagamento');
+        $('btn-split-sair').classList.toggle('hidden', !contaAtiva);
+        $('chk-dividir').disabled = !!contaAtiva;
+        $('chk-cozinha').disabled = !!contaAtiva;
+        $('chk-identificar-cliente').disabled = !!contaAtiva;
+    }
+
+    function limparPainelConta() {
+        contaAtiva = null;
+        dividir = false;
+        carrinho = [];
+        $('chk-dividir').checked = false;
+        $('split-valor').value = '';
+        $('split-recebido').value = '';
+        $('split-taxa').value = '0';
+        $('cliente-nome').value = '';
+        $('chk-identificar-cliente').checked = false;
+        $('campo-cliente').classList.add('hidden');
+        $('chk-cozinha').checked = false;
+        $('chk-dividir').disabled = false;
+        $('chk-cozinha').disabled = false;
+        $('chk-identificar-cliente').disabled = false;
+        renderCarrinho();
+    }
+
+    // Carrega uma conta já aberta (balcão, mesa ou totem) no painel para receber a próxima parte.
+    function carregarConta(id) {
+        const p = comandasPendentes.find(x => x.id === id);
+        if (!p) return;
+        if (!contaAtiva && carrinho.length && !confirm('O carrinho atual será descartado para abrir esta conta. Continuar?')) return;
+        contaAtiva = { ...p };
+        carrinho = (p.itens || []).map(i => ({
+            id: i.id || '',
+            nome: i.nome_exibicao || i.nome || 'Item',
+            preco: i.preco_unitario != null ? Number(i.preco_unitario) : (Number(i.preco) || 0),
+            qtd: Number(i.quantidade || i.qtd) || 1
+        }));
+        dividir = true;
+        $('chk-dividir').checked = true;
+        $('chk-cozinha').checked = p.status_pos_pagamento === 'PENDENTE_PREPARO';
+        $('split-valor').value = '';
+        $('split-recebido').value = '';
+        const modal = $('comandas-modal');
+        if (modal) modal.classList.add('hidden');
+        renderCarrinho();
+    }
+
+    async function registrarParte() {
+        if (!sessaoAtual || !dividir) return;
+        const v = valoresConta();
+        let valor = lerValor($('split-valor'));
+        if (valor <= 0 || valor > v.falta + 0.004) { alert(`Informe um valor entre R$ 0,01 e ${money(v.falta)}.`); return; }
+        if (valor > v.falta) valor = v.falta;
+        const dinheiro = /dinheiro/i.test(formaPagamento);
+        let recebido = null;
+        if (dinheiro) {
+            const rec = lerValor($('split-recebido'));
+            if (rec > 0) {
+                if (rec < valor) { alert('O dinheiro recebido é menor que o valor desta parte.'); return; }
+                recebido = rec;
+            }
+        }
+        const chave = CHAVE_PAG[formaPagamento] || 'Dinheiro';
+        const pagamento = { forma: formaPagamento, valor, recebido, hora: firebase.firestore.Timestamp.now(), sessao_id: sessaoAtual.id, operador: usuarioEmail };
+        const quita = r2(v.falta - valor) <= 0.004;
+        const novoPago = r2(v.pago + valor);
+
+        const pedidoRef = contaAtiva ? db.collection(COL_PEDIDOS).doc(contaAtiva.id) : db.collection(COL_PEDIDOS).doc();
+        const origem = contaAtiva ? contaAtiva.origem : 'BALCAO';
+        const posPagamento = contaAtiva ? (contaAtiva.status_pos_pagamento || 'CONCLUIDO') : ($('chk-cozinha').checked ? 'PENDENTE_PREPARO' : 'CONCLUIDO');
+        // Mesa: pagar = concluir. Totem: pagar manda para a cozinha. Balcão: como foi marcado.
+        const statusFinal = origem === 'TOTEM' ? 'PENDENTE_PREPARO' : (origem === 'MESA' ? 'CONCLUIDO' : posPagamento);
+        const rotulo = contaAtiva ? rotuloPedido(contaAtiva) : 'Balcão';
+
+        const batch = db.batch();
+        let pedidoLocal;
+        if (!contaAtiva) {
+            pedidoLocal = {
+                origem: 'BALCAO',
+                nome_cliente: nomeClienteAtual(),
+                itens: carrinho.map(c => ({ id: c.id, nome_exibicao: c.nome, nome: c.nome, preco: c.preco, quantidade: c.qtd })),
+                subtotal_itens: v.subtotal, taxa_servico: v.taxa, taxa_servico_pct: v.pct, valor_total: v.total,
+                forma_pagamento: 'Dividido', conta_dividida: true, conta_aberta: !quita,
+                status: quita ? statusFinal : 'AGUARDANDO_PAGAMENTO',
+                status_pos_pagamento: posPagamento,
+                pagamentos: [pagamento], valor_pago: novoPago,
+                caixa_sessao_id: sessaoAtual.id, operador: usuarioEmail
+            };
+            batch.set(pedidoRef, { ...pedidoLocal, hora_pedido: FieldValue.serverTimestamp(), ...(quita ? { pago_em: FieldValue.serverTimestamp() } : {}) });
+        } else {
+            const upd = { pagamentos: FieldValue.arrayUnion(pagamento), valor_pago: novoPago, conta_aberta: !quita };
+            if (!v.travada) Object.assign(upd, { subtotal_itens: v.subtotal, taxa_servico: v.taxa, taxa_servico_pct: v.pct, valor_total: v.total, forma_pagamento: 'Dividido', conta_dividida: true });
+            if (quita) Object.assign(upd, { status: statusFinal, caixa_sessao_id: sessaoAtual.id, pago_em: FieldValue.serverTimestamp() });
+            batch.update(pedidoRef, upd);
+            pedidoLocal = { ...contaAtiva, subtotal_itens: v.subtotal, taxa_servico: v.taxa, taxa_servico_pct: v.pct, valor_total: v.total,
+                forma_pagamento: 'Dividido', conta_dividida: true, conta_aberta: !quita, status: quita ? statusFinal : contaAtiva.status,
+                pagamentos: [...(Array.isArray(contaAtiva.pagamentos) ? contaAtiva.pagamentos : []), pagamento], valor_pago: novoPago };
+        }
+        batch.set(db.collection(COL_MOVS).doc(), {
+            sessao_id: sessaoAtual.id, tipo: 'VENDA', valor, forma_pagamento: formaPagamento,
+            descricao: `Conta dividida ${rotulo.toLowerCase()} (${quita ? 'última parte' : 'parte'})`,
+            pedido_id: pedidoRef.id, operador: usuarioEmail, hora: FieldValue.serverTimestamp()
+        });
+        batch.update(db.collection(COL_SESSOES).doc(sessaoAtual.id), {
+            total_vendas: FieldValue.increment(valor),
+            ...(quita ? { qtd_vendas: FieldValue.increment(1) } : {}),
+            ['totais.' + chave]: FieldValue.increment(valor)
+        });
+        if (quita && contaAtiva) {
+            if (contaAtiva.comanda_id) {
+                batch.update(db.collection(COL_COMANDAS).doc(contaAtiva.comanda_id), {
+                    status: 'FECHADA', forma_pagamento: 'Dividido', caixa_sessao_id: sessaoAtual.id, fechada_em: FieldValue.serverTimestamp()
+                });
+            }
+            if (contaAtiva.mesa_id) {
+                batch.update(db.collection(COL_MESAS).doc(contaAtiva.mesa_id), { status: 'LIVRE', comanda_id: null, pedido_id: null, total_atual: 0 });
+            }
+        }
+        // Sem await no commit (persistência offline): vale o mesmo cuidado das outras vendas.
+        batch.commit().catch(err => flash(`⚠️ Falha ao sincronizar o pagamento de ${money(valor)}: ${err.message}`));
+
+        $('split-valor').value = '';
+        $('split-recebido').value = '';
+        if (!quita) {
+            contaAtiva = { id: pedidoRef.id, ...pedidoLocal };
+            flash(`✅ ${money(valor)} (${formaPagamento}) recebido • falta ${money(r2(v.falta - valor))}`);
+            renderCarrinho();
+            return;
+        }
+        flash(`✅ Conta quitada • ${money(v.total)} em ${v.pagamentos.length + 1} pagamento(s)`);
+        // Baixa o estoque no mesmo momento em que as vendas à vista já faziam.
+        if (window.GestorChefEstoque && (origem !== 'BALCAO' || statusFinal === 'CONCLUIDO')) {
+            window.GestorChefEstoque.baixarDoPedido(db, pedidoRef.id).then(avisarPratosDesativados).catch(() => {});
+        }
+        if (origem !== 'BALCAO' || statusFinal === 'CONCLUIDO') {
+            autoEmitirNFCe(pedidoRef.id, { ...pedidoLocal, status: statusFinal, conta_aberta: false });
+        }
+        limparPainelConta();
+    }
+
+    // ============================================================
     //  OPERAÇÃO DE CAIXA
     // ============================================================
     function configurarCaixa() {
@@ -979,6 +1235,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fecharCaixa() {
         if (!sessaoAtual) return;
+        const comParte = comandasPendentes.filter(p => p.conta_dividida && PagamentosPedido.doPedido(p).length);
+        if (comParte.length) {
+            const soma = comParte.reduce((t, p) => t + (Number(p.valor_total) - PagamentosPedido.saldo(p)), 0);
+            if (!confirm(`Há ${comParte.length} conta(s) dividida(s) em aberto, com ${money(soma)} já recebidos neste caixa.\nElas continuam abertas para receber o restante depois. Fechar o caixa mesmo assim?`)) return;
+        }
         const esperado = saldoDinheiroEsperado(sessaoAtual);
         const contadoStr = prompt(`Fechamento de caixa.\nSaldo esperado em dinheiro: ${money(esperado)}\n\nValor contado na gaveta (R$):`);
         if (contadoStr === null) return;
@@ -1031,7 +1292,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!movs.length) { lista.innerHTML = '<p style="color:#7f8c8d;">Sem movimentações.</p>'; return; }
                 lista.innerHTML = movs.map(m => {
                     const h = m.hora && m.hora.toDate ? m.hora.toDate().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--';
-                    const sinal = (m.tipo === 'SANGRIA') ? '-' : '';
+                    const sinal = (m.tipo === 'SANGRIA' || m.tipo === 'ESTORNO') ? '-' : '';
                     return `<div class="linha">
                         <span>${h} • <strong>${m.tipo}</strong> ${escapeHtml(m.descricao || '')}</span>
                         <span>${sinal}${money(m.valor)}</span>
