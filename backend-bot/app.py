@@ -1,4 +1,5 @@
 import re
+import urllib.parse
 import time
 import unicodedata
 import threading
@@ -1698,6 +1699,42 @@ def verificar_ferias(bot_cfg):
     data_volta = (fim + timedelta(days=1)).strftime("%d/%m/%Y")
     return True, template.replace("{data_volta}", data_volta)
 
+def _horario_legivel(bot_cfg):
+    """Horário configurado em Config do Bot, em linhas legíveis, agrupando dias
+    seguidos com o mesmo horário ("Segunda a sexta: 09:00 às 18:00"). Devolve ''
+    se não houver horário configurado."""
+    dias = (bot_cfg.get("horario_funcionamento") or {}).get("dias") or {}
+    nomes = {"seg": "Segunda", "ter": "Terça", "qua": "Quarta", "qui": "Quinta", "sex": "Sexta", "sab": "Sábado", "dom": "Domingo"}
+    grupos = []   # [(primeiro, ultimo, 'abre às fecha')]
+    for chave in ORDEM_DIAS_SEMANA:
+        d = dias.get(chave) or {}
+        texto = f"{d['abre']} às {d['fecha']}" if d.get("aberto") and d.get("abre") and d.get("fecha") else "fechado"
+        if grupos and grupos[-1][2] == texto:
+            grupos[-1][1] = chave
+        else:
+            grupos.append([chave, chave, texto])
+    if all(g[2] == "fechado" for g in grupos):
+        return ""
+    linhas = []
+    for ini, fim, texto in grupos:
+        dia = nomes[ini] if ini == fim else f"{nomes[ini]} a {nomes[fim].lower()}"
+        linhas.append(f"• {dia}: {texto}")
+    return "\n".join(linhas)
+
+
+_RE_PERGUNTA_ENDERECO_LOJA = re.compile(
+    r"qual (e )?o endereco( (da loja|de voces|de vcs|da lileamar|completo))?\b|"
+    r"\bme (passa|passar|manda|mandar|envia|enviar|fala|falar|diz|dizer|informa|informar|mande|passe|envie|diga)\b[^.?!]{0,15}\bendereco|"
+    r"\bendereco (da loja|de voces|de vcs|da lileamar)|\bonde (fica|ficam|e a loja|voces ficam|vcs ficam|a loja fica)\b|"
+    r"\blocalizacao\b|como (eu )?(chego|chegar|faco pra chegar)|em que (rua|bairro) (voces )?(fica|ficam|e)|"
+    r"\bfica (perto|proximo) (de|do|da)\b|ponto de referencia|\bperto d[oae]s?\b[^.!]*\?")
+
+
+_RE_PERGUNTA_HORARIO = re.compile(
+    r"\bhorarios?\b|ate que horas|que horas (voces |a loja )?(abr|fech|fic|funcion|atend)|a que horas (voces |a loja )?(abr|fech)|"
+    r"ate (a )?que hora|\b(abre|fecha|funciona|atende)\w* (hoje|amanha|domingo|sabado|segunda|ate)|ate quando (voces |a loja )?(fic|funcion|atend|abert)")
+
+
 def verificar_horario_funcionamento(bot_cfg):
     """Confere se agora (fuso BR) está dentro do horário de funcionamento
     configurado em configuracoes/bot -> horario_funcionamento. Se a chave
@@ -2573,9 +2610,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # cai no fallback explícito abaixo, nunca inventa.
     try:
         doc_sistema = db.collection("configuracoes").document("sistema").get(timeout=10)
-        telefone_contato = (doc_sistema.to_dict() or {}).get("telefone") if doc_sistema.exists else None
+        dados_sistema = (doc_sistema.to_dict() or {}) if doc_sistema.exists else {}
     except Exception:
-        telefone_contato = None
+        dados_sistema = {}
+    telefone_contato = dados_sistema.get("telefone")
+    # Caso real (26/10): o cadastro tinha o endereço da loja, mas só o telefone ia pro
+    # bot — a IA inventou "fica perto do Tonin" e depois disse que não tinha o endereço.
+    endereco_loja = str(dados_sistema.get("endereco") or "").strip()
+    nome_loja = str(dados_sistema.get("nome") or "").strip()
     telefone_contato = str(telefone_contato or "").strip() or "não tenho esse número aqui, peça pra equipe confirmar"
 
     # Aviso de encomenda de festa/cento — configurável em Config do Bot,
@@ -2603,6 +2645,29 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # IA só piorou o carrinho a cada tentativa. Reclamação com carrinho montado →
     # o servidor ESVAZIA os itens e pede a lista de novo (sem IA); o próximo envio
     # entra limpo. "Não" sozinho depois de "posso fechar?" → pergunta o que mudar.
+    # Caso real (21/10): cliente perguntou "Vocês ficam até que horas?" e a IA improvisou
+    # ("perto do jantar") e mandou ligar/escrever pro WhatsApp da loja, onde ela já estava.
+    # O horário está em Config do Bot: a resposta sai dele, sem passar pela IA.
+    if (endereco_loja and len(prompt or "") <= 90 and _RE_PERGUNTA_ENDERECO_LOJA.search(_normalizar_termo(prompt or ""))
+            and not re.search(r"entrega|meu endereco|minha casa", _normalizar_termo(prompt or ""))
+            and not _itens_mencionados(prompt, carregar_cardapio())):
+        consulta = urllib.parse.quote_plus(f"{endereco_loja}, {_cidade_principal(bot_cfg)}")
+        resposta_e = (f"Estamos na {nome_loja or 'nossa loja'}:\n📍 {endereco_loja}\n"
+                      f"Como chegar: https://www.google.com/maps/search/?api=1&query={consulta}")
+        salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        salvar_historico_firestore(wa_id, "assistant", resposta_e, bot_cfg.get("max_historico_salvar"))
+        registrar_log_conversa(id_usuario, origem, prompt, resposta_e, "servidor", observacao="endereco_da_loja_respondido_pelo_servidor")
+        return resposta_e
+
+    horario_txt = _horario_legivel(bot_cfg)
+    if (horario_txt and len(prompt or "") <= 90 and _RE_PERGUNTA_HORARIO.search(_normalizar_termo(prompt or ""))
+            and not _itens_mencionados(prompt, carregar_cardapio())):
+        resposta_h = f"Nosso horário de funcionamento:\n{horario_txt}"
+        salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        salvar_historico_firestore(wa_id, "assistant", resposta_h, bot_cfg.get("max_historico_salvar"))
+        registrar_log_conversa(id_usuario, origem, prompt, resposta_h, "servidor", observacao="horario_respondido_pelo_servidor")
+        return resposta_h
+
     r_recl = obter_rascunho(id_usuario)
     p_norm = _normalizar_termo(prompt or "").strip(".!?,; ")
     resposta_fixa = None
@@ -2655,7 +2720,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     TELEFONE_DE_CONTATO_DA_LOJA (é ESTE que você informa se o cliente pedir
     "o contato"/"o telefone de vocês"/"o whatsapp da loja" — use EXATAMENTE
     este valor, nunca o TELEFONE_DO_CLIENTE acima, nunca invente outro número,
-    nem parecido): {telefone_contato}
+    nem parecido). ATENÇÃO: este é o mesmo WhatsApp em que o cliente já está
+    conversando com você — NUNCA mande o cliente "ligar" ou "chamar no WhatsApp"
+    nele pra resolver algo que você mesmo pode responder: {telefone_contato}
+    NOME E ENDEREÇO DA LOJA (use SÓ isto; NUNCA invente pontos de referência, "perto de X",
+    bairro ou outras lojas): {nome_loja or "não cadastrado"} — {endereco_loja or "endereço não cadastrado: diga que a equipe confirma"}
+    HORÁRIO DE FUNCIONAMENTO DA LOJA (use SÓ isto; nunca invente nem arredonde
+    horário): {_horario_legivel(bot_cfg).replace(chr(10), " | ") or "não configurado — diga que a equipe confirma"}
     {f"Cidade onde a loja entrega: {cidade_atendida} (só entrega dentro dessa cidade, nenhuma outra)." if cidade_atendida else ""}
     {bairros_texto}
     {aviso_atencao_antiga}
@@ -3347,6 +3418,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             if forma_pix and (pedido_registrado_ok or not ja_mostrou):
                 final_text = (final_text or "") + f"\n\nChave PIX: {chave_pix_cfg}" + (
                     " — é só pagar e mandar o comprovante por aqui. ✅" if pedido_registrado_ok else "")
+
+        # O telefone do cadastro é o do próprio WhatsApp do bot: se o cliente NÃO pediu
+        # contato/telefone, a frase que manda ele ligar/escrever pra esse número sai.
+        fone_cad = re.sub(r"\D", "", telefone_contato)
+        if (len(fone_cad) >= 8 and fone_cad[-8:] in re.sub(r"\D", "", final_text or "")
+                and not re.search(r"telefone|contato|numero|whats|ligar|falar com", _normalizar_termo(prompt or ""))):
+            frases = re.split(r"(?<=[.!?\n])\s+", final_text)
+            sem = [f for f in frases if fone_cad[-8:] not in re.sub(r"\D", "", f)]
+            if sem:
+                log_observacao = "telefone_do_proprio_whatsapp_removido"
+                final_text = " ".join(sem).strip()
 
         if pediu_humano and "equipe" not in _normalizar_termo(final_text or ""):
             log_observacao = "pediu_humano_texto_substituido"

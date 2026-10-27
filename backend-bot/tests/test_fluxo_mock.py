@@ -1055,3 +1055,43 @@ def test_forma_pagamento_na_frase():
     f = lambda t: bot._forma_pagamento_na_frase(bot._normalizar_termo(t))
     assert f("pode ser no cartão") == "CARTAO" and f("dinheiro mesmo") == "DINHEIRO"
     assert f("pix ou cartão") is None and f("não quero pix") is None and f("pode ser pix?") is None
+
+
+def _cfg_horario(ambiente):
+    dias = {k: {"aberto": True, "abre": "09:00", "fecha": "18:00"} for k in ("seg", "ter", "qua", "qui", "sex")}
+    dias["sab"] = {"aberto": True, "abre": "09:00", "fecha": "14:00"}
+    dias["dom"] = {"aberto": False}
+    # ativo=False: o horário vale como informação, sem bloquear o teste por "loja fechada agora"
+    ambiente.collection("configuracoes").document("bot").set({"horario_funcionamento": {"ativo": False, "dias": dias}}, merge=True)
+
+
+def test_horario_e_respondido_pelo_servidor(ambiente, monkeypatch):
+    """Caso 21/10: 'Vocês ficam até que horas?' → a IA improvisou 'perto do jantar' e mandou
+    ligar pro WhatsApp onde a cliente já estava. A resposta sai de Config do Bot."""
+    _cfg_horario(ambiente)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
+    resp = _conversar("553599000050", ["oi", "Vocês ficam até que horas?"])[-1]
+    assert "Segunda a sexta: 09:00 às 18:00" in resp and "Sábado: 09:00 às 14:00" in resp and "Domingo: fechado" in resp
+    assert "jantar" not in resp
+
+
+def test_telefone_do_proprio_whatsapp_nao_e_empurrado_ao_cliente(ambiente, monkeypatch):
+    ambiente.collection("configuracoes").document("sistema").set({"telefone": "35999758057"}, merge=True)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(
+        {"vocês entregam rápido?": ["Normalmente em 40 min. Se quiser confirmar, ligue ou chame no 35999758057. Posso ajudar em mais algo?"]}))
+    resp = _conversar("553599000051", ["oi", "vocês entregam rápido?"])[-1]
+    assert "35999758057" not in resp and "40 min" in resp
+
+
+def test_endereco_da_loja_vem_do_cadastro(ambiente, monkeypatch):
+    """Caso 26/10: cliente pediu o endereço, a IA inventou 'perto do Tonin' e disse que não
+    tinha o endereço — que estava em Configurações > Estabelecimento."""
+    ambiente.collection("configuracoes").document("sistema").set(
+        {"nome": "Lileamar Salgados Loja 4", "endereco": "Avenida Monsenhor Mancini, nº 1036, Bairro Vila"}, merge=True)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
+    r = _conversar("553599000052", ["oi", "Me passa o endereço com numero", "É a perto do dada ou perto do tonin?"])
+    for resp in r[1:]:
+        assert "Avenida Monsenhor Mancini, nº 1036" in resp and "Lileamar Salgados Loja 4" in resp and "maps" in resp
+    # endereço de ENTREGA do cliente não dispara a resposta da loja
+    r2 = _conversar("553599000053", ["oi", "vou passar o endereço"])
+    assert "Monsenhor Mancini" not in r2[-1]
