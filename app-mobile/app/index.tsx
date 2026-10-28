@@ -2537,82 +2537,87 @@ function AppCliente() {
 
   if (carregando) return <ActivityIndicator size="large" color={BRAND_GREEN} style={{ flex: 1 }} />;
 
+  // Tela de login/cadastro por CPF — reutilizada apenas nas abas que exigem
+  // conta (Pedidos, Perfil, Sacola ao finalizar). A aba Início (cardápio)
+  // nunca exige login, pra não bloquear a navegação de quem só quer olhar
+  // o cardápio (exigência da Apple, guideline 5.1.1(v)).
+  const telaLogin = (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: corMarca }}>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
+        <View style={styles.containerCentro}>
+          <View style={styles.cardCadastro}>
+            {usaLogotipo && appCfg.logoUrl ? (
+              // Logo configurável (Marketing > Identidade no painel) substitui a
+              // logo fixa abaixo — mostrar as duas juntas duplicava a marca na tela.
+              <Image source={{ uri: appCfg.logoUrl }} style={styles.marcaLogoLogin} contentFit="contain" />
+            ) : (
+              <>
+                <Image source={BRAND_LOGO} style={styles.logoLogin} contentFit="contain" />
+                <Text style={[styles.tituloCadastro, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeAppExibicao}</Text>
+              </>
+            )}
+
+            {/* --- ESTADO 1: SÓ O CPF (decide sozinho se é login ou cadastro) --- */}
+            {modoAcesso === 'inicial' && (
+              <View>
+                <Text style={styles.label}>DIGITE SEU CPF</Text>
+                <TextInput
+                  style={styles.inputVisivel}
+                  placeholder="000.000.000-00"
+                  keyboardType="numeric"
+                  value={cpf}
+                  onChangeText={setCpf}
+                  maxLength={11}
+                />
+                <TouchableOpacity style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 20 }]} onPress={verificarOuCadastrar}>
+                  <Text style={styles.btnTxtBranco}>Continuar 🚀</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* --- ESTADO 2: CPF NOVO — completa nome/WhatsApp pra cadastrar --- */}
+            {modoAcesso === 'cadastro' && (
+              <View>
+                <Text style={{ textAlign: 'center', marginBottom: 15, color: '#666' }}>
+                  Primeira vez por aqui! Só mais alguns dados pra criar sua conta:
+                </Text>
+
+                <Text style={styles.label}>CPF</Text>
+                <TextInput style={styles.inputVisivel} placeholder="000.000.000-00" keyboardType="numeric" value={cpf} onChangeText={setCpf} maxLength={11} />
+
+                <Text style={[styles.label, { marginTop: 15 }]}>NOME COMPLETO</Text>
+                <TextInput style={styles.inputVisivel} placeholder="Ex: João Silva" value={nome} onChangeText={setNome} />
+
+                <Text style={[styles.label, { marginTop: 15 }]}>WHATSAPP</Text>
+                <TextInput
+                  style={styles.inputVisivel}
+                  placeholder="(00) 00000-0000"
+                  keyboardType="phone-pad"
+                  value={aplicarMascaraTelefone(telefone)}
+                  onChangeText={(t) => setTelefone(aplicarMascaraTelefone(t))}
+                  maxLength={15}
+                />
+
+                <TouchableOpacity style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 20 }]} onPress={verificarOuCadastrar}>
+                  <Text style={styles.btnTxtBranco}>Criar minha conta ⭐</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={() => setModoAcesso('inicial')} style={{ marginTop: 15 }}>
+                  <Text style={{ textAlign: 'center', color: '#999' }}>Voltar</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+
   return (
     <View style={{ flex: 1, backgroundColor: '#fff' }}>
       <StatusBar barStyle="dark-content" />
 
-      {!estaCadastrado ? (
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1, backgroundColor: corMarca }}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}>
-            <View style={styles.containerCentro}>
-              <View style={styles.cardCadastro}>
-                {usaLogotipo && appCfg.logoUrl ? (
-                  // Logo configurável (Marketing > Identidade no painel) substitui a
-                  // logo fixa abaixo — mostrar as duas juntas duplicava a marca na tela.
-                  <Image source={{ uri: appCfg.logoUrl }} style={styles.marcaLogoLogin} contentFit="contain" />
-                ) : (
-                  <>
-                    <Image source={BRAND_LOGO} style={styles.logoLogin} contentFit="contain" />
-                    <Text style={[styles.tituloCadastro, estiloFonteMarca, { fontSize: tamanhoFonteMarca }]}>{nomeAppExibicao}</Text>
-                  </>
-                )}
-
-                {/* --- ESTADO 1: SÓ O CPF (decide sozinho se é login ou cadastro) --- */}
-                {modoAcesso === 'inicial' && (
-                  <View>
-                    <Text style={styles.label}>DIGITE SEU CPF</Text>
-                    <TextInput
-                      style={styles.inputVisivel}
-                      placeholder="000.000.000-00"
-                      keyboardType="numeric"
-                      value={cpf}
-                      onChangeText={setCpf}
-                      maxLength={11}
-                    />
-                    <TouchableOpacity style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 20 }]} onPress={verificarOuCadastrar}>
-                      <Text style={styles.btnTxtBranco}>Continuar 🚀</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {/* --- ESTADO 2: CPF NOVO — completa nome/WhatsApp pra cadastrar --- */}
-                {modoAcesso === 'cadastro' && (
-                  <View>
-                    <Text style={{ textAlign: 'center', marginBottom: 15, color: '#666' }}>
-                      Primeira vez por aqui! Só mais alguns dados pra criar sua conta:
-                    </Text>
-
-                    <Text style={styles.label}>CPF</Text>
-                    <TextInput style={styles.inputVisivel} placeholder="000.000.000-00" keyboardType="numeric" value={cpf} onChangeText={setCpf} maxLength={11} />
-
-                    <Text style={[styles.label, { marginTop: 15 }]}>NOME COMPLETO</Text>
-                    <TextInput style={styles.inputVisivel} placeholder="Ex: João Silva" value={nome} onChangeText={setNome} />
-
-                    <Text style={[styles.label, { marginTop: 15 }]}>WHATSAPP</Text>
-                    <TextInput
-                      style={styles.inputVisivel}
-                      placeholder="(00) 00000-0000"
-                      keyboardType="phone-pad"
-                      value={aplicarMascaraTelefone(telefone)}
-                      onChangeText={(t) => setTelefone(aplicarMascaraTelefone(t))}
-                      maxLength={15}
-                    />
-
-                    <TouchableOpacity style={[styles.btnCadastroLargo, { backgroundColor: corMarca, marginTop: 20 }]} onPress={verificarOuCadastrar}>
-                      <Text style={styles.btnTxtBranco}>Criar minha conta ⭐</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity onPress={() => setModoAcesso('inicial')} style={{ marginTop: 15 }}>
-                      <Text style={{ textAlign: 'center', color: '#999' }}>Voltar</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      ) : (
-        <View style={{ flex: 1 }}>
+      <View style={{ flex: 1 }}>
           {/* --- CONTEÚDO DAS ABAS --- */}
           <View style={{ flex: 1, paddingBottom: 0 }}>
             {abaAtiva === 'home' && (
@@ -2657,6 +2662,7 @@ function AppCliente() {
             )}
 
             {abaAtiva === 'pedidos' && (
+              !estaCadastrado ? telaLogin : (
               <SecaoPedidos
                 meusPedidos={meusPedidos}
                 insets={insets}
@@ -2667,9 +2673,11 @@ function AppCliente() {
                   setModalPixVisivel(true);
                 }}
               />
+              )
             )}
 
             {abaAtiva === 'perfil' && (
+              !estaCadastrado ? telaLogin :
               <SecaoPerfil
                 nome={nome}
                 telefone={telefone}
@@ -2756,6 +2764,7 @@ function AppCliente() {
             )}
 
             {abaAtiva === 'sacola' && (
+              !estaCadastrado ? telaLogin :
               <SecaoSacola
                 carrinho={carrinho}
                 setCarrinho={setCarrinho}
@@ -2808,8 +2817,7 @@ function AppCliente() {
               />
             )}
           </View>
-        </View>
-      )}
+      </View>
 
       <View style={[
         styles.tabBar,
