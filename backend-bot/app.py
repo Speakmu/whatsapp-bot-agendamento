@@ -3631,7 +3631,7 @@ def webhook():
                                 })
                             except gcp_exceptions.AlreadyExists:
                                 print(f"🚫 Mensagem repetida bloqueada: {msg_id}")
-                                return "EVENT_RECEIVED", 200
+                                continue
                             # -----------------------------------------------------------
 
                             from_number = message['from']
@@ -3643,8 +3643,9 @@ def webhook():
                             # todo por poucas dezenas de mensagens. Se o Meta reenviar por
                             # demora, o claim de msg_id acima descarta a repetição, então
                             # não há resposta duplicada.
+                            # Todas as mensagens do envio são processadas (antes o return
+                            # aqui descartava da segunda em diante).
                             processar_mensagem_recebida(message, from_number)
-                            return "EVENT_RECEIVED", 200
 
         return "OK", 200
 
