@@ -3636,15 +3636,14 @@ def webhook():
 
                             from_number = message['from']
 
-                            # O Meta espera o 200 rápido — não o fim do processamento, que
-                            # envolve Firestore + OpenAI + envio pelo WhatsApp e pode passar
-                            # do timeout do webhook, disparando um retry (e uma resposta
-                            # duplicada). Processa em background e confirma na hora.
-                            threading.Thread(
-                                target=processar_mensagem_recebida,
-                                args=(message, from_number),
-                                daemon=True
-                            ).start()
+                            # Processa DENTRO da requisição. O serviço roda no Cloud Run
+                            # com CPU só durante a requisição (cobrança por uso): uma thread
+                            # em segundo plano depois do 200 seria congelada e, pior, a CPU
+                            # sempre alocada que isso exigia mantinha 1 vCPU cobrando o dia
+                            # todo por poucas dezenas de mensagens. Se o Meta reenviar por
+                            # demora, o claim de msg_id acima descarta a repetição, então
+                            # não há resposta duplicada.
+                            processar_mensagem_recebida(message, from_number)
                             return "EVENT_RECEIVED", 200
 
         return "OK", 200
