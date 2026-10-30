@@ -151,35 +151,91 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
     }
 
+    const DIAS_CURTOS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+    function dataCurta(iso) {
+        const [a, m, d] = iso.split('-').map(Number);
+        const dt = new Date(Date.UTC(a, m - 1, d));
+        return `${DIAS_CURTOS[dt.getUTCDay()]}, ${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}`;
+    }
+    function hojeBrasilia() {
+        return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
+    }
+
+    // Resumo + situação ("em vigor hoje", "começa amanhã", "já passou") do card.
+    function atualizarResumoData(card) {
+        const inicio = card.querySelector('.de-inicio').value;
+        const fim = card.querySelector('.de-fim').value || inicio;
+        const tipo = card.querySelector('.de-tipo').value;
+        const motivo = card.querySelector('.de-motivo').value.trim();
+        const resumo = card.querySelector('.de-resumo');
+        const chip = card.querySelector('.de-chip');
+        if (!inicio) { resumo.textContent = 'Escolha a data'; chip.textContent = ''; chip.className = 'de-chip'; return; }
+        const quando = fim && fim !== inicio ? `${dataCurta(inicio)} até ${dataCurta(fim)}` : dataCurta(inicio);
+        const oQue = tipo === 'horario'
+            ? `horário especial ${card.querySelector('.de-abre').value || '--:--'} às ${card.querySelector('.de-fecha').value || '--:--'}`
+            : 'fechado o dia todo';
+        resumo.textContent = `${motivo ? motivo + ' · ' : ''}${quando} · ${oQue}`;
+        const hoje = hojeBrasilia();
+        const amanha = new Date(Date.parse(hoje + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
+        let txt = '', cls = 'de-chip';
+        if (fim < hoje) txt = 'já passou';
+        else if (inicio <= hoje) { txt = 'em vigor hoje'; cls += ' agora'; }
+        else if (inicio === amanha) { txt = 'começa amanhã'; cls += ' breve'; }
+        else txt = 'agendado';
+        chip.textContent = txt;
+        chip.className = cls;
+    }
+
     function adicionarLinhaData(d) {
         d = d || {};
-        const tr = document.createElement('tr');
-        tr.className = 'data-especial-linha';
-        tr.innerHTML = `
-            <td style="padding:4px;"><input type="date" class="de-inicio" value="${escAttr(d.inicio)}" style="padding:6px;"></td>
-            <td style="padding:4px;"><input type="date" class="de-fim" value="${escAttr(d.fim)}" style="padding:6px;"></td>
-            <td style="padding:4px;">
-                <select class="de-tipo" style="padding:6px;">
+        const card = document.createElement('div');
+        card.className = 'de-card data-especial-linha';
+        card.innerHTML = `
+            <div class="de-topo">
+                <div><span class="de-resumo"></span><span class="de-chip"></span></div>
+                <button type="button" class="de-remover" title="Remover esta data">Remover</button>
+            </div>
+            <div><label>De</label><input type="date" class="de-inicio" value="${escAttr(d.inicio)}"></div>
+            <div><label>Até (opcional)</label><input type="date" class="de-fim" value="${escAttr(d.fim)}"></div>
+            <div><label>Situação</label>
+                <select class="de-tipo">
                     <option value="fechado">Fechado o dia todo</option>
                     <option value="horario">Horário especial</option>
                 </select>
-            </td>
-            <td style="padding:4px;"><input type="time" class="de-abre" value="${escAttr(d.abre)}" style="padding:6px;"></td>
-            <td style="padding:4px;"><input type="time" class="de-fecha" value="${escAttr(d.fecha)}" style="padding:6px;"></td>
-            <td style="padding:4px;"><input type="text" class="de-msg" value="${escAttr(d.mensagem)}" placeholder="Ex.: Feliz Natal! Voltamos {data_volta}" style="padding:6px; width:100%;"></td>
-            <td style="padding:4px;"><button type="button" class="btn de-remover" title="Remover">&times;</button></td>
+            </div>
+            <div><label>Abre</label><input type="time" class="de-abre" value="${escAttr(d.abre)}"></div>
+            <div><label>Fecha</label><input type="time" class="de-fecha" value="${escAttr(d.fecha)}"></div>
+            <div class="de-larga"><label>Motivo (ex.: Finados, Natal)</label><input type="text" class="de-motivo" value="${escAttr(d.motivo)}" placeholder="Nome do feriado ou motivo"></div>
+            <div class="de-larga"><label>Mensagem ao cliente (opcional)</label><input type="text" class="de-msg" value="${escAttr(d.mensagem)}" placeholder="Ex.: Feliz Natal! Voltamos {data_volta}"></div>
         `;
-        const tipo = tr.querySelector('.de-tipo');
+        const tipo = card.querySelector('.de-tipo');
         tipo.value = d.tipo === 'horario' ? 'horario' : 'fechado';
         const aplicar = () => {
             const especial = tipo.value === 'horario';
-            tr.querySelector('.de-abre').disabled = !especial;
-            tr.querySelector('.de-fecha').disabled = !especial;
+            card.querySelector('.de-abre').disabled = !especial;
+            card.querySelector('.de-fecha').disabled = !especial;
+            atualizarResumoData(card);
         };
         tipo.addEventListener('change', aplicar);
+        card.querySelectorAll('input').forEach(el => el.addEventListener('input', () => atualizarResumoData(card)));
+        card.querySelector('.de-remover').addEventListener('click', () => { card.remove(); mostrarVazioDatas(); });
+        $('datas-especiais-body').appendChild(card);
         aplicar();
-        tr.querySelector('.de-remover').addEventListener('click', () => tr.remove());
-        $('datas-especiais-body').appendChild(tr);
+        mostrarVazioDatas();
+    }
+
+    function mostrarVazioDatas() {
+        const box = $('datas-especiais-body');
+        let vazio = box.querySelector('.datas-vazio');
+        const temLinhas = box.querySelector('.data-especial-linha');
+        if (!temLinhas && !vazio) {
+            vazio = document.createElement('div');
+            vazio.className = 'datas-vazio';
+            vazio.textContent = 'Nenhuma data cadastrada. A loja segue o horário semanal.';
+            box.appendChild(vazio);
+        } else if (temLinhas && vazio) {
+            vazio.remove();
+        }
     }
 
     async function carregarDatasEspeciais() {
@@ -188,6 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const lista = (snap.exists ? snap.data() : {})?.datas_especiais;
             $('datas-especiais-body').innerHTML = '';
             (Array.isArray(lista) ? lista : []).forEach(adicionarLinhaData);
+            mostrarVazioDatas();
         } catch (err) {
             console.warn('datas especiais:', err.message);
         }
@@ -203,6 +260,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const abre = tr.querySelector('.de-abre').value;
             const fecha = tr.querySelector('.de-fecha').value;
             const mensagem = tr.querySelector('.de-msg').value.trim();
+            const motivo = tr.querySelector('.de-motivo').value.trim();
             if (!inicio) { alert('Preencha a data "De" em todas as linhas (ou remova a linha vazia).'); return; }
             if (fim && fim < inicio) { alert(`Em ${inicio}: a data final não pode ser antes da inicial.`); return; }
             if (tipo === 'horario' && (!abre || !fecha)) { alert(`Em ${inicio}: informe o horário de abrir e fechar.`); return; }
@@ -212,6 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 tipo,
                 abre: tipo === 'horario' ? abre : '',
                 fecha: tipo === 'horario' ? fecha : '',
+                motivo,
                 mensagem
             });
         }
@@ -268,7 +327,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 inicio: fer.inicio,
                 fim: fer.fim,
                 tipo: 'fechado',
-                mensagem: `Hoje é feriado (${fer.nome}) e estamos fechados. Voltamos a atender no dia {data_volta}.`
+                motivo: fer.nome,
+                mensagem: ''
             });
             novos++;
         });

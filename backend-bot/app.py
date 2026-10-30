@@ -1725,6 +1725,7 @@ def _datas_especiais_validas(bot_cfg):
         if tipo == "horario" and not (abre and fecha):
             continue
         itens.append({"inicio": ini, "fim": fim, "tipo": tipo, "abre": abre, "fecha": fecha,
+                      "motivo": str(it.get("motivo") or "").strip(),
                       "mensagem": str(it.get("mensagem") or "").strip()})
     return itens
 
@@ -1753,7 +1754,8 @@ def verificar_data_especial(bot_cfg):
         if not (e and e["tipo"] == "fechado"):
             break
         volta += timedelta(days=1)
-    template = d["mensagem"] or "Hoje a loja está fechada. Voltamos a atender no dia {data_volta}."
+    motivo = f" ({d['motivo']})" if d["motivo"] else ""
+    template = d["mensagem"] or f"Hoje a loja está fechada{motivo}. Voltamos a atender no dia {{data_volta}}."
     return True, template.replace("{data_volta}", volta.strftime("%d/%m/%Y"))
 
 
@@ -1767,7 +1769,8 @@ def _linhas_datas_especiais(bot_cfg, dias_a_frente=14):
             continue
         data = d["inicio"].strftime("%d/%m") if d["inicio"] == d["fim"] else f"{d['inicio']:%d/%m} a {d['fim']:%d/%m}"
         texto = "fechado" if d["tipo"] == "fechado" else f"{d['abre']} às {d['fecha']}"
-        linhas.append(f"• {data}: {texto}")
+        motivo = f" ({d['motivo']})" if d["motivo"] else ""
+        linhas.append(f"• {data}{motivo}: {texto}")
     return linhas
 
 

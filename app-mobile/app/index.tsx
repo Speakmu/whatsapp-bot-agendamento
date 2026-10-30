@@ -187,7 +187,8 @@ function calcularHorarioFuncionamento(horarioCfg: any, datasEspeciais?: any, fer
       volta = somarDias(volta, 1);
     }
     const [va, vm, vd] = volta.split('-');
-    const msg = String(especial.mensagem || '').trim() || 'Hoje a loja está fechada. Voltamos a atender no dia {data_volta}.';
+    const motivo = String(especial.motivo || '').trim();
+    const msg = String(especial.mensagem || '').trim() || `Hoje a loja está fechada${motivo ? ` (${motivo})` : ''}. Voltamos a atender no dia {data_volta}.`;
     return { aberto: false, texto: msg.replace('{data_volta}', `${vd}/${vm}/${va}`) };
   }
   if (especial) {
