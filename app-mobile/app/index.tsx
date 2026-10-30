@@ -152,7 +152,19 @@ function dataEspecialDoDia(datas: any, iso: string): any {
   return validas.find((x: any) => x.tipo !== 'horario') || validas[0] || null;
 }
 
-function calcularHorarioFuncionamento(horarioCfg: any, datasEspeciais?: any): { aberto: boolean; texto: string } {
+// Período de férias (Config do Bot: ferias_ativo/inicio/fim/mensagem) — mesma regra
+// do bot (verificar_ferias). Devolve o texto pronto se hoje está dentro, senão null.
+function avisoFerias(ferias: any, hojeIso: string): string | null {
+  if (!ferias || !ferias.ativo) return null;
+  const ini = String(ferias.inicio || ''), fim = String(ferias.fim || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ini) || !/^\d{4}-\d{2}-\d{2}$/.test(fim)) return null;
+  if (hojeIso < ini || hojeIso > fim) return null;
+  const [va, vm, vd] = somarDias(fim, 1).split('-');
+  const msg = String(ferias.mensagem || '').trim() || 'Estamos de férias no momento e voltamos no dia {data_volta}. Até lá!';
+  return msg.replace('{data_volta}', `${vd}/${vm}/${va}`);
+}
+
+function calcularHorarioFuncionamento(horarioCfg: any, datasEspeciais?: any, ferias?: any): { aberto: boolean; texto: string } {
   const dias = (horarioCfg && horarioCfg.dias) || {};
   const partes: string[] = [];
   ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'].forEach(chave => {
@@ -162,6 +174,8 @@ function calcularHorarioFuncionamento(horarioCfg: any, datasEspeciais?: any): { 
   let texto = partes.length ? partes.join('; ') : 'horário a confirmar';
 
   const agora = agoraBrasilia();
+  const avisoDeFerias = avisoFerias(ferias, agora.iso);
+  if (avisoDeFerias) return { aberto: false, texto: avisoDeFerias };
   let diaCfg: any;
   const especial = dataEspecialDoDia(datasEspeciais, agora.iso);
   if (especial && especial.tipo !== 'horario') {
@@ -1693,6 +1707,7 @@ function AppCliente() {
   // --- Horário de funcionamento + bairros/taxa de entrega (mesma config do bot do WhatsApp) ---
   const [horarioCfg, setHorarioCfg] = useState<any>(null);
   const [datasEspeciais, setDatasEspeciais] = useState<any>(null);
+  const [feriasCfg, setFeriasCfg] = useState<any>(null);
   const [lojaFechada, setLojaFechada] = useState(false);
   const [horarioTexto, setHorarioTexto] = useState('');
   const [bairro, setBairro] = useState('');
@@ -1703,6 +1718,7 @@ function AppCliente() {
       const d = s && s.exists() ? (s.data() || {}) : {};
       setHorarioCfg(d.horario_funcionamento || null);
       setDatasEspeciais(Array.isArray(d.datas_especiais) ? d.datas_especiais : null);
+      setFeriasCfg({ ativo: d.ferias_ativo === true, inicio: d.ferias_inicio, fim: d.ferias_fim, mensagem: d.ferias_mensagem });
       setBairrosEntrega(Array.isArray(d.bairros_entrega) ? d.bairros_entrega : []);
       setTaxaEntrega(Number(d.taxa_entrega) || 0);
     }, () => { });
@@ -1710,14 +1726,14 @@ function AppCliente() {
   }, []);
   useEffect(() => {
     function recalcular() {
-      const { aberto, texto } = calcularHorarioFuncionamento(horarioCfg, datasEspeciais);
+      const { aberto, texto } = calcularHorarioFuncionamento(horarioCfg, datasEspeciais, feriasCfg);
       setLojaFechada(!aberto);
       setHorarioTexto(texto);
     }
     recalcular();
     const intervalo = setInterval(recalcular, 60000);
     return () => clearInterval(intervalo);
-  }, [horarioCfg, datasEspeciais]);
+  }, [horarioCfg, datasEspeciais, feriasCfg]);
 
   const [destaquesGrupos, setDestaquesGrupos] = useState<any[]>([]);
   const [heroUrl, setHeroUrl] = useState('');
