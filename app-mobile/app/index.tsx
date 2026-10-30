@@ -120,19 +120,69 @@ const FONT_SIZE_MAP: Record<string, number> = { pequeno: 22, medio: 28, grande: 
 const NOMES_DIAS_SEMANA: Record<string, string> = { seg: 'Segunda', ter: 'Terça', qua: 'Quarta', qui: 'Quinta', sex: 'Sexta', sab: 'Sábado', dom: 'Domingo' };
 const ORDEM_DIAS_SEMANA_JS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab']; // Date.getDay(): 0 = domingo
 
-function calcularHorarioFuncionamento(horarioCfg: any): { aberto: boolean; texto: string } {
+// Hora de Brasília (UTC-3, sem horário de verão), igual ao bot — não depende do
+// fuso do celular. Os getters UTC do Date deslocado dão a data/hora de lá.
+function agoraBrasilia() {
+  const d = new Date(Date.now() - 3 * 3600 * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return {
+    dow: d.getUTCDay(), // 0 = domingo
+    minutos: d.getUTCHours() * 60 + d.getUTCMinutes(),
+    iso: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+    ddmm: `${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)}`,
+  };
+}
+
+function somarDias(iso: string, n: number): string {
+  const [a, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(a, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
+// Feriados/dias atípicos (configuracoes/bot -> datas_especiais). Mesma regra do
+// bot: 'fechado' vence 'horario'; item malformado é ignorado.
+function dataEspecialDoDia(datas: any, iso: string): any {
+  if (!Array.isArray(datas)) return null;
+  const validas = datas.filter((x: any) => {
+    if (!x || typeof x !== 'object' || !/^\d{4}-\d{2}-\d{2}$/.test(String(x.inicio || ''))) return false;
+    const fim = String(x.fim || x.inicio);
+    if (fim < x.inicio) return false;
+    if (x.tipo === 'horario' && !(x.abre && x.fecha)) return false;
+    return x.inicio <= iso && iso <= fim;
+  });
+  return validas.find((x: any) => x.tipo !== 'horario') || validas[0] || null;
+}
+
+function calcularHorarioFuncionamento(horarioCfg: any, datasEspeciais?: any): { aberto: boolean; texto: string } {
   const dias = (horarioCfg && horarioCfg.dias) || {};
   const partes: string[] = [];
   ['seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'].forEach(chave => {
     const d = dias[chave];
     if (d && d.aberto && d.abre && d.fecha) partes.push(`${NOMES_DIAS_SEMANA[chave]} ${d.abre}-${d.fecha}`);
   });
-  const texto = partes.length ? partes.join('; ') : 'horário a confirmar';
+  let texto = partes.length ? partes.join('; ') : 'horário a confirmar';
 
-  if (!horarioCfg || !horarioCfg.ativo) return { aberto: true, texto };
-
-  const agora = new Date();
-  const diaCfg = dias[ORDEM_DIAS_SEMANA_JS[agora.getDay()]];
+  const agora = agoraBrasilia();
+  let diaCfg: any;
+  const especial = dataEspecialDoDia(datasEspeciais, agora.iso);
+  if (especial && especial.tipo !== 'horario') {
+    // Fechado o dia todo: mostra a mensagem da loja (ou o padrão) com a data de volta.
+    let volta = somarDias(String(especial.fim || especial.inicio), 1);
+    for (let i = 0; i < 60; i++) {
+      const prox = dataEspecialDoDia(datasEspeciais, volta);
+      if (!prox || prox.tipo === 'horario') break;
+      volta = somarDias(volta, 1);
+    }
+    const [va, vm, vd] = volta.split('-');
+    const msg = String(especial.mensagem || '').trim() || 'Hoje a loja está fechada. Voltamos a atender no dia {data_volta}.';
+    return { aberto: false, texto: msg.replace('{data_volta}', `${vd}/${vm}/${va}`) };
+  }
+  if (especial) {
+    texto = `hoje (${agora.ddmm}) ${especial.abre}-${especial.fecha}`;
+    diaCfg = { aberto: true, abre: especial.abre, fecha: especial.fecha };
+  } else {
+    if (!horarioCfg || !horarioCfg.ativo) return { aberto: true, texto };
+    diaCfg = dias[ORDEM_DIAS_SEMANA_JS[agora.dow]];
+  }
   if (!diaCfg || !diaCfg.aberto) return { aberto: false, texto };
 
   const abre = diaCfg.abre, fecha = diaCfg.fecha;
@@ -140,7 +190,7 @@ function calcularHorarioFuncionamento(horarioCfg: any): { aberto: boolean; texto
 
   const [h1, m1] = abre.split(':').map(Number);
   const [h2, m2] = fecha.split(':').map(Number);
-  const minutosAgora = agora.getHours() * 60 + agora.getMinutes();
+  const minutosAgora = agora.minutos;
   const minutosAbre = h1 * 60 + m1;
   const minutosFecha = h2 * 60 + m2;
   const dentro = minutosFecha <= minutosAbre
@@ -1642,6 +1692,7 @@ function AppCliente() {
 
   // --- Horário de funcionamento + bairros/taxa de entrega (mesma config do bot do WhatsApp) ---
   const [horarioCfg, setHorarioCfg] = useState<any>(null);
+  const [datasEspeciais, setDatasEspeciais] = useState<any>(null);
   const [lojaFechada, setLojaFechada] = useState(false);
   const [horarioTexto, setHorarioTexto] = useState('');
   const [bairro, setBairro] = useState('');
@@ -1651,6 +1702,7 @@ function AppCliente() {
     const unsub = onSnapshot(doc(dbModular, 'configuracoes', 'bot'), (s: any) => {
       const d = s && s.exists() ? (s.data() || {}) : {};
       setHorarioCfg(d.horario_funcionamento || null);
+      setDatasEspeciais(Array.isArray(d.datas_especiais) ? d.datas_especiais : null);
       setBairrosEntrega(Array.isArray(d.bairros_entrega) ? d.bairros_entrega : []);
       setTaxaEntrega(Number(d.taxa_entrega) || 0);
     }, () => { });
@@ -1658,14 +1710,14 @@ function AppCliente() {
   }, []);
   useEffect(() => {
     function recalcular() {
-      const { aberto, texto } = calcularHorarioFuncionamento(horarioCfg);
+      const { aberto, texto } = calcularHorarioFuncionamento(horarioCfg, datasEspeciais);
       setLojaFechada(!aberto);
       setHorarioTexto(texto);
     }
     recalcular();
     const intervalo = setInterval(recalcular, 60000);
     return () => clearInterval(intervalo);
-  }, [horarioCfg]);
+  }, [horarioCfg, datasEspeciais]);
 
   const [destaquesGrupos, setDestaquesGrupos] = useState<any[]>([]);
   const [heroUrl, setHeroUrl] = useState('');

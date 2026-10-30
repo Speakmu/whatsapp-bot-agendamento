@@ -1699,10 +1699,92 @@ def verificar_ferias(bot_cfg):
     data_volta = (fim + timedelta(days=1)).strftime("%d/%m/%Y")
     return True, template.replace("{data_volta}", data_volta)
 
+def _fuso_br():
+    return timezone(timedelta(hours=-3))
+
+
+def _datas_especiais_validas(bot_cfg):
+    """Feriados/dias atípicos de configuracoes/bot -> datas_especiais, já com as
+    datas convertidas. Cada item: {inicio, fim, tipo: 'fechado'|'horario', abre,
+    fecha, mensagem}. Item malformado é ignorado (nunca derruba o atendimento);
+    'horario' sem abre/fecha também, porque não há horário pra aplicar."""
+    itens = []
+    for it in bot_cfg.get("datas_especiais") or []:
+        if not isinstance(it, dict):
+            continue
+        try:
+            ini = datetime.strptime(str(it.get("inicio") or "").strip(), "%Y-%m-%d").date()
+            fim_s = str(it.get("fim") or "").strip()
+            fim = datetime.strptime(fim_s, "%Y-%m-%d").date() if fim_s else ini
+        except ValueError:
+            continue
+        if fim < ini:
+            continue
+        tipo = "horario" if it.get("tipo") == "horario" else "fechado"
+        abre, fecha = str(it.get("abre") or "").strip(), str(it.get("fecha") or "").strip()
+        if tipo == "horario" and not (abre and fecha):
+            continue
+        itens.append({"inicio": ini, "fim": fim, "tipo": tipo, "abre": abre, "fecha": fecha,
+                      "mensagem": str(it.get("mensagem") or "").strip()})
+    return itens
+
+
+def _data_especial_do_dia(bot_cfg, dia):
+    """Data especial que cobre o dia. Se mais de uma cobrir, 'fechado' vence."""
+    achadas = [d for d in _datas_especiais_validas(bot_cfg) if d["inicio"] <= dia <= d["fim"]]
+    for d in achadas:
+        if d["tipo"] == "fechado":
+            return d
+    return achadas[0] if achadas else None
+
+
+def verificar_data_especial(bot_cfg):
+    """Hoje (fuso BR) é um dia especial FECHADO (feriado etc.)? Retorna
+    (fechado: bool, mensagem: str) com {data_volta} já trocado — mesmo padrão
+    de verificar_ferias. Horário especial não passa por aqui: é aplicado em
+    verificar_horario_funcionamento."""
+    hoje = datetime.now(_fuso_br()).date()
+    d = _data_especial_do_dia(bot_cfg, hoje)
+    if not d or d["tipo"] != "fechado":
+        return False, ""
+    volta = d["fim"] + timedelta(days=1)
+    for _ in range(60):  # pula dias seguidos que também são especiais fechados
+        e = _data_especial_do_dia(bot_cfg, volta)
+        if not (e and e["tipo"] == "fechado"):
+            break
+        volta += timedelta(days=1)
+    template = d["mensagem"] or "Hoje a loja está fechada. Voltamos a atender no dia {data_volta}."
+    return True, template.replace("{data_volta}", volta.strftime("%d/%m/%Y"))
+
+
+def _linhas_datas_especiais(bot_cfg, dias_a_frente=14):
+    """Datas especiais de hoje até daqui a N dias, em linhas legíveis."""
+    hoje = datetime.now(_fuso_br()).date()
+    limite = hoje + timedelta(days=dias_a_frente)
+    linhas = []
+    for d in sorted(_datas_especiais_validas(bot_cfg), key=lambda x: x["inicio"]):
+        if d["fim"] < hoje or d["inicio"] > limite:
+            continue
+        data = d["inicio"].strftime("%d/%m") if d["inicio"] == d["fim"] else f"{d['inicio']:%d/%m} a {d['fim']:%d/%m}"
+        texto = "fechado" if d["tipo"] == "fechado" else f"{d['abre']} às {d['fecha']}"
+        linhas.append(f"• {data}: {texto}")
+    return linhas
+
+
 def _horario_legivel(bot_cfg):
     """Horário configurado em Config do Bot, em linhas legíveis, agrupando dias
     seguidos com o mesmo horário ("Segunda a sexta: 09:00 às 18:00"). Devolve ''
-    se não houver horário configurado."""
+    se não houver horário configurado. Feriados/dias atípicos dos próximos dias
+    entram numa seção "Datas especiais" (têm prioridade sobre o horário semanal)."""
+    semanal = _horario_semanal_legivel(bot_cfg)
+    especiais = _linhas_datas_especiais(bot_cfg)
+    if not especiais:
+        return semanal
+    bloco = "Datas especiais (valem no lugar do horário normal):\n" + "\n".join(especiais)
+    return f"{semanal}\n\n{bloco}" if semanal else bloco
+
+
+def _horario_semanal_legivel(bot_cfg):
     dias = (bot_cfg.get("horario_funcionamento") or {}).get("dias") or {}
     nomes = {"seg": "Segunda", "ter": "Terça", "qua": "Quarta", "qui": "Quinta", "sex": "Sexta", "sab": "Sábado", "dom": "Domingo"}
     grupos = []   # [(primeiro, ultimo, 'abre às fecha')]
@@ -1748,12 +1830,21 @@ def verificar_horario_funcionamento(bot_cfg):
         if dias.get(chave, {}).get("aberto") and dias[chave].get("abre") and dias[chave].get("fecha")
     ) or "horário a confirmar"
 
-    if not horario_cfg.get("ativo"):
-        return True, texto_horario
-
-    fuso_br = timezone(timedelta(hours=-3))
+    fuso_br = _fuso_br()
     agora = datetime.now(fuso_br)
-    dia_cfg = dias.get(ORDEM_DIAS_SEMANA[agora.weekday()]) or {}
+
+    # Data especial (feriado/dia atípico) manda no lugar do horário semanal e
+    # vale mesmo com "Restringir pedidos por horário" desligado.
+    especial = _data_especial_do_dia(bot_cfg, agora.date())
+    if especial and especial["tipo"] == "fechado":
+        return False, texto_horario
+    if especial:
+        texto_horario = f"hoje ({agora:%d/%m}) {especial['abre']}-{especial['fecha']}"
+        dia_cfg = {"aberto": True, "abre": especial["abre"], "fecha": especial["fecha"]}
+    elif not horario_cfg.get("ativo"):
+        return True, texto_horario
+    else:
+        dia_cfg = dias.get(ORDEM_DIAS_SEMANA[agora.weekday()]) or {}
 
     if not dia_cfg.get("aberto"):
         return False, texto_horario
@@ -2437,6 +2528,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     em_ferias, msg_ferias = verificar_ferias(bot_cfg)
     if em_ferias:
         return msg_ferias
+
+    data_especial_fechada, msg_data_especial = verificar_data_especial(bot_cfg)
+    if data_especial_fechada:
+        return msg_data_especial
 
     aberto, texto_horario = verificar_horario_funcionamento(bot_cfg)
     ck("depois verificar_horario_funcionamento")

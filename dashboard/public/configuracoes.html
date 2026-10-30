@@ -356,6 +356,34 @@
             <div class="acoes"><button class="btn btn-salvar" id="salvar-horario">Salvar hor&aacute;rio de funcionamento</button></div>
             </div>
         </details>
+
+        <details class="box">
+            <summary><div><h2>Feriados e dias especiais</h2><div class="sub">Dias em que a loja fecha ou abre em hor&aacute;rio diferente do normal. Valem no lugar do hor&aacute;rio semanal, no app e no bot do WhatsApp, mesmo com &quot;Restringir pedidos por hor&aacute;rio&quot; desligado. Datas passadas s&atilde;o ignoradas.</div></div><span class="chevron">&#9656;</span></summary>
+            <div class="box-body">
+            <table style="width:100%; border-collapse:collapse; margin:12px 0;">
+                <thead>
+                    <tr style="text-align:left; font-size:.78rem; color:var(--muted); text-transform:uppercase;">
+                        <th style="padding:6px 4px;">De</th>
+                        <th style="padding:6px 4px;">At&eacute; (opcional)</th>
+                        <th style="padding:6px 4px;">Situa&ccedil;&atilde;o</th>
+                        <th style="padding:6px 4px;">Abre</th>
+                        <th style="padding:6px 4px;">Fecha</th>
+                        <th style="padding:6px 4px;">Mensagem ao cliente (opcional)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="datas-especiais-body"></tbody>
+            </table>
+            <small>Em &quot;Fechado&quot;, use <code>{data_volta}</code> na mensagem para informar o dia em que a loja volta. Sem mensagem, o bot usa um texto padr&atilde;o.</small>
+            <div class="acoes">
+                <button class="btn btn-azul" id="datas-add" type="button">+ Adicionar data</button>
+                <select id="datas-ano" style="padding:8px;"></select>
+                <button class="btn btn-azul" id="datas-feriados" type="button">Adicionar feriados nacionais do ano</button>
+                <button class="btn btn-salvar" id="salvar-datas">Salvar feriados e dias especiais</button>
+            </div>
+            <small>Os feriados nacionais entram como &quot;Fechado&quot; s&oacute; para voc&ecirc; conferir: apague os que a loja abre e salve.</small>
+            </div>
+        </details>
     </div>
 
     <script src="/shell.js" defer></script>

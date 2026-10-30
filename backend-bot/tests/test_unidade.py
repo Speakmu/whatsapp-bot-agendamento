@@ -247,6 +247,83 @@ def test_ferias_formata_data_de_volta():
     assert em_ferias and msg == "Voltamos 31/12/2999."
 
 
+# ---------------- datas especiais (feriados / dias atípicos) ----------------
+def _com_agora(ano, mes, dia, hora, minuto):
+    from datetime import datetime, timezone, timedelta
+    fuso = timezone(timedelta(hours=-3))
+    patcher = mock.patch.object(bot, "datetime", wraps=datetime)
+    dt = patcher.start()
+    dt.now.return_value = datetime(ano, mes, dia, hora, minuto, tzinfo=fuso)
+    return patcher
+
+
+def test_data_especial_fechada_bloqueia_e_formata_volta():
+    cfg = {"datas_especiais": [{"inicio": "2026-12-25", "fim": "2026-12-26", "tipo": "fechado",
+                                "mensagem": "Feliz Natal! Voltamos {data_volta}."}]}
+    p = _com_agora(2026, 12, 25, 12, 0)
+    try:
+        assert bot.verificar_data_especial(cfg) == (True, "Feliz Natal! Voltamos 27/12/2026.")
+        assert not bot.verificar_horario_funcionamento(cfg)[0]   # vale mesmo sem 'ativo'
+    finally:
+        p.stop()
+    p = _com_agora(2026, 12, 27, 12, 0)
+    try:
+        assert bot.verificar_data_especial(cfg) == (False, "")
+        assert bot.verificar_horario_funcionamento(cfg)[0]
+    finally:
+        p.stop()
+
+
+def test_data_especial_sem_mensagem_usa_texto_padrao():
+    cfg = {"datas_especiais": [{"inicio": "2026-12-25", "tipo": "fechado"}]}
+    p = _com_agora(2026, 12, 25, 9, 0)
+    try:
+        fechado, msg = bot.verificar_data_especial(cfg)
+        assert fechado and "26/12/2026" in msg
+    finally:
+        p.stop()
+
+
+def test_data_especial_horario_substitui_o_semanal():
+    cfg = {"horario_funcionamento": {"ativo": True, "dias": {
+               d: {"aberto": True, "abre": "09:00", "fecha": "22:00"} for d in bot.ORDEM_DIAS_SEMANA}},
+           "datas_especiais": [{"inicio": "2026-12-24", "tipo": "horario", "abre": "10:00", "fecha": "16:00"}]}
+    p = _com_agora(2026, 12, 24, 15, 0)
+    try:
+        assert bot.verificar_horario_funcionamento(cfg)[0]
+    finally:
+        p.stop()
+    p = _com_agora(2026, 12, 24, 18, 0)   # aberto no horário normal, fechado no especial
+    try:
+        aberto, texto = bot.verificar_horario_funcionamento(cfg)
+        assert not aberto and "10:00-16:00" in texto
+    finally:
+        p.stop()
+
+
+def test_data_especial_malformada_e_ignorada():
+    cfg = {"datas_especiais": [{"inicio": "lixo"}, {"inicio": "2026-12-25", "tipo": "horario"}, "x", None]}
+    p = _com_agora(2026, 12, 25, 12, 0)
+    try:
+        assert bot.verificar_data_especial(cfg) == (False, "")
+        assert bot.verificar_horario_funcionamento(cfg)[0]
+    finally:
+        p.stop()
+
+
+def test_horario_legivel_lista_datas_especiais_proximas():
+    cfg = {"horario_funcionamento": {"dias": {"seg": {"aberto": True, "abre": "09:00", "fecha": "18:00"}}},
+           "datas_especiais": [{"inicio": "2026-12-25", "tipo": "fechado"},
+                               {"inicio": "2026-12-24", "tipo": "horario", "abre": "10:00", "fecha": "16:00"},
+                               {"inicio": "2027-03-01", "tipo": "fechado"}]}
+    p = _com_agora(2026, 12, 20, 12, 0)
+    try:
+        txt = bot._horario_legivel(cfg)
+    finally:
+        p.stop()
+    assert "• 24/12: 10:00 às 16:00" in txt and "• 25/12: fechado" in txt and "01/03" not in txt
+
+
 # ---------------- _ultima_resposta_pediu_confirmacao ----------------
 def test_pediu_confirmacao_de_fechar_pedido_detecta():
     hist = [{"role": "assistant", "content": "Seu total é R$ 30,00. Posso fechar o pedido?"}]

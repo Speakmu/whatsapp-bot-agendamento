@@ -74,6 +74,10 @@ document.addEventListener('DOMContentLoaded', () => {
         $('salvar-usuario').addEventListener('click', salvarUsuario);
         $('novo-usuario').addEventListener('click', limparUsuarioForm);
         $('salvar-horario').addEventListener('click', salvarHorario);
+        montarSeletorAno();
+        $('datas-add').addEventListener('click', () => adicionarLinhaData());
+        $('datas-feriados').addEventListener('click', adicionarFeriadosNacionais);
+        $('salvar-datas').addEventListener('click', salvarDatasEspeciais);
         $('salvar-alerta').addEventListener('click', salvarAlertaSom);
         $('testar-alerta').addEventListener('click', testarAlertaSom);
         $('alerta-volume').addEventListener('input', () => {
@@ -140,6 +144,143 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- Feriados e dias especiais (configuracoes/bot -> datas_especiais) ---
+    // [{inicio:'YYYY-MM-DD', fim:'YYYY-MM-DD'|'', tipo:'fechado'|'horario', abre, fecha, mensagem}]
+    // Lido pelo bot (backend-bot) e pelo app; vale no lugar do horário semanal.
+    function escAttr(v) {
+        return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    function adicionarLinhaData(d) {
+        d = d || {};
+        const tr = document.createElement('tr');
+        tr.className = 'data-especial-linha';
+        tr.innerHTML = `
+            <td style="padding:4px;"><input type="date" class="de-inicio" value="${escAttr(d.inicio)}" style="padding:6px;"></td>
+            <td style="padding:4px;"><input type="date" class="de-fim" value="${escAttr(d.fim)}" style="padding:6px;"></td>
+            <td style="padding:4px;">
+                <select class="de-tipo" style="padding:6px;">
+                    <option value="fechado">Fechado o dia todo</option>
+                    <option value="horario">Horário especial</option>
+                </select>
+            </td>
+            <td style="padding:4px;"><input type="time" class="de-abre" value="${escAttr(d.abre)}" style="padding:6px;"></td>
+            <td style="padding:4px;"><input type="time" class="de-fecha" value="${escAttr(d.fecha)}" style="padding:6px;"></td>
+            <td style="padding:4px;"><input type="text" class="de-msg" value="${escAttr(d.mensagem)}" placeholder="Ex.: Feliz Natal! Voltamos {data_volta}" style="padding:6px; width:100%;"></td>
+            <td style="padding:4px;"><button type="button" class="btn de-remover" title="Remover">&times;</button></td>
+        `;
+        const tipo = tr.querySelector('.de-tipo');
+        tipo.value = d.tipo === 'horario' ? 'horario' : 'fechado';
+        const aplicar = () => {
+            const especial = tipo.value === 'horario';
+            tr.querySelector('.de-abre').disabled = !especial;
+            tr.querySelector('.de-fecha').disabled = !especial;
+        };
+        tipo.addEventListener('change', aplicar);
+        aplicar();
+        tr.querySelector('.de-remover').addEventListener('click', () => tr.remove());
+        $('datas-especiais-body').appendChild(tr);
+    }
+
+    async function carregarDatasEspeciais() {
+        try {
+            const snap = await DOC_BOT.get();
+            const lista = (snap.exists ? snap.data() : {})?.datas_especiais;
+            $('datas-especiais-body').innerHTML = '';
+            (Array.isArray(lista) ? lista : []).forEach(adicionarLinhaData);
+        } catch (err) {
+            console.warn('datas especiais:', err.message);
+        }
+    }
+
+    async function salvarDatasEspeciais() {
+        const datas = [];
+        const linhas = Array.from(document.querySelectorAll('.data-especial-linha'));
+        for (const tr of linhas) {
+            const inicio = tr.querySelector('.de-inicio').value;
+            const fim = tr.querySelector('.de-fim').value;
+            const tipo = tr.querySelector('.de-tipo').value;
+            const abre = tr.querySelector('.de-abre').value;
+            const fecha = tr.querySelector('.de-fecha').value;
+            const mensagem = tr.querySelector('.de-msg').value.trim();
+            if (!inicio) { alert('Preencha a data "De" em todas as linhas (ou remova a linha vazia).'); return; }
+            if (fim && fim < inicio) { alert(`Em ${inicio}: a data final não pode ser antes da inicial.`); return; }
+            if (tipo === 'horario' && (!abre || !fecha)) { alert(`Em ${inicio}: informe o horário de abrir e fechar.`); return; }
+            datas.push({
+                inicio,
+                fim: fim && fim !== inicio ? fim : '',
+                tipo,
+                abre: tipo === 'horario' ? abre : '',
+                fecha: tipo === 'horario' ? fecha : '',
+                mensagem
+            });
+        }
+        datas.sort((a, b) => a.inicio.localeCompare(b.inicio));
+        try {
+            await DOC_BOT.set({
+                datas_especiais: datas,
+                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            await carregarDatasEspeciais();
+            flash('Feriados e dias especiais salvos.');
+        } catch (err) {
+            alert('Erro ao salvar feriados: ' + err.message);
+        }
+    }
+
+    // Feriados nacionais do ano (os móveis saem da data da Páscoa). Carnaval e
+    // Corpus Christi são ponto facultativo, mas a maioria das lojas fecha.
+    function feriadosNacionais(ano) {
+        const iso = (dt) => dt.toISOString().slice(0, 10);
+        const fixo = (m, d) => new Date(Date.UTC(ano, m - 1, d));
+        // Páscoa (algoritmo de Meeus/Jones/Butcher)
+        const a = ano % 19, b = Math.floor(ano / 100), c = ano % 100;
+        const d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25);
+        const g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+        const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7;
+        const m = Math.floor((a + 11 * h + 22 * l) / 451);
+        const mes = Math.floor((h + l - 7 * m + 114) / 31), dia = ((h + l - 7 * m + 114) % 31) + 1;
+        const pascoa = new Date(Date.UTC(ano, mes - 1, dia));
+        const deslocar = (n) => new Date(pascoa.getTime() + n * 86400000);
+        return [
+            { dt: fixo(1, 1), nome: 'Confraternização Universal' },
+            { dt: deslocar(-48), fim: deslocar(-47), nome: 'Carnaval' },
+            { dt: deslocar(-2), nome: 'Sexta-feira Santa' },
+            { dt: fixo(4, 21), nome: 'Tiradentes' },
+            { dt: fixo(5, 1), nome: 'Dia do Trabalho' },
+            { dt: deslocar(60), nome: 'Corpus Christi' },
+            { dt: fixo(9, 7), nome: 'Independência do Brasil' },
+            { dt: fixo(10, 12), nome: 'Nossa Senhora Aparecida' },
+            { dt: fixo(11, 2), nome: 'Finados' },
+            { dt: fixo(11, 15), nome: 'Proclamação da República' },
+            { dt: fixo(11, 20), nome: 'Consciência Negra' },
+            { dt: fixo(12, 25), nome: 'Natal' }
+        ].map(x => ({ inicio: iso(x.dt), fim: x.fim ? iso(x.fim) : '', nome: x.nome }));
+    }
+
+    function adicionarFeriadosNacionais() {
+        const ano = Number($('datas-ano').value);
+        const existentes = new Set(Array.from(document.querySelectorAll('.de-inicio')).map(el => el.value));
+        let novos = 0;
+        feriadosNacionais(ano).forEach(fer => {
+            if (existentes.has(fer.inicio)) return;
+            adicionarLinhaData({
+                inicio: fer.inicio,
+                fim: fer.fim,
+                tipo: 'fechado',
+                mensagem: `Hoje é feriado (${fer.nome}) e estamos fechados. Voltamos a atender no dia {data_volta}.`
+            });
+            novos++;
+        });
+        flash(novos ? `${novos} feriados adicionados — apague os que a loja abre e clique em Salvar.` : 'Esses feriados já estão na lista.');
+    }
+
+    function montarSeletorAno() {
+        const sel = $('datas-ano');
+        const atual = new Date().getFullYear();
+        sel.innerHTML = [atual, atual + 1].map(a => `<option value="${a}">${a}</option>`).join('');
+    }
+
     function chk(mod) {
         return document.querySelector(`input[data-mod="${mod}"]`);
     }
@@ -169,6 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
             await carregarPagamentos();
             await carregarIfood();
             await carregarHorario();
+            await carregarDatasEspeciais();
             await carregarAlertaSom();
         } catch (err) {
             alert('Erro ao carregar configuracoes: ' + err.message);
