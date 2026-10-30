@@ -74,10 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
         $('salvar-usuario').addEventListener('click', salvarUsuario);
         $('novo-usuario').addEventListener('click', limparUsuarioForm);
         $('salvar-horario').addEventListener('click', salvarHorario);
-        montarSeletorAno();
-        $('datas-add').addEventListener('click', () => adicionarLinhaData());
-        $('datas-feriados').addEventListener('click', adicionarFeriadosNacionais);
-        $('salvar-datas').addEventListener('click', salvarDatasEspeciais);
+        ligarDatasEspeciais();
         $('salvar-alerta').addEventListener('click', salvarAlertaSom);
         $('testar-alerta').addEventListener('click', testarAlertaSom);
         $('alerta-volume').addEventListener('input', () => {
@@ -145,13 +142,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // --- Feriados e dias especiais (configuracoes/bot -> datas_especiais) ---
-    // [{inicio:'YYYY-MM-DD', fim:'YYYY-MM-DD'|'', tipo:'fechado'|'horario', abre, fecha, mensagem}]
+    // [{inicio:'YYYY-MM-DD', fim:'YYYY-MM-DD'|'', tipo:'fechado'|'horario', abre, fecha, motivo, mensagem}]
     // Lido pelo bot (backend-bot) e pelo app; vale no lugar do horário semanal.
-    function escAttr(v) {
-        return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    }
+    // A lista fica em memória (sempre ordenada por data) e cada inclusão, edição
+    // ou remoção grava a lista inteira — não há um "salvar tudo" separado.
+    let datasEspeciais = [];
+    let editandoIdx = null; // null = nova data
 
     const DIAS_CURTOS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+    function escHtml(v) {
+        return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
     function dataCurta(iso) {
         const [a, m, d] = iso.split('-').map(Number);
         const dt = new Date(Date.UTC(a, m - 1, d));
@@ -160,130 +161,146 @@ document.addEventListener('DOMContentLoaded', () => {
     function hojeBrasilia() {
         return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10);
     }
+    function ordenarDatas() {
+        datasEspeciais.sort((x, y) => x.inicio.localeCompare(y.inicio));
+    }
 
-    // Resumo + situação ("em vigor hoje", "começa amanhã", "já passou") do card.
-    function atualizarResumoData(card) {
-        const inicio = card.querySelector('.de-inicio').value;
-        const fim = card.querySelector('.de-fim').value || inicio;
-        const tipo = card.querySelector('.de-tipo').value;
-        const motivo = card.querySelector('.de-motivo').value.trim();
-        const resumo = card.querySelector('.de-resumo');
-        const chip = card.querySelector('.de-chip');
-        if (!inicio) { resumo.textContent = 'Escolha a data'; chip.textContent = ''; chip.className = 'de-chip'; return; }
-        const quando = fim && fim !== inicio ? `${dataCurta(inicio)} até ${dataCurta(fim)}` : dataCurta(inicio);
-        const oQue = tipo === 'horario'
-            ? `horário especial ${card.querySelector('.de-abre').value || '--:--'} às ${card.querySelector('.de-fecha').value || '--:--'}`
-            : 'fechado o dia todo';
-        resumo.textContent = `${motivo ? motivo + ' · ' : ''}${quando} · ${oQue}`;
+    function chipDe(d) {
         const hoje = hojeBrasilia();
+        const fim = d.fim || d.inicio;
         const amanha = new Date(Date.parse(hoje + 'T00:00:00Z') + 86400000).toISOString().slice(0, 10);
-        let txt = '', cls = 'de-chip';
-        if (fim < hoje) txt = 'já passou';
-        else if (inicio <= hoje) { txt = 'em vigor hoje'; cls += ' agora'; }
-        else if (inicio === amanha) { txt = 'começa amanhã'; cls += ' breve'; }
-        else txt = 'agendado';
-        chip.textContent = txt;
-        chip.className = cls;
+        if (fim < hoje) return '<span class="de-chip">já passou</span>';
+        if (d.inicio <= hoje) return '<span class="de-chip agora">em vigor hoje</span>';
+        if (d.inicio === amanha) return '<span class="de-chip breve">começa amanhã</span>';
+        return '<span class="de-chip">agendado</span>';
     }
 
-    function adicionarLinhaData(d) {
-        d = d || {};
-        const card = document.createElement('div');
-        card.className = 'de-card data-especial-linha';
-        card.innerHTML = `
-            <div class="de-topo">
-                <div><span class="de-resumo"></span><span class="de-chip"></span></div>
-                <button type="button" class="de-remover" title="Remover esta data">Remover</button>
-            </div>
-            <div><label>De</label><input type="date" class="de-inicio" value="${escAttr(d.inicio)}"></div>
-            <div><label>Até (opcional)</label><input type="date" class="de-fim" value="${escAttr(d.fim)}"></div>
-            <div><label>Situação</label>
-                <select class="de-tipo">
-                    <option value="fechado">Fechado o dia todo</option>
-                    <option value="horario">Horário especial</option>
-                </select>
-            </div>
-            <div><label>Abre</label><input type="time" class="de-abre" value="${escAttr(d.abre)}"></div>
-            <div><label>Fecha</label><input type="time" class="de-fecha" value="${escAttr(d.fecha)}"></div>
-            <div class="de-larga"><label>Motivo (ex.: Finados, Natal)</label><input type="text" class="de-motivo" value="${escAttr(d.motivo)}" placeholder="Nome do feriado ou motivo"></div>
-            <div class="de-larga"><label>Mensagem ao cliente (opcional)</label><input type="text" class="de-msg" value="${escAttr(d.mensagem)}" placeholder="Ex.: Feliz Natal! Voltamos {data_volta}"></div>
-        `;
-        const tipo = card.querySelector('.de-tipo');
-        tipo.value = d.tipo === 'horario' ? 'horario' : 'fechado';
-        const aplicar = () => {
-            const especial = tipo.value === 'horario';
-            card.querySelector('.de-abre').disabled = !especial;
-            card.querySelector('.de-fecha').disabled = !especial;
-            atualizarResumoData(card);
-        };
-        tipo.addEventListener('change', aplicar);
-        card.querySelectorAll('input').forEach(el => el.addEventListener('input', () => atualizarResumoData(card)));
-        card.querySelector('.de-remover').addEventListener('click', () => { card.remove(); mostrarVazioDatas(); });
-        $('datas-especiais-body').appendChild(card);
-        aplicar();
-        mostrarVazioDatas();
+    function itemHtml(d, i) {
+        const fim = d.fim || d.inicio;
+        const quando = fim !== d.inicio ? `${dataCurta(d.inicio)} até ${dataCurta(fim)}` : dataCurta(d.inicio);
+        const oQue = d.tipo === 'horario' ? `Horário especial ${escHtml(d.abre)} às ${escHtml(d.fecha)}` : 'Fechado o dia todo';
+        const passada = fim < hojeBrasilia();
+        return `
+            <div class="de-item${passada ? ' passada' : ''}">
+                <div>
+                    <div class="nome">${escHtml(d.motivo) || 'Sem nome'}${chipDe(d)}</div>
+                    <div class="det">${quando} · ${oQue}${d.mensagem ? ' · “' + escHtml(d.mensagem) + '”' : ''}</div>
+                </div>
+                <div class="acoes-item">
+                    <button type="button" class="de-mini" data-acao="editar" data-idx="${i}">Editar</button>
+                    <button type="button" class="de-mini perigo" data-acao="remover" data-idx="${i}">Remover</button>
+                </div>
+            </div>`;
     }
 
-    function mostrarVazioDatas() {
-        const box = $('datas-especiais-body');
-        let vazio = box.querySelector('.datas-vazio');
-        const temLinhas = box.querySelector('.data-especial-linha');
-        if (!temLinhas && !vazio) {
-            vazio = document.createElement('div');
-            vazio.className = 'datas-vazio';
-            vazio.textContent = 'Nenhuma data cadastrada. A loja segue o horário semanal.';
-            box.appendChild(vazio);
-        } else if (temLinhas && vazio) {
-            vazio.remove();
-        }
+    function renderDatasEspeciais() {
+        const hoje = hojeBrasilia();
+        const futuras = [], passadas = [];
+        datasEspeciais.forEach((d, i) => ((d.fim || d.inicio) < hoje ? passadas : futuras).push(itemHtml(d, i)));
+        $('datas-lista').innerHTML = futuras.length
+            ? futuras.join('')
+            : '<div class="datas-vazio">Nenhuma data futura cadastrada. A loja segue o horário semanal.</div>';
+        $('datas-passadas-box').style.display = passadas.length ? 'block' : 'none';
+        $('datas-passadas-lista').innerHTML = passadas.join('');
+        const aberto = $('datas-passadas-lista').style.display !== 'none';
+        $('datas-passadas-toggle').textContent = `${aberto ? 'Ocultar' : 'Mostrar'} datas passadas (${passadas.length})`;
+    }
+
+    async function persistirDatasEspeciais() {
+        ordenarDatas();
+        await DOC_BOT.set({
+            datas_especiais: datasEspeciais,
+            atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        renderDatasEspeciais();
     }
 
     async function carregarDatasEspeciais() {
         try {
             const snap = await DOC_BOT.get();
             const lista = (snap.exists ? snap.data() : {})?.datas_especiais;
-            $('datas-especiais-body').innerHTML = '';
-            (Array.isArray(lista) ? lista : []).forEach(adicionarLinhaData);
-            mostrarVazioDatas();
+            datasEspeciais = (Array.isArray(lista) ? lista : []).filter(d => d && /^\d{4}-\d{2}-\d{2}$/.test(String(d.inicio || '')));
+            ordenarDatas();
+            renderDatasEspeciais();
         } catch (err) {
             console.warn('datas especiais:', err.message);
         }
     }
 
-    async function salvarDatasEspeciais() {
-        const datas = [];
-        const linhas = Array.from(document.querySelectorAll('.data-especial-linha'));
-        for (const tr of linhas) {
-            const inicio = tr.querySelector('.de-inicio').value;
-            const fim = tr.querySelector('.de-fim').value;
-            const tipo = tr.querySelector('.de-tipo').value;
-            const abre = tr.querySelector('.de-abre').value;
-            const fecha = tr.querySelector('.de-fecha').value;
-            const mensagem = tr.querySelector('.de-msg').value.trim();
-            const motivo = tr.querySelector('.de-motivo').value.trim();
-            if (!inicio) { alert('Preencha a data "De" em todas as linhas (ou remova a linha vazia).'); return; }
-            if (fim && fim < inicio) { alert(`Em ${inicio}: a data final não pode ser antes da inicial.`); return; }
-            if (tipo === 'horario' && (!abre || !fecha)) { alert(`Em ${inicio}: informe o horário de abrir e fechar.`); return; }
-            datas.push({
-                inicio,
-                fim: fim && fim !== inicio ? fim : '',
-                tipo,
-                abre: tipo === 'horario' ? abre : '',
-                fecha: tipo === 'horario' ? fecha : '',
-                motivo,
-                mensagem
-            });
-        }
-        datas.sort((a, b) => a.inicio.localeCompare(b.inicio));
+    function fecharPaineisDatas() {
+        $('datas-editor').classList.remove('aberto');
+        $('datas-feriados-painel').classList.remove('aberto');
+    }
+
+    function aplicarTipoData() {
+        const especial = $('de-tipo').value === 'horario';
+        $('de-abre').disabled = !especial;
+        $('de-fecha').disabled = !especial;
+    }
+
+    function abrirEditorData(idx) {
+        fecharPaineisDatas();
+        editandoIdx = idx;
+        const d = idx == null ? {} : datasEspeciais[idx];
+        $('de-editor-titulo').textContent = idx == null ? 'Nova data' : 'Editar data';
+        $('de-motivo').value = d.motivo || '';
+        $('de-inicio').value = d.inicio || '';
+        $('de-fim').value = d.fim || '';
+        $('de-tipo').value = d.tipo === 'horario' ? 'horario' : 'fechado';
+        $('de-abre').value = d.abre || '';
+        $('de-fecha').value = d.fecha || '';
+        $('de-msg').value = d.mensagem || '';
+        aplicarTipoData();
+        $('datas-editor').classList.add('aberto');
+        $('datas-editor').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        $('de-motivo').focus();
+    }
+
+    async function salvarDataEditada() {
+        const inicio = $('de-inicio').value;
+        const fim = $('de-fim').value;
+        const tipo = $('de-tipo').value;
+        const abre = $('de-abre').value;
+        const fecha = $('de-fecha').value;
+        const motivo = $('de-motivo').value.trim();
+        if (!inicio) { alert('Escolha a data (campo "De").'); return; }
+        if (fim && fim < inicio) { alert('A data final não pode ser antes da inicial.'); return; }
+        if (tipo === 'horario' && (!abre || !fecha)) { alert('Informe o horário de abrir e de fechar.'); return; }
+        if (!motivo && !confirm('Salvar sem nome? A data ficará identificada só pelo dia. Continuar?')) return;
+        const item = {
+            inicio,
+            fim: fim && fim !== inicio ? fim : '',
+            tipo,
+            abre: tipo === 'horario' ? abre : '',
+            fecha: tipo === 'horario' ? fecha : '',
+            motivo,
+            mensagem: $('de-msg').value.trim()
+        };
+        const antes = datasEspeciais.slice();
+        if (editandoIdx == null) datasEspeciais.push(item); else datasEspeciais[editandoIdx] = item;
         try {
-            await DOC_BOT.set({
-                datas_especiais: datas,
-                atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-            await carregarDatasEspeciais();
-            flash('Feriados e dias especiais salvos.');
+            await persistirDatasEspeciais();
+            fecharPaineisDatas();
+            flash('Data salva.');
         } catch (err) {
-            alert('Erro ao salvar feriados: ' + err.message);
+            datasEspeciais = antes;
+            renderDatasEspeciais();
+            alert('Erro ao salvar: ' + err.message);
+        }
+    }
+
+    async function removerData(idx) {
+        const d = datasEspeciais[idx];
+        if (!d || !confirm(`Remover "${d.motivo || d.inicio}"?`)) return;
+        const antes = datasEspeciais.slice();
+        datasEspeciais.splice(idx, 1);
+        try {
+            await persistirDatasEspeciais();
+            flash('Data removida.');
+        } catch (err) {
+            datasEspeciais = antes;
+            renderDatasEspeciais();
+            alert('Erro ao remover: ' + err.message);
         }
     }
 
@@ -317,28 +334,74 @@ document.addEventListener('DOMContentLoaded', () => {
         ].map(x => ({ inicio: iso(x.dt), fim: x.fim ? iso(x.fim) : '', nome: x.nome }));
     }
 
-    function adicionarFeriadosNacionais() {
+    function montarListaFeriados() {
         const ano = Number($('datas-ano').value);
-        const existentes = new Set(Array.from(document.querySelectorAll('.de-inicio')).map(el => el.value));
-        let novos = 0;
-        feriadosNacionais(ano).forEach(fer => {
-            if (existentes.has(fer.inicio)) return;
-            adicionarLinhaData({
-                inicio: fer.inicio,
-                fim: fer.fim,
-                tipo: 'fechado',
-                motivo: fer.nome,
-                mensagem: ''
-            });
-            novos++;
-        });
-        flash(novos ? `${novos} feriados adicionados — apague os que a loja abre e clique em Salvar.` : 'Esses feriados já estão na lista.');
+        const hoje = hojeBrasilia();
+        // Já coberto = o dia do feriado cai dentro de uma data cadastrada (ex.: Finados dentro de um feriado prolongado).
+        const jaCoberto = (f) => datasEspeciais.some(d => f.inicio >= d.inicio && f.inicio <= (d.fim || d.inicio));
+        const itens = feriadosNacionais(ano).filter(f => !jaCoberto(f) && (f.fim || f.inicio) >= hoje);
+        $('datas-feriados-lista').innerHTML = itens.length
+            ? itens.map((f, i) => `
+                <label class="de-feriado-linha">
+                    <input type="checkbox" data-i="${i}" checked>
+                    <span><b>${escHtml(f.nome)}</b> — ${f.fim ? dataCurta(f.inicio) + ' até ' + dataCurta(f.fim) : dataCurta(f.inicio)}</span>
+                </label>`).join('')
+            : '<div class="datas-vazio">Todos os feriados deste ano já estão na lista (ou já passaram).</div>';
+        $('datas-feriados-lista')._itens = itens;
     }
 
-    function montarSeletorAno() {
+    function abrirFeriadosNacionais() {
+        fecharPaineisDatas();
         const sel = $('datas-ano');
         const atual = new Date().getFullYear();
         sel.innerHTML = [atual, atual + 1].map(a => `<option value="${a}">${a}</option>`).join('');
+        montarListaFeriados();
+        $('datas-feriados-painel').classList.add('aberto');
+        $('datas-feriados-painel').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    async function adicionarFeriadosMarcados() {
+        const itens = $('datas-feriados-lista')._itens || [];
+        const marcados = Array.from(document.querySelectorAll('#datas-feriados-lista input[type=checkbox]:checked'))
+            .map(el => itens[Number(el.dataset.i)]).filter(Boolean);
+        if (!marcados.length) { alert('Marque ao menos um feriado.'); return; }
+        const antes = datasEspeciais.slice();
+        marcados.forEach(f => datasEspeciais.push({
+            inicio: f.inicio, fim: f.fim, tipo: 'fechado', abre: '', fecha: '', motivo: f.nome, mensagem: ''
+        }));
+        try {
+            await persistirDatasEspeciais();
+            fecharPaineisDatas();
+            flash(`${marcados.length} feriado(s) adicionado(s).`);
+        } catch (err) {
+            datasEspeciais = antes;
+            renderDatasEspeciais();
+            alert('Erro ao salvar: ' + err.message);
+        }
+    }
+
+    function ligarDatasEspeciais() {
+        $('datas-add').addEventListener('click', () => abrirEditorData(null));
+        $('datas-feriados').addEventListener('click', abrirFeriadosNacionais);
+        $('datas-ano').addEventListener('change', montarListaFeriados);
+        $('datas-feriados-add').addEventListener('click', adicionarFeriadosMarcados);
+        $('datas-feriados-cancelar').addEventListener('click', fecharPaineisDatas);
+        $('de-salvar').addEventListener('click', salvarDataEditada);
+        $('de-cancelar').addEventListener('click', fecharPaineisDatas);
+        $('de-tipo').addEventListener('change', aplicarTipoData);
+        $('datas-passadas-toggle').addEventListener('click', () => {
+            const lista = $('datas-passadas-lista');
+            lista.style.display = lista.style.display === 'none' ? 'block' : 'none';
+            renderDatasEspeciais();
+        });
+        const clique = (ev) => {
+            const btn = ev.target.closest('button[data-acao]');
+            if (!btn) return;
+            const idx = Number(btn.dataset.idx);
+            if (btn.dataset.acao === 'editar') abrirEditorData(idx); else removerData(idx);
+        };
+        $('datas-lista').addEventListener('click', clique);
+        $('datas-passadas-lista').addEventListener('click', clique);
     }
 
     function chk(mod) {

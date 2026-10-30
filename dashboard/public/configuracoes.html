@@ -354,39 +354,81 @@
                 <small>Use <code>{horario}</code> no texto pra inserir automaticamente os dias/hor&aacute;rios configurados.</small>
             </div>
             <div class="acoes"><button class="btn btn-salvar" id="salvar-horario">Salvar hor&aacute;rio de funcionamento</button></div>
-            </div>
-        </details>
 
-        <details class="box">
-            <summary><div><h2>Feriados e dias especiais</h2><div class="sub">Dias em que a loja fecha ou abre em hor&aacute;rio diferente do normal. Valem no lugar do hor&aacute;rio semanal, no app e no bot do WhatsApp, mesmo com &quot;Restringir pedidos por hor&aacute;rio&quot; desligado. Datas passadas s&atilde;o ignoradas.</div></div><span class="chevron">&#9656;</span></summary>
-            <div class="box-body">
+            <hr style="border:0; border-top:1px solid var(--border, #2b3445); margin:22px 0 14px;">
             <style>
-                .datas-barra { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:12px 0; }
-                .datas-barra .sep { flex:1; }
-                .de-card { border:1px solid var(--border, #2b3445); border-radius:10px; padding:12px; margin:10px 0; display:grid; gap:10px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); position:relative; }
-                .de-card label { display:block; font-size:.72rem; color:var(--muted); text-transform:uppercase; margin-bottom:3px; }
-                .de-card input, .de-card select { width:100%; padding:7px; box-sizing:border-box; }
-                .de-card .de-larga { grid-column:1 / -1; }
-                .de-topo { grid-column:1 / -1; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
-                .de-resumo { font-weight:600; }
-                .de-chip { font-size:.72rem; padding:2px 8px; border-radius:999px; background:#374151; color:#e5e7eb; margin-left:6px; font-weight:600; }
+                .datas-topo { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; margin:6px 0 10px; }
+                .datas-topo h3 { margin:0; font-size:1.05rem; }
+                .datas-topo .sub2 { color:var(--muted); font-size:.82rem; width:100%; }
+                .de-item { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; border:1px solid var(--border, #2b3445); border-radius:10px; padding:10px 12px; margin:8px 0; }
+                .de-item.passada { opacity:.55; }
+                .de-item .nome { font-weight:700; }
+                .de-item .det { color:var(--muted); font-size:.85rem; margin-top:2px; }
+                .de-item .acoes-item { display:flex; gap:6px; }
+                .de-chip { font-size:.72rem; padding:2px 8px; border-radius:999px; background:#374151; color:#e5e7eb; margin-left:6px; font-weight:600; white-space:nowrap; }
                 .de-chip.agora { background:#b91c1c; color:#fff; }
                 .de-chip.breve { background:#b45309; color:#fff; }
-                .de-remover { background:transparent; border:1px solid #b91c1c; color:#f87171; border-radius:8px; padding:4px 10px; cursor:pointer; }
-                .datas-vazio { color:var(--muted); padding:14px 0; }
-                .datas-salvar { margin-top:14px; padding-top:14px; border-top:1px solid var(--border, #2b3445); display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+                .de-mini { background:transparent; border:1px solid var(--border, #475569); color:inherit; border-radius:8px; padding:5px 12px; cursor:pointer; }
+                .de-mini.perigo { border-color:#b91c1c; color:#f87171; }
+                .de-painel { border:1px solid var(--border, #2b3445); border-radius:10px; padding:14px; margin:10px 0; display:none; }
+                .de-painel.aberto { display:block; }
+                .de-painel h4 { margin:0 0 10px; }
+                .de-grade { display:grid; gap:10px; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); }
+                .de-grade label { display:block; font-size:.72rem; color:var(--muted); text-transform:uppercase; margin-bottom:3px; }
+                .de-grade input, .de-grade select { width:100%; padding:7px; box-sizing:border-box; }
+                .de-grade .larga { grid-column:1 / -1; }
+                .de-feriado-linha { display:flex; gap:8px; align-items:center; padding:4px 0; }
+                .datas-vazio { color:var(--muted); padding:10px 0; }
             </style>
-            <div class="datas-barra">
-                <button class="btn btn-azul" id="datas-add" type="button">+ Adicionar data</button>
-                <span class="sep"></span>
-                <select id="datas-ano" style="padding:8px;"></select>
-                <button class="btn btn-azul" id="datas-feriados" type="button">Adicionar feriados nacionais</button>
+            <div class="datas-topo">
+                <h3>Feriados e dias especiais</h3>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button class="btn btn-azul" id="datas-add" type="button">+ Adicionar data</button>
+                    <button class="btn btn-azul" id="datas-feriados" type="button">Feriados nacionais</button>
+                </div>
+                <div class="sub2">Dias em que a loja fecha ou abre em hor&aacute;rio diferente. Valem no lugar do hor&aacute;rio semanal, no app e no bot do WhatsApp, mesmo com &quot;Restringir pedidos por hor&aacute;rio&quot; desligado. Cada inclus&atilde;o, edi&ccedil;&atilde;o ou remo&ccedil;&atilde;o &eacute; salva na hora.</div>
             </div>
-            <div id="datas-especiais-body"></div>
-            <small>Em &quot;Fechado&quot;, use <code>{data_volta}</code> na mensagem para informar o dia em que a loja volta. Sem mensagem, o bot usa um texto padr&atilde;o com o motivo. Os feriados nacionais entram como &quot;Fechado&quot; s&oacute; para voc&ecirc; conferir: apague os que a loja abre.</small>
-            <div class="datas-salvar">
-                <button class="btn btn-salvar" id="salvar-datas">Salvar feriados e dias especiais</button>
-                <small>As altera&ccedil;&otilde;es s&oacute; valem depois de salvar.</small>
+
+            <div id="datas-editor" class="de-painel">
+                <h4 id="de-editor-titulo">Nova data</h4>
+                <div class="de-grade">
+                    <div class="larga"><label>Nome / motivo (ex.: Natal, Finados)</label><input type="text" id="de-motivo" placeholder="Nome do feriado ou motivo"></div>
+                    <div><label>De</label><input type="date" id="de-inicio"></div>
+                    <div><label>At&eacute; (opcional)</label><input type="date" id="de-fim"></div>
+                    <div><label>Situa&ccedil;&atilde;o</label>
+                        <select id="de-tipo">
+                            <option value="fechado">Fechado o dia todo</option>
+                            <option value="horario">Hor&aacute;rio especial</option>
+                        </select>
+                    </div>
+                    <div><label>Abre</label><input type="time" id="de-abre"></div>
+                    <div><label>Fecha</label><input type="time" id="de-fecha"></div>
+                    <div class="larga"><label>Mensagem ao cliente (opcional)</label><input type="text" id="de-msg" placeholder="Ex.: Feliz Natal! Voltamos {data_volta}"></div>
+                </div>
+                <small>Em &quot;Fechado&quot;, use <code>{data_volta}</code> para informar o dia em que a loja volta. Sem mensagem, o bot usa um texto padr&atilde;o com o nome.</small>
+                <div class="acoes" style="margin-top:12px;">
+                    <button class="btn btn-salvar" id="de-salvar" type="button">Salvar data</button>
+                    <button class="de-mini" id="de-cancelar" type="button">Cancelar</button>
+                </div>
+            </div>
+
+            <div id="datas-feriados-painel" class="de-painel">
+                <h4>Feriados nacionais</h4>
+                <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+                    <label for="datas-ano">Ano</label><select id="datas-ano" style="padding:6px;"></select>
+                    <small>Marque os que a loja fecha. Os j&aacute; cadastrados n&atilde;o aparecem.</small>
+                </div>
+                <div id="datas-feriados-lista"></div>
+                <div class="acoes" style="margin-top:12px;">
+                    <button class="btn btn-salvar" id="datas-feriados-add" type="button">Adicionar marcados</button>
+                    <button class="de-mini" id="datas-feriados-cancelar" type="button">Cancelar</button>
+                </div>
+            </div>
+
+            <div id="datas-lista"></div>
+            <div id="datas-passadas-box" style="display:none; margin-top:6px;">
+                <button class="de-mini" id="datas-passadas-toggle" type="button"></button>
+                <div id="datas-passadas-lista" style="display:none;"></div>
             </div>
             </div>
         </details>
