@@ -171,7 +171,7 @@ function calcularHorarioFuncionamento(horarioCfg: any, datasEspeciais?: any, fer
     const d = dias[chave];
     if (d && d.aberto && d.abre && d.fecha) partes.push(`${NOMES_DIAS_SEMANA[chave]} ${d.abre}-${d.fecha}`);
   });
-  let texto = partes.length ? partes.join('; ') : 'horário a confirmar';
+  let texto = partes.length ? `Horário de funcionamento: ${partes.join('; ')}` : 'Horário a confirmar';
 
   const agora = agoraBrasilia();
   const avisoDeFerias = avisoFerias(ferias, agora.iso);
@@ -192,7 +192,7 @@ function calcularHorarioFuncionamento(horarioCfg: any, datasEspeciais?: any, fer
     return { aberto: false, texto: msg.replace('{data_volta}', `${vd}/${vm}/${va}`) };
   }
   if (especial) {
-    texto = `hoje (${agora.ddmm}) ${especial.abre}-${especial.fecha}`;
+    texto = `Horário especial de hoje (${agora.ddmm}): ${especial.abre} às ${especial.fecha}`;
     diaCfg = { aberto: true, abre: especial.abre, fecha: especial.fecha };
   } else {
     if (!horarioCfg || !horarioCfg.ativo) return { aberto: true, texto };
@@ -879,7 +879,7 @@ const SecaoSacola = ({
                 if (lojaFechada) {
                   showAlert(
                     'Estamos fechados',
-                    `No momento não estamos recebendo pedidos.${horarioTexto ? `\n\nHorário de funcionamento: ${horarioTexto}` : ''}`
+                    `No momento não estamos recebendo pedidos.${horarioTexto ? `\n\n${horarioTexto}` : ''}`
                   );
                   return;
                 }
@@ -1166,8 +1166,11 @@ const SecaoHome = React.memo(({
             {lojaFechada && (
               <View style={{ backgroundColor: '#c0392b', paddingVertical: 8, paddingHorizontal: 14 }}>
                 <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>
-                  Estamos fechados no momento{horarioTexto ? ` • ${horarioTexto}` : ''}
+                  Estamos fechados no momento
                 </Text>
+                {!!horarioTexto && (
+                  <Text style={{ color: '#fff', textAlign: 'center', marginTop: 2 }}>{horarioTexto}</Text>
+                )}
               </View>
             )}
 
