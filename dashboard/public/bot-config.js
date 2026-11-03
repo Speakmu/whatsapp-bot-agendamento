@@ -31,7 +31,9 @@ document.addEventListener('DOMContentLoaded', () => {
         ferias_fim: '',
         ferias_mensagem: 'Estamos de férias no momento e voltamos no dia {data_volta}. Até lá!',
         aviso_encomenda_festa_ativo: true,
-        aviso_encomenda_festa_texto: 'Para encomendas de salgadinhos para festa ou cento de salgados, fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp).'
+        aviso_encomenda_festa_texto: 'Para encomendas de salgadinhos para festa ou cento de salgados, fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp).',
+        aviso_sache_ativo: true,
+        aviso_sache_texto: 'O ketchup e a maionese (sachês) já acompanham todos os pedidos, sem custo. 😊'
     };
 
     // Config técnica de suporte (não é decisão comercial do cliente) — só
@@ -150,6 +152,8 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-ferias-mensagem').value = d.ferias_mensagem || '';
             $('bot-festa-ativo').checked = d.aviso_encomenda_festa_ativo !== false;
             $('bot-festa-texto').value = d.aviso_encomenda_festa_texto || '';
+            $('bot-sache-ativo').checked = d.aviso_sache_ativo !== false;
+            $('bot-sache-texto').value = d.aviso_sache_texto || '';
             $('bot-nome-atendente').value = d.nome_atendente || '';
             $('bot-nome-empresa').value = d.nome_empresa || '';
             $('bot-chave-pix').value = d.chave_pix || '';
@@ -203,6 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ferias_mensagem: $('bot-ferias-mensagem').value.trim() || BOT_DEFAULTS.ferias_mensagem,
             aviso_encomenda_festa_ativo: $('bot-festa-ativo').checked,
             aviso_encomenda_festa_texto: $('bot-festa-texto').value.trim() || BOT_DEFAULTS.aviso_encomenda_festa_texto,
+            aviso_sache_ativo: $('bot-sache-ativo').checked,
+            aviso_sache_texto: $('bot-sache-texto').value.trim() || BOT_DEFAULTS.aviso_sache_texto,
             nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,
             nome_empresa: $('bot-nome-empresa').value.trim() || BOT_DEFAULTS.nome_empresa,
             chave_pix: $('bot-chave-pix').value.trim(),

@@ -97,7 +97,11 @@ BOT_CONFIG_DEFAULTS = {
     # "salgadinhos pra festa", em vez de encaminhar pro contato certo.
     "aviso_encomenda_festa_ativo": True,
     "aviso_encomenda_festa_texto": ("Para encomendas de salgadinhos para festa ou cento de salgados, "
-                                     "fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp).")
+                                     "fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp)."),
+    # Sachês de ketchup/maionese não são item de cardápio: vão em todos os pedidos. Se o
+    # cliente pedir, o bot só informa que já acompanham (texto editável em Config do Bot).
+    "aviso_sache_ativo": True,
+    "aviso_sache_texto": "O ketchup e a maionese (sachês) já acompanham todos os pedidos, sem custo. 😊",
 }
 
 def _params_do_modelo(modelo):
@@ -1820,6 +1824,15 @@ def _horario_semanal_legivel(bot_cfg):
     return "\n".join(linhas)
 
 
+_RE_SACHE = re.compile(r"ketchup|catchup|ketchu|ketchp|\bcatsup\b|maionese|maioneze|maionesi|\bsache\w*|\bsachet\w*")
+
+
+def _aviso_sache(bot_cfg):
+    if not (bot_cfg or {}).get("aviso_sache_ativo", True):
+        return ""
+    return str((bot_cfg or {}).get("aviso_sache_texto") or BOT_CONFIG_DEFAULTS["aviso_sache_texto"]).strip()
+
+
 _RE_PERGUNTA_ENDERECO_LOJA = re.compile(
     r"qual (e )?o endereco( (da loja|de voces|de vcs|da lileamar|completo))?\b|"
     r"\bme (passa|passar|manda|mandar|envia|enviar|fala|falar|diz|dizer|informa|informar|mande|passe|envie|diga)\b[^.?!]{0,15}\bendereco|"
@@ -2800,6 +2813,16 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # Caso real (21/10): cliente perguntou "Vocês ficam até que horas?" e a IA improvisou
     # ("perto do jantar") e mandou ligar/escrever pro WhatsApp da loja, onde ela já estava.
     # O horário está em Config do Bot: a resposta sai dele, sem passar pela IA.
+    # Pedido de ketchup/maionese (sachê): não é item, já vai em todos os pedidos. Mensagem só
+    # sobre isso → resposta fixa de Config do Bot, sem IA e sem chamar a equipe.
+    aviso_sache = _aviso_sache(bot_cfg)
+    if (aviso_sache and len(prompt or "") <= 90 and _RE_SACHE.search(_normalizar_termo(prompt or ""))
+            and not _itens_mencionados(prompt, carregar_cardapio())):
+        salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        salvar_historico_firestore(wa_id, "assistant", aviso_sache, bot_cfg.get("max_historico_salvar"))
+        registrar_log_conversa(id_usuario, origem, prompt, aviso_sache, "servidor", observacao="sache_respondido_pelo_servidor")
+        return aviso_sache
+
     if (endereco_loja and len(prompt or "") <= 90 and _RE_PERGUNTA_ENDERECO_LOJA.search(_normalizar_termo(prompt or ""))
             and not re.search(r"entrega|meu endereco|minha casa", _normalizar_termo(prompt or ""))
             and not _itens_mencionados(prompt, carregar_cardapio())):
@@ -3041,6 +3064,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        que vai abrir/fazer "outro pedido" — na dúvida, avise que vai chamar
        a equipe pra confirmar direto com ele qual pedido ele quer mudar.
 
+       {f'SOBRE KETCHUP/MAIONESE (sachês): NÃO são item de cardápio e nunca entram no pedido nem têm preço. Se o cliente pedir, responda: "{_aviso_sache(bot_cfg)}" — nunca diga que não temos nem chame a equipe.' if _aviso_sache(bot_cfg) else ''}
+
        SOBRE ITEM INDISPONÍVEL: item marcado "(INDISPONÍVEL NO MOMENTO)" no
        cardápio existe, só está em falta agora. Responda "no momento não temos o
        X" (NUNCA só "não temos"), ofereça opções parecidas disponíveis e NUNCA
@@ -3279,9 +3304,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                        tipo="pedido_falhou", dados={"rascunho": obter_rascunho(id_usuario).get("itens")})
                 elif function_name == "item_nao_encontrado":
                     nome_pedido = str(args.get("nome_pedido") or "").strip()
-                    marcar_atencao(id_usuario, f"Item(ns) não reconhecido(s) no pedido: {nome_pedido}",
-                                   tipo="item", dados={"nome_produto": nome_pedido, "todos": [nome_pedido]})
-                    resultado = {"status": "ok", "instrucao": "Equipe avisada. Diga ao cliente que não temos esse item e ofereça a categoria mais próxima do cardápio."}
+                    if _aviso_sache(bot_cfg) and _RE_SACHE.search(_normalizar_termo(nome_pedido)):
+                        resultado = {"status": "ok", "instrucao": f"Isto NÃO é item de cardápio: {_aviso_sache(bot_cfg)} Diga isso ao cliente; "
+                                                                  "NÃO adicione ao pedido e NÃO chame a equipe."}
+                    else:
+                        marcar_atencao(id_usuario, f"Item(ns) não reconhecido(s) no pedido: {nome_pedido}",
+                                       tipo="item", dados={"nome_produto": nome_pedido, "todos": [nome_pedido]})
+                        resultado = {"status": "ok", "instrucao": "Equipe avisada. Diga ao cliente que não temos esse item e ofereça a categoria mais próxima do cardápio."}
                 elif function_name == "detalhar_item":
                     resultado = detalhar_item(args.get("item_id"), cardapio_atual)
                 elif function_name == "verificar_bairro_entrega":
@@ -3609,6 +3638,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             if sem:
                 log_observacao = "telefone_do_proprio_whatsapp_removido"
                 final_text = " ".join(sem).strip()
+
+        # Pedido misto ("2 coxinhas e ketchup"): a resposta tem que informar que o sachê já vai junto.
+        aviso_sc = _aviso_sache(bot_cfg)
+        if (aviso_sc and _RE_SACHE.search(_normalizar_termo(prompt or ""))
+                and not _RE_SACHE.search(_normalizar_termo(final_text or ""))):
+            log_observacao = "aviso_sache_acrescentado"
+            final_text = (final_text or "").rstrip() + "\n\n" + aviso_sc
 
         # O cliente escreveu o nome de um item indisponível no momento: a resposta TEM que avisar
         # "no momento não temos" (caso 03/11: a IA adicionou outro item sem dizer nada).

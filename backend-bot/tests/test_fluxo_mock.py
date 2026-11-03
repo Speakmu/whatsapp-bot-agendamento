@@ -1176,3 +1176,32 @@ def test_tipo_incompativel_nao_bloqueia_item_certo_nem_mensagem_sem_tipo(ambient
     assert bot._tipo_do_item_incompativel(pastel, "quero 1 pastel de carne", c) is False
     assert bot._tipo_do_item_incompativel(coxinha, "sim", c) is False
     assert bot._tipo_do_item_incompativel(coxinha, "3 coxinhas e 2 pasteis", c) is False
+
+
+def test_ketchup_e_maionese_so_informa_que_acompanham(ambiente, monkeypatch):
+    """Sachês de ketchup/maionese vão em todos os pedidos: se o cliente pedir, o bot só informa
+    (texto de Config do Bot), sem chamar a equipe, sem item e sem passar pela IA."""
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
+    tel = "553591526905"
+    resp = _conversar(tel, ["oi", "tem ketchup e maionese?"])[-1]
+    assert "já acompanham todos os pedidos" in resp
+    h = ambiente.collection("historico_conversas").document(tel).get().to_dict()
+    assert not h.get("precisa_atencao") and not h.get("aviso_equipe")
+
+
+def test_ketchup_no_meio_do_pedido_recebe_o_aviso(ambiente, monkeypatch):
+    """'2 coxinhas e ketchup': a IA ignora o ketchup → o aviso é acrescentado à resposta."""
+    cx = _codigo("coxinha de frango")
+    roteiro = {"quero 2 coxinha de frango e ketchup": [("adicionar_item", {"item_id": cx, "quantidade": 2}), "Anotei 2 coxinhas!"]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "553591526906"
+    resp = _conversar(tel, ["oi", "quero 2 coxinha de frango e ketchup"])[-1]
+    assert "já acompanham todos os pedidos" in resp
+    assert [i["quantidade"] for i in bot.obter_rascunho(tel)["itens"]] == [2]
+
+
+def test_aviso_sache_pode_ser_desligado_e_editado(ambiente, monkeypatch):
+    ambiente.collection("configuracoes").document("bot").set(
+        {"aviso_sache_texto": "Ketchup e maionese vão de brinde em todo pedido!"}, merge=True)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
+    assert "de brinde" in _conversar("553591526907", ["oi", "quero maionese"])[-1]
