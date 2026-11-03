@@ -277,7 +277,9 @@ def test_limite_de_rodadas_fecha_com_texto(ambiente, monkeypatch):
 # ---------- Fase 3: cardápio com código no prompt ----------
 def test_prompt_contem_cardapio_com_codigos(ambiente, monkeypatch):
     """O system prompt leva o cardápio com códigos; itens só-balcão ficam de
-    fora; esgotado vem marcado; ingredientes NÃO vão (custo)."""
+    fora; esgotado vem marcado; ingredientes NÃO vão (custo).
+    Item indisponível só no online (botão "esgotar no app e WhatsApp") APARECE marcado:
+    antes sumia e a IA trocava pastel por coxinha (03/11)."""
     capturado = {}
     def create(model, messages, tools=None, tool_choice=None, timeout=None):
         capturado["system"] = messages[0]["content"]
@@ -288,8 +290,8 @@ def test_prompt_contem_cardapio_com_codigos(ambiente, monkeypatch):
     sp = capturado["system"]
     assert "CARDÁPIO DE AGORA" in sp
     assert f"[{_codigo('pastel de carne')}] Pastel de Carne — R$ 8,00" in sp
-    assert "Kibe — R$ 6,50 (ESGOTADO hoje)" in sp
-    assert "Bacalhau" not in sp                    # disponivel_online=False
+    assert "Kibe — R$ 6,50 (INDISPONÍVEL NO MOMENTO)" in sp
+    assert "Bacalhau" in sp and "(INDISPONÍVEL NO MOMENTO)" in sp.split("Bacalhau", 1)[1].split(chr(10), 1)[0]
     assert "Carne moída" not in sp                # ingredientes fora do prompt
     assert "listar_cardapio" not in capturado["tools"] and "consultar_sabor" not in capturado["tools"]
     assert "detalhar_item" in capturado["tools"]
@@ -327,7 +329,7 @@ def test_esgotado_e_so_balcao_recusados_por_id(ambiente):
 def test_detalhar_item(ambiente):
     d = bot.detalhar_item(_codigo("pastel de carne"))
     assert d["status"] == "ok" and d["ingredientes"] == "Carne moída temperada" and d["preco"] == 8.0
-    assert bot.detalhar_item(_codigo("bolinho de bacalhau"))["status"] == "nao_encontrado"
+    assert bot.detalhar_item(_codigo("bolinho de bacalhau"))["status"] == "indisponivel"
     assert bot.detalhar_item("zzzz")["status"] == "nao_encontrado"
 
 
@@ -1095,3 +1097,59 @@ def test_endereco_da_loja_vem_do_cadastro(ambiente, monkeypatch):
     # endereço de ENTREGA do cliente não dispara a resposta da loja
     r2 = _conversar("553599000053", ["oi", "vou passar o endereço"])
     assert "Monsenhor Mancini" not in r2[-1]
+
+
+def test_pastel_indisponivel_nao_vira_coxinha(ambiente, monkeypatch):
+    """Caso 03/11: cliente pediu 'pastel de frango com catupiry' (esgotado no online) e a IA
+    adicionou a coxinha de frango com catupiry. Agora a troca é recusada e o bot avisa
+    'no momento não temos'."""
+    cx = _codigo("coxinha de frango")
+    ambiente.collection("cardapio").document(bot._resolver_item(_codigo("pastel de carne"), bot.carregar_cardapio())["id"])
+    ambiente.collection("cardapio").add({"nome": "pastel frango com catupiry", "nome_exibicao": "Pastel Frango com Catupiry",
+                                         "preco": 8.5, "categoria": "Salgados Fritos", "disponivel": True,
+                                         "disponivel_online": False})
+    bot.carregar_cardapio(forcar=True)
+    roteiro = {"Quero 1 pastel de frango com catupiry": [("adicionar_item", {"item_id": cx, "quantidade": 1}),
+                                                          "Adicionei a coxinha de frango."]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "553591526900"
+    _conversar(tel, ["oi", "Quero 1 pastel de frango com catupiry"])
+    assert bot.obter_rascunho(tel)["itens"] == []
+
+
+def test_rascunho_parado_ha_horas_perde_a_retirada_sem_itens(ambiente):
+    """Caso 03/11: sobrou 'retirada no balcão' de uma conversa antiga sem itens."""
+    tel = "553591526901"
+    antigo = bot.datetime.now(bot.timezone.utc) - bot.timedelta(days=5)
+    ambiente.collection("pedidos_rascunho").document(tel).set(
+        {"tipo_entrega": "RETIRADA", "endereco": "Retirada no balcão", "itens": [], "atualizado_em": antigo, "criado_em": antigo})
+    assert bot.obter_rascunho(tel)["tipo_entrega"] is None
+
+
+def test_item_indisponivel_sempre_recebe_aviso_no_momento(ambiente, monkeypatch):
+    """O cliente pediu um item indisponível: a resposta tem que dizer 'no momento não temos',
+    mesmo que a IA escreva outra coisa."""
+    ambiente.collection("cardapio").add({"nome": "pastel frango com catupiry", "nome_exibicao": "Pastel Frango com Catupiry",
+                                         "preco": 8.5, "categoria": "Salgados Fritos", "disponivel": True,
+                                         "disponivel_online": False})
+    bot.carregar_cardapio(forcar=True)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"Quero 1 pastel de frango com catupiry": ["Anotado! Mais alguma coisa?"]}))
+    resp = _conversar("553591526902", ["oi", "Quero 1 pastel de frango com catupiry"])[-1]
+    assert "No momento não temos o Pastel Frango com Catupiry" in resp
+
+
+def test_conversa_nova_apos_dias_nao_retoma_a_antiga(ambiente, monkeypatch):
+    """Caso 03/11: 'Oi' dias depois recebia 'Posso ajudar com mais alguma coisa?'."""
+    tel = "553591526903"
+    antigo = bot.datetime.now(bot.timezone.utc) - bot.timedelta(days=5)
+    ambiente.collection("historico_conversas").document(tel).set({"mensagens": [
+        {"role": "user", "content": "Somente o pastel", "timestamp": antigo},
+        {"role": "assistant", "content": "Certo", "timestamp": antigo}], "ultima_interacao": antigo})
+    visto = {}
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
+        visto["system"] = messages[0]["content"]
+        visto["n_msgs"] = len(messages)
+        return _Resp(_Msg(content="Bom dia! Como posso ajudar?"))
+    monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
+    _conversar(tel, ["Bom dia, quero ver o cardápio"])
+    assert "conversa NOVA" in visto["system"] and visto["n_msgs"] == 2   # só system + a mensagem de agora

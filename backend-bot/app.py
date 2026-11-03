@@ -361,8 +361,6 @@ def montar_cardapio_prompt(cardapio=None):
     apelidos = _apelidos_aprendidos()
     por_categoria = {}
     for it in cardapio:
-        if not _disponivel_online(it):
-            continue
         cat = str(it.get('categoria') or 'Outros').strip().title()
         nome = it.get('nome_exibicao') or it.get('nome') or '?'
         try:
@@ -370,8 +368,12 @@ def montar_cardapio_prompt(cardapio=None):
         except (TypeError, ValueError):
             preco = "R$ ?"
         linha = f"[{it['codigo']}] {nome} — {preco}"
-        if it.get('disponivel') is False:
-            linha += " (ESGOTADO hoje)"
+        # Caso real (03/11): "Pastel Frango com Catupiry" foi esgotado pelo botão
+        # "esgotar no app e WhatsApp" (disponivel_online=False), sumiu do cardápio do bot e
+        # a IA trocou por conta própria pela Coxinha de frango com catupiry. O item precisa
+        # APARECER, marcado, pra IA saber que existe e só está em falta.
+        if it.get('disponivel') is False or not _disponivel_online(it):
+            linha += " (INDISPONÍVEL NO MOMENTO)"
         if apelidos.get(it['id']):
             linha += f" (o cliente também chama de: {', '.join(apelidos[it['id']])})"
         por_categoria.setdefault(cat, []).append(linha)
@@ -407,8 +409,11 @@ def detalhar_item(item_id, cardapio=None):
     quando o cliente pergunta."""
     cardapio = cardapio if cardapio is not None else carregar_cardapio()
     it = _resolver_item(item_id, cardapio)
-    if not it or not _disponivel_online(it):
+    if not it:
         return {"status": "nao_encontrado", "item_id": item_id}
+    if not _disponivel_online(it):
+        return {"status": "indisponivel", "nome": it.get('nome_exibicao') or it.get('nome'),
+                "instrucao": "Indisponível no momento: diga 'no momento não temos' e ofereça um item parecido."}
     return {
         "status": "ok",
         "codigo": it["codigo"],
@@ -465,7 +470,9 @@ def obter_rascunho(wa_id):
                 # Carrinho parado há mais de HORAS_EXPIRA_RASCUNHO começa do zero
                 # (só guarda a referência do último pedido fechado).
                 ultimo_toque = r.get("atualizado_em") or r.get("criado_em")
-                if (r.get("itens") and ultimo_toque
+                # Caso real (03/11): sobrou "retirada no balcão" de uma conversa de 5 dias antes
+                # (sem itens) e o bot assumiu retirada sem o cliente dizer nada.
+                if (ultimo_toque
                         and datetime.now(timezone.utc) - ultimo_toque > timedelta(hours=HORAS_EXPIRA_RASCUNHO)):
                     base = _rascunho_vazio()
                     base["ultimo_pedido"] = r.get("ultimo_pedido")
@@ -590,9 +597,15 @@ def rascunho_adicionar_item(wa_id, item_id, quantidade, bot_cfg, cardapio=None):
     cardapio = cardapio if cardapio is not None else carregar_cardapio()
     r = obter_rascunho(wa_id)
     it = _resolver_item(item_id, cardapio)
-    if not it or not _disponivel_online(it):
+    if not it:
         return _resumo_rascunho(r, bot_cfg, status="erro",
                                 motivo=f"Código '{item_id}' não existe no cardápio de agora. Use um código da lista do prompt.")
+    if not _disponivel_online(it):
+        nome_it = it.get('nome_exibicao') or it.get('nome')
+        return _resumo_rascunho(r, bot_cfg, status="erro",
+                                motivo=f"'{nome_it}' está INDISPONÍVEL NO MOMENTO. Diga ao cliente \"no momento não temos o {nome_it}\" "
+                                       "(NUNCA só \"não temos\"), NÃO troque por outro item sem ele aceitar, e ofereça as opções "
+                                       "parecidas que estão disponíveis.")
     if it.get("disponivel") is False:
         return _resumo_rascunho(r, bot_cfg, status="erro",
                                 motivo=f"'{it.get('nome_exibicao') or it.get('nome')}' está ESGOTADO hoje — avise o cliente e ofereça outro item.")
@@ -2007,6 +2020,19 @@ _RE_CLIENTE_DISSE_QUE_ESTA_ERRADO = re.compile(
     r"nao pedi|nao foi o que pedi|ta bugado|bugou")
 
 
+def _indisponiveis_pedidos_na_mensagem(mensagem, cardapio):
+    """Itens indisponíveis no momento cujo nome COMPLETO o cliente escreveu
+    ("pastel de frango com catupiry" → Pastel Frango com Catupiry)."""
+    toks = set(re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")))
+    achados = []
+    for it in cardapio or []:
+        if it.get('disponivel') is False or not _disponivel_online(it):
+            t = _tokens_item(it)
+            if t and t <= toks:
+                achados.append(it)
+    return achados
+
+
 def _tipo_do_item_na_mensagem(item, mensagem):
     """A primeira palavra do nome do item (o tipo: pastel, coxinha, esfirra, coca...)
     aparece na mensagem? Compara pelo começo da palavra (pastel/pastéis)."""
@@ -2802,6 +2828,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         for e in eventos_servidor:
             if e.get("instrucao"):
                 rascunho_texto += f"\n  INSTRUÇÃO DESTA MENSAGEM: {e['instrucao']}"
+    sessao_nova = horas_parado is not None and horas_parado >= HORAS_EXPIRA_RASCUNHO
+    if sessao_nova:
+        # Caso real (03/11): cliente voltou dias depois com um "Oi" e o bot respondeu "Posso ajudar
+        # com mais alguma coisa?", retomando a conversa antiga (que acabava em "Ok").
+        rascunho_texto += ("\n  ATENÇÃO: o cliente ficou horas/dias sem escrever — é uma conversa NOVA. Cumprimente normalmente; "
+                           "NÃO diga \"mais alguma coisa\" nem retome assunto ou pedido antigo.")
     if pediu_humano:
         rascunho_texto += ("\n  INSTRUÇÃO DESTA MENSAGEM: o cliente pediu pra falar com a equipe e o servidor JÁ AVISOU a equipe. "
                            "Diga que chamou a equipe e que alguém responde AQUI MESMO nesta conversa em instantes "
@@ -2981,6 +3013,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        que vai abrir/fazer "outro pedido" — na dúvida, avise que vai chamar
        a equipe pra confirmar direto com ele qual pedido ele quer mudar.
 
+       SOBRE ITEM INDISPONÍVEL: item marcado "(INDISPONÍVEL NO MOMENTO)" no
+       cardápio existe, só está em falta agora. Responda "no momento não temos o
+       X" (NUNCA só "não temos"), ofereça opções parecidas disponíveis e NUNCA
+       adicione outro item no lugar sem o cliente aceitar — pastel não vira
+       coxinha, nem coxinha vira pastel.
+
        SOBRE ENCOMENDA DE FESTA/CENTO: se o cliente perguntar sobre
        "salgadinhos pra festa", "cento de salgados" ou pedido em grande
        quantidade pra evento, NÃO responda com o preço unitário do cardápio
@@ -3011,6 +3049,8 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # 6. Carregar Histórico
     ck("antes obter_historico_firestore (contexto completo)")
     historico_msgs = obter_historico_firestore(wa_id, bot_cfg.get("max_historico_contexto"))
+    if sessao_nova:
+        historico_msgs = []   # conversa de dias atrás não é contexto da de agora (pedidos antigos: consultar_meu_pedido)
     ck("depois obter_historico_firestore (contexto completo)")
 
     # Montagem
@@ -3130,7 +3170,15 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         certo_ctx, _ = _resolver_variante_ambigua(it_pedido, cardapio_atual, " ".join(recentes + [prompt]))
                         if certo_ctx:
                             item_certo, opcoes_variante = certo_ctx, None
-                    if it_pedido and not _adicao_permitida(it_pedido, prompt, historico_msgs, obter_rascunho(id_usuario)):
+                    indisp_pedidos = _indisponiveis_pedidos_na_mensagem(prompt, cardapio_atual)
+                    if (it_pedido and indisp_pedidos and it_pedido["id"] not in {x["id"] for x in indisp_pedidos}
+                            and not _tipo_do_item_na_mensagem(it_pedido, prompt)):
+                        nomes_ind = " / ".join(x.get('nome_exibicao') or x.get('nome') for x in indisp_pedidos)
+                        resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg, status="erro",
+                                                     motivo=f"O cliente pediu '{nomes_ind}', que está INDISPONÍVEL NO MOMENTO, e '{it_pedido.get('nome_exibicao') or it_pedido.get('nome')}' "
+                                                            "NÃO é o que ele pediu — não adicionei. Diga \"no momento não temos o item\" e ofereça "
+                                                            "alternativas disponíveis; só adicione outro item se o cliente aceitar.")
+                    elif it_pedido and not _adicao_permitida(it_pedido, prompt, historico_msgs, obter_rascunho(id_usuario)):
                         resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg,
                                                      aviso="NÃO somei: o cliente não pediu esse item NESTA mensagem (ele já está no "
                                                            "pedido ou não foi citado agora). Não readicione itens — responda só ao "
@@ -3527,6 +3575,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             if sem:
                 log_observacao = "telefone_do_proprio_whatsapp_removido"
                 final_text = " ".join(sem).strip()
+
+        # O cliente escreveu o nome de um item indisponível no momento: a resposta TEM que avisar
+        # "no momento não temos" (caso 03/11: a IA adicionou outro item sem dizer nada).
+        indisp_msg = _indisponiveis_pedidos_na_mensagem(prompt, cardapio_atual)
+        if indisp_msg and "no momento" not in _normalizar_termo(final_text or ""):
+            nomes_i = " e ".join(x.get('nome_exibicao') or x.get('nome') for x in indisp_msg)
+            log_observacao = "aviso_item_indisponivel_acrescentado"
+            final_text = (final_text or "").rstrip() + f"\n\nNo momento não temos o {nomes_i}. Posso te oferecer outra opção?"
 
         if pediu_humano and "equipe" not in _normalizar_termo(final_text or ""):
             log_observacao = "pediu_humano_texto_substituido"
