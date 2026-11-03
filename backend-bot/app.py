@@ -2020,6 +2020,34 @@ _RE_CLIENTE_DISSE_QUE_ESTA_ERRADO = re.compile(
     r"nao pedi|nao foi o que pedi|ta bugado|bugou")
 
 
+def _raiz_tipo(item):
+    """4 primeiras letras do TIPO do item (1ª palavra do nome: pastel, coxinha, esfirra, coca...)."""
+    nome = _normalizar_termo((item or {}).get("nome_exibicao") or (item or {}).get("nome") or "")
+    for t in re.split(r"[^a-z0-9]+", nome):
+        if len(t) >= 4 and t not in _PALAVRAS_GENERICAS_ITEM:
+            return t[:4]
+    return None
+
+
+def _tipo_do_item_incompativel(item, mensagem, cardapio):
+    """O cliente citou o TIPO de algum item do cardápio (pastel, coxinha, esfirra...) e o
+    item que a IA quer adicionar é de OUTRO tipo? Caso real (03/11): "1 pastel de frango com
+    catupiry" → a IA adicionou a coxinha de frango com catupiry. Apelido ensinado pela equipe
+    ("enroladinho de salsicha" → Salsicha) conta como tipo citado."""
+    raiz_item = _raiz_tipo(item)
+    if not raiz_item:
+        return False
+    toks = [t for t in re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")) if len(t) >= 4]
+    raizes_menu = {r for r in (_raiz_tipo(i) for i in cardapio or []) if r}
+    citados = {t[:4] for t in toks if t[:4] in raizes_menu}
+    if not citados or raiz_item in citados:
+        return False
+    for ap in _apelidos_aprendidos().get(item.get("id"), []):
+        if any(len(t) >= 4 and t[:4] in citados for t in re.split(r"[^a-z0-9]+", _normalizar_termo(ap))):
+            return False
+    return True
+
+
 def _indisponiveis_pedidos_na_mensagem(mensagem, cardapio):
     """Itens indisponíveis no momento cujo nome COMPLETO o cliente escreveu
     ("pastel de frango com catupiry" → Pastel Frango com Catupiry)."""
@@ -3178,6 +3206,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                                      motivo=f"O cliente pediu '{nomes_ind}', que está INDISPONÍVEL NO MOMENTO, e '{it_pedido.get('nome_exibicao') or it_pedido.get('nome')}' "
                                                             "NÃO é o que ele pediu — não adicionei. Diga \"no momento não temos o item\" e ofereça "
                                                             "alternativas disponíveis; só adicione outro item se o cliente aceitar.")
+                    elif it_pedido and _tipo_do_item_incompativel(it_pedido, prompt, cardapio_atual):
+                        resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg, status="erro",
+                                                     motivo=f"O cliente pediu outro TIPO de item: '{it_pedido.get('nome_exibicao') or it_pedido.get('nome')}' "
+                                                            "NÃO é o que ele escreveu — não adicionei. Adicione o item que ELE pediu "
+                                                            "(código da lista do prompt) ou pergunte qual ele quer; nunca troque pastel por "
+                                                            "coxinha, esfirra por pastel etc.")
                     elif it_pedido and not _adicao_permitida(it_pedido, prompt, historico_msgs, obter_rascunho(id_usuario)):
                         resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg,
                                                      aviso="NÃO somei: o cliente não pediu esse item NESTA mensagem (ele já está no "

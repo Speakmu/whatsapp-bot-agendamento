@@ -1153,3 +1153,26 @@ def test_conversa_nova_apos_dias_nao_retoma_a_antiga(ambiente, monkeypatch):
     monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
     _conversar(tel, ["Bom dia, quero ver o cardápio"])
     assert "conversa NOVA" in visto["system"] and visto["n_msgs"] == 2   # só system + a mensagem de agora
+
+
+def test_tipo_errado_e_recusado_mesmo_com_item_disponivel(ambiente, monkeypatch):
+    """Caso 03/11, versão geral: cliente escreveu 'pastel' e a IA adiciona coxinha, mesmo com
+    os dois disponíveis. Tipo (pastel/coxinha...) diferente do que o cliente citou é recusado."""
+    cx, pc = _codigo("coxinha de frango"), _codigo("pastel de carne")
+    roteiro = {"quero 2 pastel de carne": [("adicionar_item", {"item_id": cx, "quantidade": 2}),
+                                           ("adicionar_item", {"item_id": pc, "quantidade": 2}), "Anotei!"]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "553591526904"
+    _conversar(tel, ["oi", "quero 2 pastel de carne"])
+    nomes = [i["nome"] for i in bot.obter_rascunho(tel)["itens"]]
+    assert nomes == ["2x pastel de carne"] or [n.split("x ")[-1] for n in nomes] == ["pastel de carne"]
+
+
+def test_tipo_incompativel_nao_bloqueia_item_certo_nem_mensagem_sem_tipo(ambiente):
+    c = bot.carregar_cardapio(forcar=True)
+    por_nome = {i["nome"]: i for i in c}
+    coxinha, pastel = por_nome["coxinha de frango"], por_nome["pastel de carne"]
+    assert bot._tipo_do_item_incompativel(coxinha, "quero 1 pastel de carne", c) is True
+    assert bot._tipo_do_item_incompativel(pastel, "quero 1 pastel de carne", c) is False
+    assert bot._tipo_do_item_incompativel(coxinha, "sim", c) is False
+    assert bot._tipo_do_item_incompativel(coxinha, "3 coxinhas e 2 pasteis", c) is False
