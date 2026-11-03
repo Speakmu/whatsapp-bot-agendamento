@@ -45,6 +45,14 @@ import sys
 import time
 from datetime import datetime
 
+# Console do Windows (cp1252) não imprime "→"/"•"/emoji e o programa caía na abertura — ver
+# _avisar_apelidos_invisiveis. Força UTF-8 na saída, trocando o que não der por "?".
+for _fluxo in (sys.stdout, sys.stderr):
+    try:
+        _fluxo.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 AQUI = os.path.dirname(os.path.abspath(__file__))
 RAIZ = os.path.dirname(AQUI)
 sys.path.insert(0, AQUI)
@@ -103,11 +111,11 @@ def _avisar_apelidos_invisiveis():
         if not it:
             problemas.append(f"{', '.join(nomes)} → item {item_id} NÃO EXISTE mais no cardápio")
         elif not bot._disponivel_online(it):
-            problemas.append(f"{', '.join(nomes)} → '{it.get('nome')}' está PAUSADO no App/Bot (disponivel_online=False)")
+            problemas.append(f"{', '.join(nomes)} → '{it.get('nome')}' está PAUSADO no App/Bot (disponivel_online=False): o bot reconhece o apelido e responde 'no momento não temos'")
         elif it.get("disponivel") is False:
             problemas.append(f"{', '.join(nomes)} → '{it.get('nome')}' está ESGOTADO")
     if problemas:
-        print("  AVISO — apelidos que o bot NÃO vai reconhecer agora:")
+        print("  AVISO — apelidos apontando para item que não pode ser vendido agora:")
         for pr in problemas:
             print(f"    • {pr}")
         print("    (no painel: 'Repor no App/Bot' e gere o snapshot de novo; ou aqui: /repor <item>)")

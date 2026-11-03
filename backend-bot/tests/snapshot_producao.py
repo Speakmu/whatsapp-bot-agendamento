@@ -50,8 +50,13 @@ db = firestore.client()
 
 
 def _serializavel(v):
+    # Recursivo: campos novos guardam datas dentro de listas/mapas (ex.: bairros_pendentes_bot[].em).
     if hasattr(v, "isoformat"):
         return v.isoformat()
+    if isinstance(v, dict):
+        return {k: _serializavel(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_serializavel(x) for x in v]
     return v
 
 
