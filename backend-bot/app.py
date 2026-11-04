@@ -582,8 +582,9 @@ def _resumo_rascunho(r, bot_cfg, status="ok", **extra):
             f"O pedido anterior (R$ {ultimo.get('valor_total')}) JÁ FOI REGISTRADO — não existe função pra editar um "
             "pedido depois de fechado. Este resumo aqui é de um carrinho NOVO e separado, não é o pedido antigo "
             "corrigido. Se o cliente estava tentando CORRIGIR/TROCAR ALGO do pedido anterior (não pedindo algo "
-            "novo), NUNCA diga que 'corrigiu' o pedido nem informe um total como se fosse dele — diga que vai "
-            "avisar a equipe pra ajustar esse pedido manualmente."
+            "novo), NUNCA diga que 'corrigiu' o pedido nem informe um total como se fosse dele — diga com clareza "
+            "que um pedido já enviado NÃO pode ser alterado e ofereça fazer um pedido novo. NÃO prometa avisar a "
+            "equipe pra ajustar."
         )
     out.update(extra)
     return out
@@ -3132,8 +3133,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
        o pedido antigo continua exatamente como fechou). Se não estiver
        claro que o cliente quer um pedido novo de verdade (ele só citou
        "mais" itens, não corrigiu nada do que já tinha pedido), NÃO diga
-       que vai abrir/fazer "outro pedido" — na dúvida, avise que vai chamar
-       a equipe pra confirmar direto com ele qual pedido ele quer mudar.
+       que vai abrir/fazer "outro pedido" — na dúvida, pergunte se ele quer um
+       pedido novo. Se ele quer MUDAR algo do que já foi enviado, diga com
+       clareza que um pedido já enviado não pode ser alterado (nem pela equipe,
+       por aqui) e ofereça fazer um pedido novo. NUNCA prometa chamar a equipe
+       pra ajustar o pedido.
 
        {f'SOBRE KETCHUP/MAIONESE (sachês): NÃO são item de cardápio e nunca entram no pedido nem têm preço. Se o cliente pedir, responda: "{_aviso_sache(bot_cfg)}" — nunca diga que não temos nem chame a equipe.' if _aviso_sache(bot_cfg) else ''}
 
@@ -3602,15 +3606,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             # verdade.
             if _pedido_recem_fechado(obter_rascunho(id_usuario)) and _soa_como_correcao_pos_fechamento(final_text):
                 log_observacao = "texto_correcao_pedido_ja_fechado"
-                marcar_atencao(
-                    id_usuario,
-                    "IA disse ter corrigido/reaberto um pedido já fechado sem função pra isso — confira com o cliente qual pedido ele quer mudar.",
-                    tipo="pedido_pos_fechamento",
-                    dados={"resposta_suspeita": final_text}
-                )
+                # Regra da loja: pedido já enviado NÃO pode ser alterado. Informa isso com
+                # clareza e não aciona a equipe (não há o que ela fazer por aqui).
                 final_text = (
-                    "Seu pedido anterior já está registrado — não dá pra alterar automaticamente por aqui. "
-                    "Já chamei a equipe pra confirmar essa mudança direto com você."
+                    "Seu pedido já foi enviado e não é possível alterá-lo. "
+                    "Se quiser, posso fazer um novo pedido com o que você precisa. 😊"
                 )
 
             # Rede de segurança pra alucinação de CONTEÚDO do carrinho (não
