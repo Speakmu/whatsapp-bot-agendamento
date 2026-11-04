@@ -1,4 +1,5 @@
 import re
+import base64
 import urllib.parse
 import time
 import unicodedata
@@ -1305,7 +1306,10 @@ def registrar_comprovante(wa_id: str, imagem_url: str):
 
             def _anotar(nota):
                 obs = str(dados.get('observacao') or '').strip()
-                obs = f"{obs} | {nota}" if obs and obs.lower() != 'nenhuma' else nota
+                if nota in obs:
+                    pass  # mesma nota já está no pedido (cliente mandou 2 imagens): não repete
+                else:
+                    obs = f"{obs} | {nota}" if obs and obs.lower() != 'nenhuma' else nota
                 doc.reference.update({'comprovante_url': imagem_url, 'observacao': obs}, timeout=10)
 
             # PIX do app: cobrado e confirmado pelo gateway — comprovante não muda nada.
@@ -1354,6 +1358,73 @@ def registrar_comprovante(wa_id: str, imagem_url: str):
         print(f"ERRO: {e}")
         return "Tive um problema ao processar a imagem."
     
+MODELO_VISAO = "gpt-4o-mini"
+
+_PROMPT_CLASSIFICAR_IMAGEM = (
+    "Você classifica imagens que clientes de uma loja mandam pelo WhatsApp. Responda SOMENTE um JSON "
+    '{"tipo": "...", "confianca": "..."}.\n'
+    "tipo:\n"
+    '- "comprovante_pagamento": comprovante/recibo de PIX, transferência ou pagamento (tem valor pago, '
+    "nome de pagador/recebedor, data/hora, ID da transação ou logo de banco/app de pagamento).\n"
+    '- "print_do_app": print de tela de app, de pedido, cardápio ou conversa (ex.: "Meus Pedidos", lista de itens, total).\n'
+    '- "outra_imagem": qualquer outra coisa (foto, comida, documento, dinheiro, etc.).\n'
+    "confianca: alta, media ou baixa. Na dúvida, NÃO diga comprovante_pagamento com confiança alta."
+)
+
+
+def classificar_imagem_cliente(caminho_local, tipo_midia):
+    """Decide se a imagem que o cliente mandou é um comprovante de pagamento, olhando o
+    CONTEÚDO (modelo de visão). Devolve 'comprovante' ou 'outro'.
+
+    Caso real (03/11): cliente com pedido em dinheiro mandou um print do 'Meus Pedidos' do
+    app; o bot tratou como comprovante de PIX parcial, anotou isso no pedido (2x) e
+    anexou o print como comprovante. Agora só vira comprovante se o modelo disser
+    comprovante COM confiança alta; qualquer outra resposta, erro ou demora = 'outro'
+    (não mexe no pedido, avisa a equipe).
+
+    PDF/documento: o modelo de visão não lê PDF, então segue o fluxo antigo ('comprovante')."""
+    if tipo_midia != 'image':
+        return 'comprovante'
+    try:
+        with open(caminho_local, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+    except Exception as e:
+        print(f"ERRO ao ler imagem pra classificar: {e}")
+        return 'outro'
+    for tentativa in (1, 2):  # 1 retentativa: erro passageiro não pode derrubar um comprovante de verdade
+        try:
+            resp = openai.chat.completions.create(
+                model=MODELO_VISAO,
+                messages=[{"role": "user", "content": [
+                    {"type": "text", "text": _PROMPT_CLASSIFICAR_IMAGEM},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                ]}],
+                response_format={"type": "json_object"},
+                max_tokens=60,
+                timeout=25,
+            )
+            resultado = json.loads(resp.choices[0].message.content or "{}")
+            tipo = str(resultado.get("tipo") or "").strip().lower()
+            confianca = str(resultado.get("confianca") or "").strip().lower()
+            print(f"DEBUG: imagem classificada: {tipo} ({confianca})")
+            return 'comprovante' if (tipo == "comprovante_pagamento" and confianca == "alta") else 'outro'
+        except Exception as e:
+            print(f"ERRO ao classificar imagem (tentativa {tentativa}): {e}")
+    return 'outro'
+
+
+def tratar_imagem_nao_comprovante(wa_id, imagem_url):
+    """Imagem que não é comprovante: NÃO mexe no pedido (nem observação, nem comprovante_url),
+    só avisa a equipe no painel de Atendimento e responde de forma neutra."""
+    marcar_atencao(
+        wa_id,
+        "Cliente enviou uma imagem que não parece comprovante de pagamento — veja o que é e responda.",
+        tipo="imagem",
+        dados={"imagem_url": imagem_url},
+    )
+    return "Recebi sua imagem! Vou avisar a equipe para dar uma olhada. 😊"
+
+
 def baixar_imagem_whatsapp(media_id, tipo):
     """
     Obtém a URL da mídia e baixa o arquivo para o servidor local.
@@ -3938,14 +4009,20 @@ def _processar_mensagem_recebida(message, from_number):
         caminho_arquivo = baixar_imagem_whatsapp(media_id, tipo)
         if caminho_arquivo:
             nome_arquivo = os.path.basename(caminho_arquivo)
+            eh_comprovante = classificar_imagem_cliente(caminho_arquivo, tipo) == 'comprovante'
             url_publica = upload_comprovante_firebase(caminho_arquivo, nome_arquivo)
             if url_publica:
                 # Antes: mandava sempre "Recebi seu comprovante! Vou registrar aqui."
                 # e descartava a resposta real de registrar_comprovante (pedido fechado
                 # agora, PIX do app já confirmado, anexado ao pedido...).
-                resposta = registrar_comprovante(from_number, url_publica)
+                if eh_comprovante:
+                    resposta = registrar_comprovante(from_number, url_publica)
+                    rotulo = "[cliente enviou imagem/comprovante]"
+                else:
+                    resposta = tratar_imagem_nao_comprovante(from_number, url_publica)
+                    rotulo = "[cliente enviou uma imagem]"
                 send_message(from_number, resposta)
-                salvar_historico_firestore(from_number, "user", "[cliente enviou imagem/comprovante]")
+                salvar_historico_firestore(from_number, "user", rotulo)
                 salvar_historico_firestore(from_number, "assistant", resposta)
                 os.remove(caminho_arquivo)
 

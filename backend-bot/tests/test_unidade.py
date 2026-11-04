@@ -324,6 +324,81 @@ def test_horario_legivel_lista_datas_especiais_proximas():
     assert "• 24/12: 10:00 às 16:00" in txt and "• 25/12: fechado" in txt and "01/03" not in txt
 
 
+# ---------------- imagem do cliente: comprovante ou não ----------------
+def _resposta_visao(tipo, confianca):
+    import json as _json
+    r = mock.MagicMock()
+    r.choices = [mock.MagicMock()]
+    r.choices[0].message.content = _json.dumps({"tipo": tipo, "confianca": confianca})
+    return r
+
+
+def _arquivo_img(tmp_path):
+    f = tmp_path / "img.jpg"
+    f.write_bytes(b"fake-jpeg-bytes")
+    return str(f)
+
+
+def test_imagem_comprovante_alta_confianca_segue_fluxo(tmp_path):
+    with mock.patch.object(bot.openai.chat.completions, "create", return_value=_resposta_visao("comprovante_pagamento", "alta")):
+        assert bot.classificar_imagem_cliente(_arquivo_img(tmp_path), "image") == "comprovante"
+
+
+def test_imagem_comprovante_media_confianca_nao_vale(tmp_path):
+    with mock.patch.object(bot.openai.chat.completions, "create", return_value=_resposta_visao("comprovante_pagamento", "media")):
+        assert bot.classificar_imagem_cliente(_arquivo_img(tmp_path), "image") == "outro"
+
+
+def test_print_do_app_nao_e_comprovante(tmp_path):
+    with mock.patch.object(bot.openai.chat.completions, "create", return_value=_resposta_visao("print_do_app", "alta")):
+        assert bot.classificar_imagem_cliente(_arquivo_img(tmp_path), "image") == "outro"
+
+
+def test_erro_do_modelo_vira_outro_apos_uma_retentativa(tmp_path):
+    with mock.patch.object(bot.openai.chat.completions, "create", side_effect=RuntimeError("fora do ar")) as c:
+        assert bot.classificar_imagem_cliente(_arquivo_img(tmp_path), "image") == "outro"
+        assert c.call_count == 2
+
+
+def test_erro_passageiro_e_recuperado_na_retentativa(tmp_path):
+    with mock.patch.object(bot.openai.chat.completions, "create",
+                           side_effect=[RuntimeError("x"), _resposta_visao("comprovante_pagamento", "alta")]):
+        assert bot.classificar_imagem_cliente(_arquivo_img(tmp_path), "image") == "comprovante"
+
+
+def test_pdf_nao_passa_pelo_modelo_de_visao():
+    with mock.patch.object(bot.openai.chat.completions, "create") as c:
+        assert bot.classificar_imagem_cliente("x.pdf", "document") == "comprovante"
+        c.assert_not_called()
+
+
+def test_imagem_que_nao_e_comprovante_nao_toca_no_pedido():
+    msg = {"image": {"id": "123"}}
+    with mock.patch.object(bot, "baixar_imagem_whatsapp", return_value="comprovante_123.jpg"),          mock.patch.object(bot, "classificar_imagem_cliente", return_value="outro"),          mock.patch.object(bot, "upload_comprovante_firebase", return_value="https://storage.googleapis.com/x/a.jpg"),          mock.patch.object(bot, "registrar_comprovante") as reg,          mock.patch.object(bot, "marcar_atencao") as atencao,          mock.patch.object(bot, "send_message") as envio,          mock.patch.object(bot, "salvar_historico_firestore"),          mock.patch.object(bot.os, "remove"):
+        bot._processar_mensagem_recebida(msg, "5535999999999")
+    reg.assert_not_called()
+    assert atencao.call_args.kwargs["tipo"] == "imagem"
+    assert atencao.call_args.kwargs["dados"]["imagem_url"].endswith("a.jpg")
+    assert "avisar a equipe" in envio.call_args.args[1]
+
+
+def test_comprovante_de_verdade_segue_o_fluxo_antigo():
+    msg = {"image": {"id": "123"}}
+    with mock.patch.object(bot, "baixar_imagem_whatsapp", return_value="comprovante_123.jpg"),          mock.patch.object(bot, "classificar_imagem_cliente", return_value="comprovante"),          mock.patch.object(bot, "upload_comprovante_firebase", return_value="https://storage.googleapis.com/x/a.jpg"),          mock.patch.object(bot, "registrar_comprovante", return_value="ok!") as reg,          mock.patch.object(bot, "marcar_atencao") as atencao,          mock.patch.object(bot, "send_message"),          mock.patch.object(bot, "salvar_historico_firestore"),          mock.patch.object(bot.os, "remove"):
+        bot._processar_mensagem_recebida(msg, "5535999999999")
+    reg.assert_called_once()
+    atencao.assert_not_called()
+
+
+def test_observacao_do_pix_parcial_nao_se_repete():
+    nota = "Cliente pagou parte no PIX (comprovante no pedido) — confira o valor e cobre só o restante"
+    doc = mock.MagicMock()
+    dados = {"forma_pagamento": "Entrega/Dinheiro", "status": "EM_PREPARO", "origem": "APP", "observacao": nota}
+    with mock.patch.object(bot, "obter_rascunho", return_value={}),          mock.patch.object(bot, "_pedidos_do_cliente", return_value=[(doc, dados)]):
+        bot.registrar_comprovante("5535999999999", "https://storage.googleapis.com/x/a.jpg")
+    assert doc.reference.update.call_args.args[0]["observacao"] == nota
+
+
 # ---------------- _ultima_resposta_pediu_confirmacao ----------------
 def test_pediu_confirmacao_de_fechar_pedido_detecta():
     hist = [{"role": "assistant", "content": "Seu total é R$ 30,00. Posso fechar o pedido?"}]

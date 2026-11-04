@@ -253,6 +253,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!itemId) { alert('Escolha o item correspondente antes de vincular.'); return; }
                 vincularItem(info.nome_produto, itemId);
             });
+        } else if (dados.tipo_atencao === 'imagem' && /^https:\/\/storage\.googleapis\.com\//.test(info.imagem_url || '')) {
+            box.innerHTML = `
+                <div class="atencao-titulo">ℹ️ ${escapeHtml(dados.motivo_atencao || '')}
+                    <a href="${escapeHtml(info.imagem_url)}" target="_blank" rel="noopener">Ver imagem</a></div>
+                <div class="atencao-acoes"></div>
+            `;
         } else {
             box.innerHTML = `
                 <div class="atencao-titulo">${dados.precisa_atencao ? '⚠️' : 'ℹ️'} ${escapeHtml(dados.motivo_atencao || '')}</div>
