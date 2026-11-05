@@ -25,7 +25,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let nomeLoja = 'Autoatendimento';
     let tipoConsumo = null; // 'LOCAL' | 'RETIRADA' — escolhido na tela 2
     let tipoCartaoPoint = 'credito'; // 'credito' | 'debito' | 'escolher' (config do painel)
-    let totemPin = ''; // PIN pra sair do totem — vazio = sem PIN, só confirmação
 
     function money(v) {
         return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ',');
@@ -46,7 +45,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Sem a Point em uso, esconde o Cartão (o cliente ainda tem PIX).
         const btnCartao = document.querySelector('#tela-pagamento .opcao[data-forma="CARTAO"]');
         if (btnCartao) btnCartao.style.display = d.pointAtiva === false ? 'none' : '';
-        totemPin = d.totemPin || '';
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
     }, () => {});
 
@@ -148,24 +146,6 @@ document.addEventListener('DOMContentLoaded', () => {
             card.addEventListener('click', () => adicionarAoCarrinho(card.dataset.id));
         });
     }
-
-    // ---------- Sair (equipe) ----------
-    // Ícone discreto no cabeçalho — o totem não tem login/menu nenhum de
-    // propósito (é tela pública), então isso é só um jeito da equipe voltar
-    // pro painel sem precisar fechar o navegador. Pede o PIN configurado em
-    // Configurações > Pagamentos pra um cliente não conseguir derrubar o
-    // totem sem querer — sem PIN cadastrado, cai de volta na confirmação
-    // simples de antes.
-    $('btn-sair-totem').addEventListener('click', () => {
-        if (totemPin) {
-            const digitado = prompt('PIN da equipe pra sair do totem:');
-            if (digitado === null) return;
-            if (digitado !== totemPin) { alert('PIN incorreto.'); return; }
-        } else if (!confirm('Sair do totem e voltar pro painel?')) {
-            return;
-        }
-        window.location.href = '/login.html';
-    });
 
     // ---------- Busca ----------
     $('btn-busca').addEventListener('click', () => {

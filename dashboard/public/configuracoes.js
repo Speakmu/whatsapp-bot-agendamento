@@ -769,7 +769,6 @@ document.addEventListener('DOMContentLoaded', () => {
             $('pag-stone-secret').placeholder = d.stoneSecretConfigured ? 'Chave Connect salva no servidor' : 'sk_...';
             $('pag-provedor').value = d.provedorCartao || 'mercadopago';
             $('pag-maquininha-ativa').checked = d.maquininhaAtiva !== false;
-            $('totem-pin').value = d.totemPin || '';
             aplicarVisibilidadeProvedor();
             aplicarVisibilidadeMaquininha();
         } catch (err) {
@@ -789,7 +788,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 pointDeviceIdTotem: $('pag-point-device-totem').value.trim(),
                 pointTipoCartao: $('pag-point-tipo').value,
                 pointApi: $('pag-point-api').value,
-                totemPin: $('totem-pin').value.trim(),
                 atualizado_em: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
             // Cópia pública só do tipo de cartão: o totem (sem login) precisa saber se
@@ -798,8 +796,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pointTipoCartao: $('pag-point-tipo').value,
                 pointApi: $('pag-point-api').value,
                 // Totem esconde o Cartão quando a Point não está em uso (Stone não atende o totem).
-                pointAtiva: maquininhaAtiva && $('pag-provedor').value !== 'stone',
-                totemPin: $('totem-pin').value.trim()
+                pointAtiva: maquininhaAtiva && $('pag-provedor').value !== 'stone'
             }, { merge: true });
             flash('Configuracoes de pagamento salvas.');
         } catch (err) {
