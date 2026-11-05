@@ -35,9 +35,7 @@
             flex: none;
             border-bottom: 1px solid #e1e5ea;
         }
-        header.topo .marca img { height: 44px; max-width: 200px; object-fit: contain; }
         header.topo h1 { font-size: 1.35rem; font-weight: 800; color: var(--marca-escura, #17421f); }
-        header.topo .boas-vindas { font-size: .85rem; font-weight: 700; letter-spacing: .03em; color: #7f8c8d; text-transform: uppercase; margin-top: 2px; }
         header.topo .topo-direita { display: flex; align-items: center; gap: 14px; }
         header.topo .relogio { font-size: 1rem; font-weight: 700; color: #7f8c8d; }
         header.topo .btn-busca {
@@ -69,6 +67,7 @@
             flex-direction: column;
             gap: 6px;
         }
+        aside.sidebar nav#categorias { display: flex; flex-direction: column; gap: 6px; }
         aside.sidebar button.cat-item {
             text-align: left;
             padding: 14px 16px;
@@ -337,9 +336,7 @@
 
     <header class="topo">
         <div class="marca">
-            <img id="topo-logo" src="" alt="" style="display:none">
             <h1 id="topo-nome">Autoatendimento</h1>
-            <div class="boas-vindas">Bem-vindo! Faça seu pedido</div>
         </div>
         <div class="topo-direita">
             <span class="relogio" id="relogio">--:--</span>

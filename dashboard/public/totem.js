@@ -36,8 +36,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ---------- Marca (reaproveita a config já usada no app do cliente) ----------
-    // usaLogotipo: mesma regra do app mobile — mostra OU a logo OU o nome em
-    // texto, nunca os dois juntos (identidadeTipo === 'logo' é quem decide).
+    // O cabeçalho do totem mostra só o nome em texto — sem logo, pra não
+    // duplicar com a imagem de boas-vindas (que já tem a marca).
     DOC_APP_CFG.onSnapshot(snap => {
         const d = snap.exists ? (snap.data() || {}) : {};
         nomeLoja = d.nomeApp || 'Autoatendimento';
@@ -48,17 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnCartao) btnCartao.style.display = d.pointAtiva === false ? 'none' : '';
         totemPin = d.totemPin || '';
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
-
-        const usaLogotipo = d.identidadeTipo === 'logo' && !!d.logoUrl;
-        if (usaLogotipo) {
-            $('topo-logo').src = d.logoUrl;
-            $('topo-logo').style.display = '';
-            $('topo-nome').style.display = 'none';
-        } else {
-            $('topo-logo').style.display = 'none';
-            $('topo-nome').style.display = '';
-            $('topo-nome').textContent = nomeLoja;
-        }
+        $('topo-nome').textContent = nomeLoja;
     }, () => {});
 
     // Banner de destaque (hero) do app do cliente NÃO aparece aqui de
