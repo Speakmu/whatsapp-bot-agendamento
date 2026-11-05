@@ -35,9 +35,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     }
 
-    // ---------- Marca (reaproveita a config já usada no app do cliente) ----------
-    // O cabeçalho do totem mostra só o nome em texto — sem logo, pra não
-    // duplicar com a imagem de boas-vindas (que já tem a marca).
+    // ---------- Config geral ----------
+    // O cabeçalho do totem não mostra marca nenhuma (nem logo, nem nome) —
+    // a identidade da loja já aparece na imagem de boas-vindas.
     DOC_APP_CFG.onSnapshot(snap => {
         const d = snap.exists ? (snap.data() || {}) : {};
         nomeLoja = d.nomeApp || 'Autoatendimento';
@@ -48,7 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (btnCartao) btnCartao.style.display = d.pointAtiva === false ? 'none' : '';
         totemPin = d.totemPin || '';
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
-        $('topo-nome').textContent = nomeLoja;
     }, () => {});
 
     // Banner de destaque (hero) do app do cliente NÃO aparece aqui de

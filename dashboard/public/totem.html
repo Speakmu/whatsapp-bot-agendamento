@@ -31,11 +31,10 @@
             padding: 16px 28px;
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-end;
             flex: none;
             border-bottom: 1px solid #e1e5ea;
         }
-        header.topo h1 { font-size: 1.35rem; font-weight: 800; color: var(--marca-escura, #17421f); }
         header.topo .topo-direita { display: flex; align-items: center; gap: 14px; }
         header.topo .relogio { font-size: 1rem; font-weight: 700; color: #7f8c8d; }
         header.topo .btn-busca {
@@ -335,9 +334,6 @@
     </div>
 
     <header class="topo">
-        <div class="marca">
-            <h1 id="topo-nome">Autoatendimento</h1>
-        </div>
         <div class="topo-direita">
             <span class="relogio" id="relogio">--:--</span>
             <button class="btn-busca" id="btn-cancelar-pedido" type="button" title="Cancelar pedido" style="font-size:.85rem;">✕ Cancelar</button>
