@@ -261,42 +261,6 @@
         }
         @keyframes pulsar { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 
-        /* ---------- Tela: comer aqui ou levar ---------- */
-        .tela-consumo {
-            position: fixed; inset: 0;
-            background: #fff;
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: 34px;
-            z-index: 90;
-            text-align: center;
-            padding: 24px;
-        }
-        .tela-consumo.aberta { display: flex; }
-        .tela-consumo h2 { font-size: 1.9rem; color: #2c3e50; font-weight: 800; }
-        .tela-consumo .opcoes { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; }
-        .tela-consumo .opcao {
-            width: 240px;
-            padding: 40px 24px;
-            border-radius: 22px;
-            border: 2px solid #e1e5ea;
-            background: #fff;
-            cursor: pointer;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 14px;
-        }
-        .tela-consumo .opcao:active { transform: scale(.97); }
-        .tela-consumo .opcao .icone { font-size: 3rem; }
-        .tela-consumo .opcao .rotulo { font-size: 1.15rem; font-weight: 800; color: #2c3e50; }
-        .tela-consumo .voltar {
-            background: none; border: none; color: #7f8c8d; font-size: .95rem;
-            font-weight: 700; cursor: pointer; text-decoration: underline;
-        }
-
         /* ---------- Tela de confirmação (senha) ---------- */
         .tela-confirmacao {
             position: fixed; inset: 0;
@@ -375,22 +339,6 @@
         <div class="pill">Toque na tela para iniciar</div>
     </div>
 
-    <!-- Tela 2: comer aqui ou levar -->
-    <div class="tela-consumo" id="tela-consumo">
-        <h2>Como vai ser hoje?</h2>
-        <div class="opcoes">
-            <button class="opcao" type="button" data-consumo="LOCAL">
-                <span class="icone">🍽️</span>
-                <span class="rotulo">Comer aqui</span>
-            </button>
-            <button class="opcao" type="button" data-consumo="RETIRADA">
-                <span class="icone">🥡</span>
-                <span class="rotulo">Levar</span>
-            </button>
-        </div>
-        <button class="voltar" id="btn-voltar-boas-vindas" type="button">← Voltar</button>
-    </div>
-
     <header class="topo">
         <div class="marca">
             <img id="topo-logo" src="" alt="" style="display:none">
@@ -453,7 +401,6 @@
         <div class="opcoes-pag">
             <button class="opcao" type="button" data-forma="CARTAO"><span class="icone">💳</span><span class="rotulo">Cartão</span></button>
             <button class="opcao" type="button" data-forma="PIX"><span class="icone">📱</span><span class="rotulo">PIX</span></button>
-            <button class="opcao" type="button" data-forma="CAIXA"><span class="icone">💵</span><span class="rotulo">Pagar no caixa</span></button>
         </div>
         <button class="voltar" id="btn-pag-voltar" type="button">← Voltar ao pedido</button>
     </div>

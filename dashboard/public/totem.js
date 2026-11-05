@@ -75,25 +75,17 @@ document.addEventListener('DOMContentLoaded', () => {
         tela.classList.add('tem-imagem');
     }
 
-    // ---------- Navegação entre telas 1 → 2 → 3 ----------
+    // ---------- Navegação entre telas: boas-vindas → cardápio ----------
+    // A tela "Comer aqui ou Levar" foi removida — todo pedido do totem é
+    // retirada no balcão, então não faz sentido perguntar isso aqui.
     function irParaConsumo() {
         $('tela-boas-vindas').classList.remove('aberta');
-        $('tela-consumo').classList.add('aberta');
     }
     function voltarBoasVindas() {
         tipoConsumo = null;
-        $('tela-consumo').classList.remove('aberta');
         $('tela-boas-vindas').classList.add('aberta');
     }
-    function irParaCardapio(consumo) {
-        tipoConsumo = consumo;
-        $('tela-consumo').classList.remove('aberta');
-    }
     $('tela-boas-vindas').addEventListener('click', irParaConsumo);
-    $('btn-voltar-boas-vindas').addEventListener('click', voltarBoasVindas);
-    document.querySelectorAll('.tela-consumo .opcao').forEach(btn => {
-        btn.addEventListener('click', () => irParaCardapio(btn.dataset.consumo));
-    });
 
     // ---------- Relógio ----------
     function atualizarRelogio() {
@@ -314,8 +306,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const forma = btn.dataset.forma;
             document.querySelectorAll('#tela-pagamento .opcao').forEach(b => { b.disabled = true; });
             try {
-                if (forma === 'CAIXA') await pagarNoCaixa();
-                else if (forma === 'CARTAO') await pagarCartao();
+                if (forma === 'CARTAO') await pagarCartao();
                 else if (forma === 'PIX') await pagarPix();
             } finally {
                 document.querySelectorAll('#tela-pagamento .opcao').forEach(b => { b.disabled = false; });
@@ -363,23 +354,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok) throw new Error(data.message || data.error || `erro ${resp.status}`);
         return data;
-    }
-
-    // Pagar no caixa: comportamento original — pedido fica AGUARDANDO_PAGAMENTO.
-    async function pagarNoCaixa() {
-        try {
-            const senha = await obterSenha();
-            const itens = itensDoPedido();
-            const total = totalCarrinho();
-            await COL_PEDIDOS.add({
-                ...dadosBasePedido(senha, itens, total),
-                forma_pagamento: null,
-                status: 'AGUARDANDO_PAGAMENTO'
-            });
-            mostrarConfirmacao(senha, itens, total, null);
-        } catch (err) {
-            abrirTelaPagamento('Não foi possível enviar o pedido: ' + err.message);
-        }
     }
 
     // A Point exige o tipo do cartão. Com a config "escolher", o cliente decide aqui.
