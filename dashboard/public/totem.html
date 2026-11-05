@@ -44,6 +44,10 @@
             width: 44px; height: 44px; border-radius: 50%; border: 1px solid #e1e5ea;
             background: #fff; font-size: 1.15rem; cursor: pointer; color: #2c3e50;
         }
+        header.topo #btn-cancelar-pedido {
+            width: auto; height: 40px; border-radius: 20px; padding: 0 16px;
+            font-weight: 800; color: #c0392b; border-color: #f1c7c0;
+        }
         .busca-wrap { flex: none; background: #fff; border-bottom: 1px solid #e1e5ea; padding: 0 28px; max-height: 0; overflow: hidden; transition: max-height .18s ease, padding .18s ease; }
         .busca-wrap.aberta { max-height: 80px; padding: 14px 28px; }
         .busca-wrap input {
@@ -347,6 +351,7 @@
         </div>
         <div class="topo-direita">
             <span class="relogio" id="relogio">--:--</span>
+            <button class="btn-busca" id="btn-cancelar-pedido" type="button" title="Cancelar pedido" style="font-size:.85rem;">✕ Cancelar</button>
             <button class="btn-busca" id="btn-busca" type="button" title="Buscar">🔍</button>
             <button class="btn-busca" id="btn-sair-totem" type="button" title="Sair (equipe)" style="opacity:.35;font-size:.9rem;">🔒</button>
         </div>

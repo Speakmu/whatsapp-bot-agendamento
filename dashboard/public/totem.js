@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let nomeLoja = 'Autoatendimento';
     let tipoConsumo = null; // 'LOCAL' | 'RETIRADA' — escolhido na tela 2
     let tipoCartaoPoint = 'credito'; // 'credito' | 'debito' | 'escolher' (config do painel)
+    let totemPin = ''; // PIN pra sair do totem — vazio = sem PIN, só confirmação
 
     function money(v) {
         return 'R$ ' + (Number(v) || 0).toFixed(2).replace('.', ',');
@@ -42,9 +43,10 @@ document.addEventListener('DOMContentLoaded', () => {
         nomeLoja = d.nomeApp || 'Autoatendimento';
         // Na Orders API a própria máquina pergunta débito/crédito, então o totem não pergunta.
         tipoCartaoPoint = d.pointApi === 'orders' ? 'credito' : (d.pointTipoCartao || 'credito');
-        // Sem a Point em uso, esconde o Cartão (o cliente ainda tem PIX e caixa).
+        // Sem a Point em uso, esconde o Cartão (o cliente ainda tem PIX).
         const btnCartao = document.querySelector('#tela-pagamento .opcao[data-forma="CARTAO"]');
         if (btnCartao) btnCartao.style.display = d.pointAtiva === false ? 'none' : '';
+        totemPin = d.totemPin || '';
         if (d.corPrimaria) document.documentElement.style.setProperty('--marca', d.corPrimaria);
 
         const usaLogotipo = d.identidadeTipo === 'logo' && !!d.logoUrl;
@@ -161,12 +163,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---------- Sair (equipe) ----------
     // Ícone discreto no cabeçalho — o totem não tem login/menu nenhum de
     // propósito (é tela pública), então isso é só um jeito da equipe voltar
-    // pro painel sem precisar fechar o navegador. Confirmação evita que um
-    // toque acidental do cliente derrube o totem no meio de um pedido.
+    // pro painel sem precisar fechar o navegador. Pede o PIN configurado em
+    // Configurações > Pagamentos pra um cliente não conseguir derrubar o
+    // totem sem querer — sem PIN cadastrado, cai de volta na confirmação
+    // simples de antes.
     $('btn-sair-totem').addEventListener('click', () => {
-        if (confirm('Sair do totem e voltar pro painel?')) {
-            window.location.href = '/login.html';
+        if (totemPin) {
+            const digitado = prompt('PIN da equipe pra sair do totem:');
+            if (digitado === null) return;
+            if (digitado !== totemPin) { alert('PIN incorreto.'); return; }
+        } else if (!confirm('Sair do totem e voltar pro painel?')) {
+            return;
         }
+        window.location.href = '/login.html';
     });
 
     // ---------- Busca ----------
@@ -548,15 +557,29 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    $('btn-novo-pedido').addEventListener('click', () => {
+    // Zera o pedido em andamento e volta pro início — usado pelo botão "Novo
+    // pedido" (pós-compra), "Cancelar pedido" (cliente desiste no meio) e
+    // pelo reset automático por inatividade.
+    function resetarTotem() {
         carrinho = [];
         senhaAtual = null;
         categoriaAtiva = 'Todos';
+        $('tela-pagamento').classList.remove('aberta');
+        $('tela-tipo-cartao').classList.remove('aberta');
+        $('overlay-carrinho').classList.remove('aberto');
+        $('tela-confirmacao').classList.remove('aberta');
         atualizarBarraCarrinho();
         renderCategorias();
         renderProdutos();
-        $('tela-confirmacao').classList.remove('aberta');
         voltarBoasVindas();
+    }
+
+    $('btn-novo-pedido').addEventListener('click', resetarTotem);
+
+    $('btn-cancelar-pedido').addEventListener('click', () => {
+        if (pagando) return; // pagamento em andamento tem seu próprio fluxo de cancelamento
+        if (!carrinho.length) { resetarTotem(); return; }
+        if (confirm('Cancelar o pedido atual e voltar pro início?')) resetarTotem();
     });
 
     // Reset automático de segurança: se o cliente sumir sem tocar em "Novo
@@ -582,16 +605,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if ($('tela-boas-vindas').classList.contains('aberta')) return;
         inatividadeTimer = setTimeout(() => {
             if (pagando) return; // esperando cartão/PIX: o próprio pagamento tem timeout
-            carrinho = [];
-            senhaAtual = null;
-            $('tela-pagamento').classList.remove('aberta');
-            $('tela-tipo-cartao').classList.remove('aberta');
-            categoriaAtiva = 'Todos';
-            atualizarBarraCarrinho();
-            renderCategorias();
-            renderProdutos();
-            $('overlay-carrinho').classList.remove('aberto');
-            voltarBoasVindas();
+            resetarTotem();
         }, 90000);
     }
     ['click', 'touchstart'].forEach(evento => document.addEventListener(evento, reiniciarInatividade));
