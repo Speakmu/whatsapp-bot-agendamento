@@ -76,9 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tipoConsumo = null;
         $('tela-boas-vindas').classList.add('aberta');
     }
-    // TEMPORÁRIO: toque desativado durante os testes do totem — reativar
-    // (descomentar a linha abaixo) quando os testes terminarem.
-    // $('tela-boas-vindas').addEventListener('click', irParaConsumo);
+    $('tela-boas-vindas').addEventListener('click', irParaConsumo);
 
     // ---------- Relógio ----------
     function atualizarRelogio() {
