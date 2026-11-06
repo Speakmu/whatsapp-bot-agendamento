@@ -260,8 +260,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="atencao-acoes"></div>
             `;
         } else {
+            const linkImagem = /^https:\/\/storage\.googleapis\.com\//.test(info.imagem_url || '')
+                ? ` <a href="${escapeHtml(info.imagem_url)}" target="_blank" rel="noopener">Ver imagem</a>` : '';
             box.innerHTML = `
-                <div class="atencao-titulo">${dados.precisa_atencao ? '⚠️' : 'ℹ️'} ${escapeHtml(dados.motivo_atencao || '')}</div>
+                <div class="atencao-titulo">${dados.precisa_atencao ? '⚠️' : 'ℹ️'} ${escapeHtml(dados.motivo_atencao || '')}${linkImagem}</div>
                 <div class="atencao-acoes"></div>
             `;
         }
@@ -406,7 +408,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const estavaNoFim = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
         box.innerHTML = mensagens.map(m => {
             const role = m.role === 'assistant' ? 'assistant' : 'user';
-            return `<div class="msg ${role}">${escapeHtml(m.content)}<span class="msg-time">${formatarHora(m.timestamp)}</span></div>`;
+            // Imagem enviada pelo cliente (comprovante etc.): só links do nosso Storage.
+            const img = /^https:\/\/storage\.googleapis\.com\//.test(m.imagem_url || '')
+                ? `<a href="${escapeHtml(m.imagem_url)}" target="_blank" rel="noopener" title="Abrir a imagem em tamanho real"><img class="msg-img" src="${escapeHtml(m.imagem_url)}" alt="Imagem enviada pelo cliente" loading="lazy"></a>`
+                : '';
+            return `<div class="msg ${role}">${escapeHtml(m.content)}${img}<span class="msg-time">${formatarHora(m.timestamp)}</span></div>`;
         }).join('');
         if (estavaNoFim) box.scrollTop = box.scrollHeight;
     }

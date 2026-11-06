@@ -1341,7 +1341,8 @@ def registrar_comprovante(wa_id: str, imagem_url: str):
                     wa_id,
                     "Cliente mandou um comprovante, mas o pedido mais recente não é PIX pendente — confira manualmente.",
                     tipo="pedido_falhou",
-                    dados={"pedido_id": doc.id, "forma_pagamento": forma_pagamento, "status": status_atual}
+                    dados={"pedido_id": doc.id, "forma_pagamento": forma_pagamento, "status": status_atual,
+                           "imagem_url": imagem_url}
                 )
                 return "Recebi sua imagem! Como seu pedido mais recente não está aguardando PIX, já avisei nossa equipe pra conferir manualmente — eles confirmam com você em instantes."
 
@@ -1531,7 +1532,7 @@ def obter_historico_firestore(wa_id, limite=None):
         print(f"Erro ao ler histórico: {e}")
         return []
 
-def salvar_historico_firestore(wa_id, role, content, limite=None):
+def salvar_historico_firestore(wa_id, role, content, limite=None, imagem_url=None):
     """Salva a mensagem e mantém apenas as últimas 15 para economizar espaço"""
     try:
         doc_ref = db.collection("historico_conversas").document(wa_id)
@@ -1542,6 +1543,12 @@ def salvar_historico_firestore(wa_id, role, content, limite=None):
             "content": content, 
             "timestamp": datetime.now(timezone.utc)
         }
+        # Caso real (06/11): o cliente mandou um comprovante e a equipe não conseguia ver a
+        # imagem — o histórico só guardava o texto "[cliente enviou imagem/comprovante]".
+        # O painel de Atendimento mostra a imagem a partir deste campo (a IA nunca o lê:
+        # obter_historico_firestore só repassa role/content).
+        if imagem_url:
+            nova_msg["imagem_url"] = imagem_url
         
         doc = doc_ref.get(timeout=10)
         if doc.exists:
@@ -4022,7 +4029,7 @@ def _processar_mensagem_recebida(message, from_number):
                     resposta = tratar_imagem_nao_comprovante(from_number, url_publica)
                     rotulo = "[cliente enviou uma imagem]"
                 send_message(from_number, resposta)
-                salvar_historico_firestore(from_number, "user", rotulo)
+                salvar_historico_firestore(from_number, "user", rotulo, imagem_url=url_publica)
                 salvar_historico_firestore(from_number, "assistant", resposta)
                 os.remove(caminho_arquivo)
 
