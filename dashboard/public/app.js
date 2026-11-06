@@ -1070,12 +1070,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- 4. FUNÇÕES DO PAINEL DE PEDIDOS ---
 
     // Texto da origem no cartão do pedido (antes só a cor da borda diferenciava).
-    const ROTULO_CANAL = { app: '📱 APP', bot: '🤖 BOT', ifood: '🍔 IFOOD', sistema: '🖥️ PDV' };
+    const ROTULO_CANAL = { app: '📱 APP', bot: '🤖 BOT', ifood: '🍔 IFOOD', sistema: '🖥️ PDV', totem: '🏧 TOTEM' };
 
     function canalPedido(pedido) {
         const origem = String(pedido.origem || pedido.canal || pedido.source || '').trim().toUpperCase();
         if (origem === 'APP') return 'app';
         if (origem === 'IFOOD') return 'ifood';
+        if (origem === 'TOTEM') return 'totem';
         if (['BOT', 'WHATSAPP', 'WPP'].includes(origem)) return 'bot';
         if (['BALCAO', 'MESA', 'SISTEMA', 'PDV'].includes(origem)) return 'sistema';
         if (pedido.wa_id || pedido.telefone_cliente || String(pedido.usuario_id || '').startsWith('wa_')) return 'bot';
@@ -1113,7 +1114,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     app: { qtd: 0, total: 0 },
                     bot: { qtd: 0, total: 0 },
                     ifood: { qtd: 0, total: 0 },
-                    sistema: { qtd: 0, total: 0 }
+                    sistema: { qtd: 0, total: 0 },
+                    totem: { qtd: 0, total: 0 }
                 };
                 let totalPedidos = 0;
                 let faturamento = 0;
@@ -1138,15 +1140,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 });
 
-                const maiorQtd = Math.max(canais.app.qtd, canais.bot.qtd, canais.ifood.qtd, canais.sistema.qtd, 1);
+                const maiorQtd = Math.max(canais.app.qtd, canais.bot.qtd, canais.ifood.qtd, canais.sistema.qtd, canais.totem.qtd, 1);
                 setText('orders-today-total', String(totalPedidos));
                 setText('orders-today-revenue', moneyBR(faturamento));
                 setText('orders-today-active', String(pedidosAtivos));
                 setText('orders-today-ticket', moneyBR(vendasFaturadas ? faturamento / vendasFaturadas : 0));
 
-                // channel-ifood-* só atualiza se a tela tiver o card (setText/setBar
-                // ignoram silenciosamente se o elemento não existir).
-                [['app', 'channel-app'], ['bot', 'channel-bot'], ['ifood', 'channel-ifood'], ['sistema', 'channel-sistema']].forEach(([key, prefix]) => {
+                // channel-ifood-*/channel-totem-* só atualizam se a tela tiver o card
+                // (setText/setBar ignoram silenciosamente se o elemento não existir).
+                [['app', 'channel-app'], ['bot', 'channel-bot'], ['ifood', 'channel-ifood'], ['sistema', 'channel-sistema'], ['totem', 'channel-totem']].forEach(([key, prefix]) => {
                     setText(`${prefix}-count`, String(canais[key].qtd));
                     setText(`${prefix}-value`, moneyBR(canais[key].total));
                     setBar(`${prefix}-bar`, pct(canais[key].qtd, maiorQtd));

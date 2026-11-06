@@ -105,11 +105,13 @@ body {
 .order-card--bot { border-left-color: #16a085; }
 .order-card--ifood { border-left-color: #ea1d2c; }
 .order-card--sistema { border-left-color: var(--accent); }
+.order-card--totem { border-left-color: #8e44ad; }
 .badge-canal { font-size: .68rem; font-weight: 800; letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; color: #fff; white-space: nowrap; }
 .badge-canal--app { background: #2f6fed; }
 .badge-canal--bot { background: #16a085; }
 .badge-canal--ifood { background: #ea1d2c; }
 .badge-canal--sistema { background: var(--accent); }
+.badge-canal--totem { background: #8e44ad; }
 .order-header {
     display: flex; justify-content: flex-start; align-items: center; gap: 6px;
     border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 6px;
@@ -291,7 +293,7 @@ body {
 .orders-kpi.revenue strong { color: var(--ok); }
 .orders-channel-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
 }
 .orders-channel {
@@ -323,6 +325,7 @@ body {
 .channel-fill.app { background: #2f6fed; }
 .channel-fill.bot { background: #16a085; }
 .channel-fill.sistema { background: var(--accent); }
+.channel-fill.totem { background: #8e44ad; }
 .orders-channel small { color: var(--muted); }
 
 /* Caixa de itens dentro do card de pedido (sobrepõe inline antigo) */
@@ -344,6 +347,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
     .painel-header { padding: 12px 16px; }
     .container { padding: 16px; }
     .orders-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .orders-channel-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
     .orders-channel-grid { grid-template-columns: 1fr; }
 }
 
