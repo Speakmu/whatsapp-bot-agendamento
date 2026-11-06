@@ -1239,3 +1239,23 @@ def test_aviso_novo_nao_herda_dados_do_aviso_antigo(ambiente):
     bot.marcar_atencao(wa, "aviso 2", tipo="pedido_falhou", dados={"imagem_url": "https://storage.googleapis.com/b/c.jpg"})
     d = ambiente.collection("historico_conversas").document(wa).get().to_dict()["atencao_dados"]
     assert d == {"imagem_url": "https://storage.googleapis.com/b/c.jpg"}
+
+
+def test_nao_pede_o_nome_de_novo_quando_ja_sabe(ambiente):
+    t = "Obrigado, Beatriz! Resumo:\n- 1x Hamburguer\nTotal: R$ 35,50\n\nConfere? Posso finalizar? E me diz seu primeiro nome para anotar, se preferir."
+    r = bot._tirar_pedido_de_nome(t)
+    assert "primeiro nome" not in r and "Posso finalizar?" in r and "Total: R$ 35,50" in r
+    assert bot._tirar_pedido_de_nome("Posso fechar? Me diz o nome do bairro também.") == "Posso fechar? Me diz o nome do bairro também."
+    assert bot._tirar_pedido_de_nome("Qual é o seu nome?") == "Qual é o seu nome?"   # resposta inteira: não deixa vazio
+
+
+def test_anotei_seu_pedido_sem_fechar_nao_abre_aviso_para_equipe(ambiente, monkeypatch):
+    """Caso 06/11: 'Anotei seu pedido: 1 hambúrguer…' (itens no carrinho) acionava a trava de
+    confirmação e abria 'IA disse que o pedido foi registrado…' sem necessidade."""
+    hb = _codigo("pastel de carne")
+    roteiro = {"1 pastel de carne": [("adicionar_item", {"item_id": hb, "quantidade": 1}), "Anotei seu pedido: 1 pastel de carne. Pronto, está registrado!"]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "553599000094"
+    resp = _conversar(tel, ["oi", "1 pastel de carne"])[-1]
+    h = ambiente.collection("historico_conversas").document(tel).get().to_dict()
+    assert "registrado" not in resp.lower() and not h.get("aviso_equipe") and not h.get("precisa_atencao")

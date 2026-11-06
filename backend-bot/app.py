@@ -2512,6 +2512,26 @@ def _conversa_de_festa(prompt, historico_msgs):
     return bool(_RE_FESTA.search(_normalizar_termo(" ".join(recentes + [prompt or ""]))))
 
 
+_RE_PEDE_NOME = re.compile(
+    r"^(e |ah,? e |so |tambem |por favor,? )?(me )?(diz|diga|dizer|passa|passe|passar|informe|informa|informar|manda|mande|qual)\b"
+    r"[^.?!\n]{0,40}\bnome\b(?! d[oae]s? )|\bnome para (eu )?anotar\b|\bseu primeiro nome\b")
+
+
+def _tirar_pedido_de_nome(texto):
+    """O nome do cliente já é conhecido: tira do texto as frases que pedem o nome de novo (o resto
+    do texto fica exatamente como está). Caso real (06/11): "Obrigado, Beatriz! … E me diz seu
+    primeiro nome para anotar, se preferir." Não mexe em "nome do bairro". Se a resposta inteira
+    fosse isso, mantém como está."""
+    if not texto:
+        return texto
+    partes = re.findall(r"[^.!?\n]+[.!?]*[ \t]*|\n+", texto)
+    mantidas = [x for x in partes if not x.strip() or not _RE_PEDE_NOME.search(_normalizar_termo(x.strip()))]
+    novo = "".join(mantidas).strip()
+    if not novo or len(mantidas) == len(partes):
+        return texto
+    return novo
+
+
 _RE_PEDIU_HUMANO = re.compile(
     r"\b(falar|conversar|contato|contatar|atendido|atender)\b[^.?!]{0,25}\b(alguem|atendente|pessoa|humano|equipe|gerente|dono|dona|"
     r"responsavel|funcionari\w*|moca|moco|eles)\b|atendimento humano|atendente humano|\bquero (um|uma) atendente\b")
@@ -3571,12 +3591,9 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             # força registro (ver Fase 0).
             if _soa_como_confirmacao(final_text) and not pedido_registrado_ok:
                 log_observacao = "texto_confirmacao_sem_registrar_pedido"
-                marcar_atencao(
-                    id_usuario,
-                    "IA disse que o pedido foi registrado sem ter chamado registrar_pedido — confirme com o cliente manualmente.",
-                    tipo="pedido_falhou",
-                    dados={"resposta_suspeita": final_text}
-                )
+                # Sem marcar_atencao (06/11): o texto suspeito é TROCADO logo abaixo, o cliente nunca vê a
+                # afirmação falsa. Quase sempre é só "Anotei seu pedido: 1 hambúrguer…" (itens adicionados
+                # ao carrinho) e o aviso "confirme com o cliente manualmente" ficava aceso sem motivo.
                 # Caso real de produção: cliente perguntou "quero acompanhar
                 # meu pedido" sem nunca ter um pedido registrado —
                 # consultar_meu_pedido voltou "sem_pedido", o guard disparou
@@ -3738,6 +3755,14 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             if forma_pix and (pedido_registrado_ok or not ja_mostrou):
                 final_text = (final_text or "") + f"\n\nChave PIX: {chave_pix_cfg}" + (
                     " — é só pagar e mandar o comprovante por aqui. ✅" if pedido_registrado_ok else "")
+
+        # Nome já conhecido (o bot até chama o cliente por ele): não pede de novo.
+        nome_conhecido = (obter_rascunho(id_usuario).get("nome_cliente") or nome_cliente or "").strip()
+        if nome_conhecido and not pedido_registrado_ok:
+            sem_pedido_nome = _tirar_pedido_de_nome(final_text)
+            if sem_pedido_nome != final_text:
+                log_observacao = log_observacao or "pedido_de_nome_removido"
+                final_text = sem_pedido_nome
 
         # O telefone do cadastro é o do próprio WhatsApp do bot: se o cliente NÃO pediu
         # contato/telefone, a frase que manda ele ligar/escrever pra esse número sai.
