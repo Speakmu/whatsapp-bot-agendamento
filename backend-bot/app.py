@@ -2466,8 +2466,15 @@ def _preencher_slots_obvios(wa_id, mensagem, bot_cfg):
     if len(m) > 30 and not _RE_PARECE_ENDERECO.match(m) and not _forma_pagamento_na_frase(m):
         return eventos
     if _RE_SLOT_RETIRADA.match(m):
+        ja_estava = r.get("tipo_entrega") == "RETIRADA"
         res = rascunho_definir_entrega(wa_id, "RETIRADA", None, None, bot_cfg)
-        eventos.append({"nome": "definir_entrega[servidor]", "args": {"tipo": "RETIRADA"}, "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})
+        evento = {"nome": "definir_entrega[servidor]", "args": {"tipo": "RETIRADA"}, "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]}
+        if ja_estava:
+            # Caso real (06/11): o cliente repetiu "Retirada" e o bot respondeu "Você já tinha informado
+            # que seria retirada" — soou como bronca. Só confirma de leve e segue.
+            evento["instrucao"] = ("A retirada JÁ estava anotada e o cliente só repetiu. Responda leve, tipo \"Ok, sua retirada já foi "
+                                   "anotada!\" e siga pro próximo passo. NUNCA diga \"você já tinha informado/dito\".")
+        eventos.append(evento)
     elif _RE_SLOT_ENTREGA.match(m) and r.get("tipo_entrega") != "ENTREGA":
         res = rascunho_definir_entrega(wa_id, "ENTREGA", None, None, bot_cfg)
         eventos.append({"nome": "definir_entrega[servidor]", "args": {"tipo": "ENTREGA"}, "resultado": json.dumps(res, ensure_ascii=False, default=str)[:2000]})
@@ -2510,6 +2517,10 @@ def _conversa_de_festa(prompt, historico_msgs):
     """A conversa (mensagem atual + últimas 4 do cliente) é encomenda de festa/cento?"""
     recentes = [m.get("content") or "" for m in (historico_msgs or []) if m.get("role") == "user"][-4:]
     return bool(_RE_FESTA.search(_normalizar_termo(" ".join(recentes + [prompt or ""]))))
+
+
+_RE_VOCE_JA_INFORMOU = re.compile(
+    r"(?im)(?:^|(?<=[.!?]\s))(voc[eê]|vc|tu)\s+j[aá]\s+(tinha\s+|havia\s+)?(informou|informado|disse|dito|falou|avisou|mencionou|mencionado)\b[^.!?\n]*(?:[.!]|\n|\Z)")
 
 
 _RE_PEDE_NOME = re.compile(
@@ -3755,6 +3766,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             if forma_pix and (pedido_registrado_ok or not ja_mostrou):
                 final_text = (final_text or "") + f"\n\nChave PIX: {chave_pix_cfg}" + (
                     " — é só pagar e mandar o comprovante por aqui. ✅" if pedido_registrado_ok else "")
+
+        # Tom: "você já tinha informado/dito…" soa como bronca. Vira uma confirmação leve.
+        if final_text and _RE_VOCE_JA_INFORMOU.search(final_text):
+            tipo_atual = obter_rascunho(id_usuario).get("tipo_entrega")
+            leve = {"RETIRADA": "Ok, sua retirada já foi anotada!", "ENTREGA": "Ok, sua entrega já foi anotada!"}.get(tipo_atual, "Ok, já está anotado!")
+            final_text = _RE_VOCE_JA_INFORMOU.sub(leve, final_text, count=1)
+            log_observacao = log_observacao or "bronca_suavizada"
 
         # Nome já conhecido (o bot até chama o cliente por ele): não pede de novo.
         nome_conhecido = (obter_rascunho(id_usuario).get("nome_cliente") or nome_cliente or "").strip()

@@ -1259,3 +1259,16 @@ def test_anotei_seu_pedido_sem_fechar_nao_abre_aviso_para_equipe(ambiente, monke
     resp = _conversar(tel, ["oi", "1 pastel de carne"])[-1]
     h = ambiente.collection("historico_conversas").document(tel).get().to_dict()
     assert "registrado" not in resp.lower() and not h.get("aviso_equipe") and not h.get("precisa_atencao")
+
+
+def test_repetir_retirada_nao_gera_bronca(ambiente, monkeypatch):
+    """Caso 06/11: o cliente repetiu 'Retirada' e o bot respondeu 'Você já tinha informado que seria
+    retirada' (soa como bronca). Agora: 'Ok, sua retirada já foi anotada!' e segue."""
+    cfg = bot.obter_config_bot()
+    tel = "553599000095"
+    bot.rascunho_adicionar_item(tel, _codigo("pastel de carne"), 1, cfg)
+    bot.rascunho_definir_entrega(tel, "RETIRADA", None, None, cfg)
+    roteiro = {"Retirada": ["Você já tinha informado que seria retirada, Beatriz. Agora só preciso saber a forma de pagamento: PIX, cartão ou dinheiro?"]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    resp = _conversar(tel, ["oi", "Retirada"])[-1]
+    assert "já tinha informado" not in resp and "Ok, sua retirada já foi anotada!" in resp and "forma de pagamento" in resp
