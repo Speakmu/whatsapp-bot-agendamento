@@ -40,8 +40,10 @@ document.addEventListener('DOMContentLoaded', () => {
     DOC_APP_CFG.onSnapshot(snap => {
         const d = snap.exists ? (snap.data() || {}) : {};
         nomeLoja = d.nomeApp || 'Autoatendimento';
-        // Na Orders API a própria máquina pergunta débito/crédito, então o totem não pergunta.
-        tipoCartaoPoint = d.pointApi === 'orders' ? 'credito' : (d.pointTipoCartao || 'credito');
+        // Sempre respeita a configuração do painel. Com "escolher", o totem
+        // pergunta crédito/débito antes de acionar a maquininha, independente
+        // da API usada — a Orders API não pergunta isso sozinha na prática.
+        tipoCartaoPoint = d.pointTipoCartao || 'credito';
         // Sem a Point em uso, esconde o Cartão (o cliente ainda tem PIX).
         const btnCartao = document.querySelector('#tela-pagamento .opcao[data-forma="CARTAO"]');
         if (btnCartao) btnCartao.style.display = d.pointAtiva === false ? 'none' : '';
