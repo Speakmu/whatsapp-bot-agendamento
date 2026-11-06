@@ -301,17 +301,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 comandasPendentes = [];
                 snap.forEach(doc => {
                     const data = doc.data();
-                    // MESA = comanda de mesa fechada pedindo pagamento; TOTEM = pedido
-                    // feito no autoatendimento, também esperando pagamento no caixa.
-                    // BALCAO só entra quando é conta dividida em andamento (balcão comum nunca fica aguardando aqui).
-                    if (data.origem === "MESA" || data.origem === "TOTEM" || (data.origem === "BALCAO" && data.conta_dividida)) comandasPendentes.push({ id: doc.id, ...data });
+                    // MESA = comanda de mesa fechada pedindo pagamento. BALCAO só entra
+                    // quando é conta dividida em andamento (balcão comum nunca fica
+                    // aguardando aqui). TOTEM não aparece mais aqui: cartão e PIX são
+                    // confirmados automaticamente pelo webhook, sem passar pelo caixa.
+                    if (data.origem === "MESA" || (data.origem === "BALCAO" && data.conta_dividida)) comandasPendentes.push({ id: doc.id, ...data });
                 });
                 if (contaAtiva) {
                     const atual = comandasPendentes.find(c => c.id === contaAtiva.id);
                     if (atual) contaAtiva = { ...atual };
                     else if (snap.metadata && !snap.metadata.fromCache) { flash("Esta conta foi encerrada em outro lugar."); limparPainelConta(); }
                 }
-                comandasPendentes.sort((a, b) => Number(a.mesa_numero || a.senha || 0) - Number(b.mesa_numero || b.senha || 0));
+                comandasPendentes.sort((a, b) => Number(a.mesa_numero || 0) - Number(b.mesa_numero || 0));
                 renderComandasPendentes();
             }, err => console.error("Erro comandas pendentes:", err));
     }
@@ -380,7 +381,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }).join('');
             const disabled = sessaoAtual ? '' : 'disabled';
             const label = sessaoAtual ? 'Receber' : 'Abra o caixa';
-            const consumoTotem = p.tipo_consumo === 'LOCAL' ? ' · Comer aqui' : (p.origem === 'TOTEM' ? ' · Levar' : '');
             const rotulo = escapeHtml(rotuloPedido(p));
             const parcial = !!p.conta_dividida && PagamentosPedido.doPedido(p).length > 0;
             const saldoAberto = PagamentosPedido.saldo(p);
@@ -428,8 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!pedido) return;
         if (pedido.conta_dividida && PagamentosPedido.doPedido(pedido).length) { alert('Esta conta já tem parte paga: use "Continuar divisão".'); return; }
         const total = Number(pedido.valor_total) || 0;
-        const consumoTotem = pedido.tipo_consumo === 'LOCAL' ? ' (Comer aqui)' : (pedido.origem === 'TOTEM' ? ' (Levar)' : '');
-        const rotulo = pedido.origem === 'TOTEM' ? `Senha ${pedido.senha}${consumoTotem}` : `Mesa ${pedido.mesa_numero}`;
+        const rotulo = `Mesa ${pedido.mesa_numero}`;
         if (!confirm(`Receber ${rotulo}?\nTotal: ${money(total)}\nPagamento: ${formaRecebimento}`)) return;
 
         const chave = CHAVE_PAG[formaRecebimento] || "Dinheiro";
@@ -438,10 +437,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const sessaoRef = db.collection(COL_SESSOES).doc(sessaoAtual.id);
         const batch = db.batch();
 
-        // Mesa: a comida já foi servida antes de fechar a comanda, então
-        // pagar = concluir. Totem: o cliente paga ANTES de a cozinha começar
-        // a preparar (igual totem de fast-food) — pagar manda pra cozinha.
-        const statusFinal = pedido.origem === 'TOTEM' ? 'PENDENTE_PREPARO' : 'CONCLUIDO';
+        // A comida já foi servida antes de fechar a comanda, então pagar = concluir.
+        const statusFinal = 'CONCLUIDO';
 
         batch.update(pedidoRef, {
             status: statusFinal,
@@ -923,7 +920,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return isFinite(n) ? r2(n) : 0;
     }
     function rotuloPedido(p) {
-        if (p.origem === 'TOTEM') return `Senha ${p.senha || '-'}${p.tipo_consumo === 'LOCAL' ? ' (Comer aqui)' : ' (Levar)'}`;
         if (p.origem === 'MESA') return `Mesa ${p.mesa_numero || '-'}`;
         return `Balcão • ${p.nome_cliente || 'Balcão'}`;
     }
@@ -1116,8 +1112,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const pedidoRef = contaAtiva ? db.collection(COL_PEDIDOS).doc(contaAtiva.id) : db.collection(COL_PEDIDOS).doc();
         const origem = contaAtiva ? contaAtiva.origem : 'BALCAO';
         const posPagamento = contaAtiva ? (contaAtiva.status_pos_pagamento || 'CONCLUIDO') : ($('chk-cozinha').checked ? 'PENDENTE_PREPARO' : 'CONCLUIDO');
-        // Mesa: pagar = concluir. Totem: pagar manda para a cozinha. Balcão: como foi marcado.
-        const statusFinal = origem === 'TOTEM' ? 'PENDENTE_PREPARO' : (origem === 'MESA' ? 'CONCLUIDO' : posPagamento);
+        // Mesa: pagar = concluir. Balcão: como foi marcado.
+        const statusFinal = origem === 'MESA' ? 'CONCLUIDO' : posPagamento;
         const rotulo = contaAtiva ? rotuloPedido(contaAtiva) : 'Balcão';
 
         const batch = db.batch();
