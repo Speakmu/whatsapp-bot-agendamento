@@ -51,10 +51,6 @@
             width: auto; height: 40px; border-radius: 20px; padding: 0 16px;
             font-weight: 800; color: #c0392b; border-color: #f1c7c0;
         }
-        header.topo #btn-teste-impressao {
-            width: auto; height: 40px; border-radius: 20px; padding: 0 16px;
-            font-weight: 800; color: #8e44ad; border-color: #e3cdf1;
-        }
         .busca-wrap { flex: none; background: #fff; border-bottom: 1px solid #e1e5ea; padding: 0 28px; max-height: 0; overflow: hidden; transition: max-height .18s ease, padding .18s ease; }
         .busca-wrap.aberta { max-height: 80px; padding: 14px 28px; }
         .busca-wrap input {
@@ -360,9 +356,6 @@
     <header class="topo">
         <span class="relogio" id="relogio">--:--</span>
         <div class="topo-direita">
-            <!-- Temporário, só pra fase de testes no local — remover depois que a
-                 impressora/impressão forem validadas de verdade. -->
-            <button class="btn-busca" id="btn-teste-impressao" type="button" title="Imprimir um cupom de teste (não gera pedido nem senha real)" style="font-size:.85rem;">🖨️ Testar</button>
             <button class="btn-busca" id="btn-cancelar-pedido" type="button" title="Cancelar pedido" style="font-size:.85rem;">✕ Cancelar</button>
             <button class="btn-busca" id="btn-busca" type="button" title="Buscar">🔍</button>
         </div>

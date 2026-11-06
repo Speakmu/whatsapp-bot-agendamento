@@ -149,18 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ---------- Teste de impressão (temporário, fase de testes no local) ----------
-    // Imprime um cupom de exemplo sem criar pedido nem consumir número de
-    // senha real — só pra validar a impressora/bobina sem precisar comprar
-    // nada no totem de verdade.
-    $('btn-teste-impressao').addEventListener('click', () => {
-        montarCupom('TESTE', [
-            { nome: 'Item de teste 1', preco: 9.90 },
-            { nome: 'Item de teste 2 (nome mais longo)', preco: 5.00 },
-        ], 14.90, 'cartão');
-        setTimeout(() => window.print(), 300);
-    });
-
     // ---------- Busca ----------
     $('btn-busca').addEventListener('click', () => {
         $('busca-wrap').classList.toggle('aberta');
