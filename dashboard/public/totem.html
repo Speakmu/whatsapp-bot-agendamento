@@ -21,6 +21,12 @@
             color: #2c3e50;
             display: flex;
             flex-direction: column;
+            /* A tela física do totem é grande (monitor de verdade, não um
+               celular) — um zoom geral aumenta tudo proporcionalmente
+               (fontes, ícones, botões, espaçamentos) sem precisar reescrever
+               cada regra individualmente. Suportado nativamente no Edge/
+               Chrome, que é o navegador fixo do totem. */
+            zoom: 1.4;
         }
         :root { --marca: #ff5200; --bg: #f4f6f9; }
 
