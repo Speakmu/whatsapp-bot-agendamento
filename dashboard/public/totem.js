@@ -547,10 +547,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     $('btn-novo-pedido').addEventListener('click', resetarTotem);
 
-    $('btn-cancelar-pedido').addEventListener('click', () => {
+    // confirm() nativo sai minúsculo na tela grande do totem — modal próprio
+    // no tamanho da interface, no mesmo padrão do perguntarTipoCartao().
+    function confirmarCancelamento() {
+        return new Promise(resolve => {
+            const overlay = $('overlay-confirmar-cancelar');
+            const fechar = valor => {
+                overlay.classList.remove('aberto');
+                $('btn-confirmar-cancelamento').removeEventListener('click', aoConfirmar);
+                $('btn-cancelar-cancelamento').removeEventListener('click', aoVoltar);
+                resolve(valor);
+            };
+            const aoConfirmar = () => fechar(true);
+            const aoVoltar = () => fechar(false);
+            $('btn-confirmar-cancelamento').addEventListener('click', aoConfirmar);
+            $('btn-cancelar-cancelamento').addEventListener('click', aoVoltar);
+            overlay.classList.add('aberto');
+        });
+    }
+
+    $('btn-cancelar-pedido').addEventListener('click', async () => {
         if (pagando) return; // pagamento em andamento tem seu próprio fluxo de cancelamento
         if (!carrinho.length) { resetarTotem(); return; }
-        if (confirm('Cancelar o pedido atual e voltar pro início?')) resetarTotem();
+        if (await confirmarCancelamento()) resetarTotem();
     });
 
     // Reset automático de segurança: se o cliente sumir sem tocar em "Novo

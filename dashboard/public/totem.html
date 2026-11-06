@@ -393,6 +393,20 @@
         </div>
     </div>
 
+    <!-- Confirmação de cancelar pedido (substitui o confirm() nativo, que
+         sai minúsculo na tela grande do totem) -->
+    <div class="overlay" id="overlay-confirmar-cancelar">
+        <div class="modal" style="max-width:460px;text-align:center;">
+            <div class="modal-corpo" style="padding:32px 28px 8px;">
+                <h2 style="font-size:1.5rem;">Cancelar o pedido atual e voltar pro início?</h2>
+            </div>
+            <div class="modal-rodape">
+                <button class="btn btn-secundario" id="btn-cancelar-cancelamento">Voltar</button>
+                <button class="btn btn-primario" id="btn-confirmar-cancelamento" style="background:#c0392b;">Sim, cancelar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Tela: forma de pagamento -->
     <div class="tela-confirmacao tela-pagamento" id="tela-pagamento">
         <h2>Como deseja pagar?</h2>
