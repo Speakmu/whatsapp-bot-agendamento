@@ -309,6 +309,12 @@
         /* ---------- Cupom impresso ---------- */
         #cupom-impressao { display: none; }
         @media print {
+            /* Tamanho de página pra bobina de 80mm — sem isso o navegador
+               imprime em papel A4 padrão: corta conteúdo na largura (A4 é mais
+               largo que a área imprimível da bobina) e sobra muito papel em
+               branco na altura (A4 é bem mais alto que o cupom). */
+            @page { size: 80mm auto; margin: 1mm 2mm; }
+            html, body { margin: 0; }
             body > *:not(#cupom-impressao) { display: none !important; }
             #cupom-impressao {
                 display: block !important;
