@@ -513,10 +513,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const linhas = itens.map(i =>
             `<div class="linha"><span>${escapeHtml(i.nome)}</span><span>${money(i.preco)}</span></div>`
         ).join('');
-        const rotuloConsumo = tipoConsumo === 'LOCAL' ? 'COMER AQUI' : 'LEVAR';
         $('cupom-impressao').innerHTML = `
             <h1>${escapeHtml(nomeLoja)}</h1>
-            <div style="text-align:center">Autoatendimento — ${rotuloConsumo}</div>
+            <div style="text-align:center">Autoatendimento</div>
             <div class="senha-grande">SENHA ${String(senha).padStart(3, '0')}</div>
             <hr>
             ${linhas}
