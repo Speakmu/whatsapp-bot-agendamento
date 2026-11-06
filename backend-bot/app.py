@@ -1336,6 +1336,16 @@ def registrar_comprovante(wa_id: str, imagem_url: str):
             forma_pagamento = str(dados.get('forma_pagamento') or '').upper()
             status_atual = dados.get('status')
             STATUS_ACEITA_COMPROVANTE = ('PENDENTE_PREPARO', 'PENDENTE_VALIDACAO', 'AGUARDANDO_PIX')
+            # Caso real (06/11): a equipe já tinha mandado o pedido pro preparo (EM_PREPARO) quando
+            # o comprovante chegou; o bot respondeu "seu pedido não está aguardando PIX" e abriu um
+            # aviso desnecessário, e a imagem não ficou no pedido. Pedido PIX em andamento: só
+            # anexa o comprovante (status intacto) e confirma ao cliente.
+            situacao_andamento = {"EM_PREPARO": "em preparo", "PRONTO_PARA_ENTREGA": "pronto",
+                                  "SAIU_PARA_ENTREGA": "a caminho"}
+            if 'PIX' in forma_pagamento and status_atual in situacao_andamento:
+                doc.reference.update({'comprovante_url': imagem_url}, timeout=10)
+                return (f"Recebi o comprovante e anexei ao seu pedido! ✅ Ele já está {situacao_andamento[status_atual]}. "
+                        "Qualquer dúvida sobre o pagamento, a equipe confirma com você.")
             if 'PIX' not in forma_pagamento or status_atual not in STATUS_ACEITA_COMPROVANTE:
                 marcar_atencao(
                     wa_id,
@@ -1413,6 +1423,24 @@ def classificar_imagem_cliente(caminho_local, tipo_midia):
         except Exception as e:
             print(f"ERRO ao classificar imagem (tentativa {tentativa}): {e}")
     return 'outro'
+
+
+def _atualizar_nome_do_pedido_recente(wa_id, nome):
+    """O cliente deu o nome DEPOIS de o pedido fechar (o bot fecha como 'Cliente' quando não sabe):
+    atualiza o pedido recente, senão o card, a impressão e o aviso de saída mostram 'cliente'.
+    Caso real (06/11): "Anotei seu nome, Gabriel!" e o pedido continuou como 'cliente'."""
+    nome = str(nome or "").strip()
+    if not nome:
+        return
+    try:
+        for doc, p in _pedidos_do_cliente(wa_id, limite=1):
+            hp = p.get("hora_pedido")
+            if (str(p.get("nome_cliente") or "").strip().lower() in ("", "cliente", "none")
+                    and hp and datetime.now(timezone.utc) - hp < timedelta(minutes=30)
+                    and p.get("status") not in ("CONCLUIDO", "CANCELADO")):
+                doc.reference.update({"nome_cliente": nome}, timeout=10)
+    except Exception as e:
+        print(f"Erro ao atualizar o nome do pedido recente: {e}")
 
 
 def tratar_imagem_nao_comprovante(wa_id, imagem_url):
@@ -1649,7 +1677,11 @@ def marcar_atencao(wa_id, motivo, tipo=None, dados=None):
     if tipo in TIPOS_ALERTA_PISCANTE:
         campos["precisa_atencao"] = True
     try:
-        db.collection("historico_conversas").document(wa_id).set(campos, merge=True)
+        ref = db.collection("historico_conversas").document(wa_id)
+        try:
+            ref.update(campos)   # update SUBSTITUI atencao_dados inteiro (set+merge misturava chaves de avisos antigos)
+        except Exception:
+            ref.set(campos, merge=True)   # conversa ainda sem documento
     except Exception as e:
         print(f"Erro ao marcar atenção: {e}")
 
@@ -3370,6 +3402,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                                                   "com a resposta dele."}
                 elif function_name == "definir_nome":
                     resultado = rascunho_definir_nome(id_usuario, args.get("nome"), bot_cfg)
+                    _atualizar_nome_do_pedido_recente(wa_id, args.get("nome"))
                 elif function_name == "definir_observacao":
                     resultado = rascunho_definir_observacao(id_usuario, args.get("observacao"), bot_cfg)
                 elif function_name == "ver_resumo":

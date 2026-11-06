@@ -1205,3 +1205,37 @@ def test_aviso_sache_pode_ser_desligado_e_editado(ambiente, monkeypatch):
         {"aviso_sache_texto": "Ketchup e maionese vão de brinde em todo pedido!"}, merge=True)
     monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
     assert "de brinde" in _conversar("553591526907", ["oi", "quero maionese"])[-1]
+
+
+def test_comprovante_pix_com_pedido_em_preparo_so_anexa(ambiente):
+    """Caso 06/11: pedido PIX já EM_PREPARO quando o comprovante chegou. Não diz que 'não aguarda
+    PIX', não abre aviso e anexa a imagem ao pedido sem mudar o status."""
+    wa = "553599000091"
+    _, ref = ambiente.collection("pedidos").add({"origem": "WHATSAPP", "telefone_cliente": wa, "status": "EM_PREPARO",
+                                                 "forma_pagamento": "PIX", "valor_total": 70.0,
+                                                 "hora_pedido": bot.datetime.now(bot.timezone.utc)})
+    msg = bot.registrar_comprovante(wa, "https://storage.googleapis.com/b/comprovantes/c.jpg")
+    p = ref.get().to_dict()
+    assert "anexei ao seu pedido" in msg and "em preparo" in msg and "não está aguardando" not in msg
+    assert p["status"] == "EM_PREPARO" and p["comprovante_url"].endswith("c.jpg")
+    h = ambiente.collection("historico_conversas").document(wa).get()
+    assert not h.exists or not (h.to_dict() or {}).get("aviso_equipe")
+
+
+def test_nome_dado_depois_de_fechar_atualiza_o_pedido(ambiente):
+    wa = "553599000092"
+    _, ref = ambiente.collection("pedidos").add({"origem": "WHATSAPP", "telefone_cliente": wa, "status": "PENDENTE_PREPARO",
+                                                 "nome_cliente": "Cliente", "valor_total": 20.0,
+                                                 "hora_pedido": bot.datetime.now(bot.timezone.utc)})
+    bot._atualizar_nome_do_pedido_recente(wa, "Gabriel")
+    assert ref.get().to_dict()["nome_cliente"] == "Gabriel"
+    bot._atualizar_nome_do_pedido_recente(wa, "Outro Nome")      # já tem nome real: não troca
+    assert ref.get().to_dict()["nome_cliente"] == "Gabriel"
+
+
+def test_aviso_novo_nao_herda_dados_do_aviso_antigo(ambiente):
+    wa = "553599000093"
+    bot.marcar_atencao(wa, "aviso 1", tipo="pedido_falhou", dados={"resposta_suspeita": "texto antigo", "x": 1})
+    bot.marcar_atencao(wa, "aviso 2", tipo="pedido_falhou", dados={"imagem_url": "https://storage.googleapis.com/b/c.jpg"})
+    d = ambiente.collection("historico_conversas").document(wa).get().to_dict()["atencao_dados"]
+    assert d == {"imagem_url": "https://storage.googleapis.com/b/c.jpg"}
