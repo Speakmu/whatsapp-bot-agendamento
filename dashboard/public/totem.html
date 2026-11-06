@@ -51,6 +51,10 @@
             width: auto; height: 40px; border-radius: 20px; padding: 0 16px;
             font-weight: 800; color: #c0392b; border-color: #f1c7c0;
         }
+        header.topo #btn-teste-impressao {
+            width: auto; height: 40px; border-radius: 20px; padding: 0 16px;
+            font-weight: 800; color: #8e44ad; border-color: #e3cdf1;
+        }
         .busca-wrap { flex: none; background: #fff; border-bottom: 1px solid #e1e5ea; padding: 0 28px; max-height: 0; overflow: hidden; transition: max-height .18s ease, padding .18s ease; }
         .busca-wrap.aberta { max-height: 80px; padding: 14px 28px; }
         .busca-wrap input {
@@ -313,7 +317,7 @@
                imprime em papel A4 padrão: corta conteúdo na largura (A4 é mais
                largo que a área imprimível da bobina) e sobra muito papel em
                branco na altura (A4 é bem mais alto que o cupom). */
-            @page { size: 80mm auto; margin: 1mm 2mm; }
+            @page { size: 80mm auto; margin: 0; }
             /* O zoom:1.4 do body (pra aumentar a interface na tela do totem)
                também escalava a impressão — o cupom de 72mm saía com ~101mm
                reais e cortava na bobina de 80mm. Zera só na impressão. */
@@ -321,7 +325,13 @@
             body > *:not(#cupom-impressao) { display: none !important; }
             #cupom-impressao {
                 display: block !important;
-                width: 72mm;
+                /* Área realmente imprimível da ELGIN i8 é 72,1mm, mais apertada
+                   que a margem que a gente definia antes (2mm de cada lado já
+                   empurrava o conteúdo pra fora dela, cortando 1 caractere à
+                   direita nos valores). 70mm centralizado deixa ~1mm de folga
+                   de cada lado dentro dos 72,1mm reais. */
+                width: 70mm;
+                margin: 0 auto;
                 /* Traço grosso e preto puro: 'Courier New' normal sai falhado
                    em impressora térmica (mesmo ajuste do cupom de pedido do
                    painel). */
@@ -356,6 +366,9 @@
     <header class="topo">
         <span class="relogio" id="relogio">--:--</span>
         <div class="topo-direita">
+            <!-- Temporário, só pra fase de testes no local — remover depois que a
+                 impressora/impressão forem validadas de verdade. -->
+            <button class="btn-busca" id="btn-teste-impressao" type="button" title="Imprimir um cupom de teste (não gera pedido nem senha real)" style="font-size:.85rem;">🖨️ Testar</button>
             <button class="btn-busca" id="btn-cancelar-pedido" type="button" title="Cancelar pedido" style="font-size:.85rem;">✕ Cancelar</button>
             <button class="btn-busca" id="btn-busca" type="button" title="Buscar">🔍</button>
         </div>
