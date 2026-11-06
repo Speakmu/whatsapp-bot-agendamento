@@ -314,7 +314,10 @@
                largo que a área imprimível da bobina) e sobra muito papel em
                branco na altura (A4 é bem mais alto que o cupom). */
             @page { size: 80mm auto; margin: 1mm 2mm; }
-            html, body { margin: 0; }
+            /* O zoom:1.4 do body (pra aumentar a interface na tela do totem)
+               também escalava a impressão — o cupom de 72mm saía com ~101mm
+               reais e cortava na bobina de 80mm. Zera só na impressão. */
+            html, body { margin: 0; zoom: 1 !important; }
             body > *:not(#cupom-impressao) { display: none !important; }
             #cupom-impressao {
                 display: block !important;
