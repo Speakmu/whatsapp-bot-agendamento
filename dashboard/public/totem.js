@@ -610,9 +610,9 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
     }
 
-    // Zera o pedido em andamento e volta pro início — usado pelo botão "Novo
-    // pedido" (pós-compra), "Cancelar pedido" (cliente desiste no meio) e
-    // pelo reset automático por inatividade.
+    // Zera o pedido em andamento e volta pro início — usado após mostrar a
+    // senha, no "Cancelar pedido" (cliente desiste no meio) e no reset
+    // automático por inatividade.
     function resetarTotem() {
         carrinho = [];
         senhaAtual = null;
@@ -626,8 +626,6 @@ document.addEventListener('DOMContentLoaded', () => {
         renderProdutos();
         voltarBoasVindas();
     }
-
-    $('btn-novo-pedido').addEventListener('click', resetarTotem);
 
     // confirm() nativo sai minúsculo na tela grande do totem — modal próprio
     // no tamanho da interface, no mesmo padrão do perguntarTipoCartao().
@@ -654,17 +652,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (await confirmarCancelamento()) resetarTotem();
     });
 
-    // Volta sozinho pra tela inicial depois de mostrar a senha — o cliente já
-    // tem o cupom impresso com a senha, não precisa ficar parado esperando
-    // nem tocar em nada; ficar preso nessa tela com um botão "Fazer novo
-    // pedido" confundia quem já tinha terminado (parecia pedir uma ação).
-    // 30s era tempo demais pra isso — 6s dá pra ler a senha na tela e sair.
+    // Volta sozinho pra tela inicial depois de mostrar o agradecimento + senha
+    // — o cliente já tem o cupom impresso com a senha, não precisa ficar
+    // parado esperando nem tocar em nada. Sem botão nessa tela de propósito:
+    // ficar parado esperando um "Fazer novo pedido" confundia quem já tinha
+    // terminado (parecia pedir uma ação). 3s dá pra ler a tela e já volta.
     let resetTimer = null;
     document.addEventListener('DOMContentLoaded', () => {});
     const observerReset = new MutationObserver(() => {
         clearTimeout(resetTimer);
         if ($('tela-confirmacao').classList.contains('aberta')) {
-            resetTimer = setTimeout(() => $('btn-novo-pedido').click(), 6000);
+            resetTimer = setTimeout(resetarTotem, 3000);
         }
     });
     observerReset.observe($('tela-confirmacao'), { attributes: true, attributeFilter: ['class'] });
