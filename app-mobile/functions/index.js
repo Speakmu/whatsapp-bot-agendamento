@@ -215,7 +215,14 @@ export const criarCobrancaPoint = onRequest(
                     expiration_time: 'PT5M', // cobrança esquecida não trava o terminal por 15 min
                     transactions: { payments: [{ amount: Number(amount).toFixed(2) }] },
                     config: {
-                        point: { terminal_id: deviceId },
+                        point: {
+                            terminal_id: deviceId,
+                            // No totem o cliente já leva a senha impressa pelo próprio totem (com
+                            // valor, itens e senha) — o cupom da maquininha ficaria duplicado e sem
+                            // utilidade nenhuma pro cliente nem pra loja. No balcão/caixa o cupom da
+                            // maquininha continua sendo o único comprovante, então não mexe lá.
+                            ...(terminal === 'totem' ? { print_on_terminal: 'no_ticket' } : {}),
+                        },
                         // Tipo já enviado à máquina (testado: qr e credit_card chegam sozinhos).
                         // PIX = qr; cartão = tipo fixo da config, ou o escolhido no Caixa quando a
                         // config é "escolher"; sem tipo, a própria máquina pergunta (ex.: totem).
@@ -242,6 +249,9 @@ export const criarCobrancaPoint = onRequest(
                 description: description || `Pedido ${externalReference}`,
                 payment: pagamentoPoint(cfgPoint, req.body.tipoCartao),
                 additional_info: { external_reference: externalReference },
+                // Mesmo motivo do config.point.print_on_terminal na Orders API acima:
+                // no totem o cupom já sai impresso pelo próprio totem com a senha.
+                ...(terminal === 'totem' ? { print_on_terminal: false } : {}),
             },
             { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' } }
         );
