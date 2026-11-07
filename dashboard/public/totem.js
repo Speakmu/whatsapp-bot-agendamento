@@ -22,6 +22,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let categoriaAtiva = 'Todos';
     let buscaTexto = '';
     let carrinho = []; // [{ id, nome, nome_exibicao, preco, categoria, qtd }]
+    let produtoDetalheId = null; // produto aberto no modal de detalhe (imagem maior)
+    let qtdDetalhe = 1;
     let nomeLoja = 'Autoatendimento';
     let tipoConsumo = null; // 'LOCAL' | 'RETIRADA' — escolhido na tela 2
     let tipoCartaoPoint = 'credito'; // 'credito' | 'debito' | 'escolher' (config do painel)
@@ -145,9 +147,66 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>`;
         }).join('');
         wrap.querySelectorAll('.produto-card').forEach(card => {
-            card.addEventListener('click', () => adicionarAoCarrinho(card.dataset.id));
+            // Toca na foto/nome/preço abre o detalhe (imagem maior + escolher
+            // quantidade, igual ao app). O "+" continua adicionando 1 direto,
+            // sem abrir nada — pra quem já sabe o que quer não perder tempo.
+            card.addEventListener('click', () => abrirDetalheProduto(card.dataset.id));
+            const btnAdd = card.querySelector('.btn-add');
+            if (btnAdd) {
+                btnAdd.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    adicionarAoCarrinho(card.dataset.id);
+                });
+            }
         });
     }
+
+    // ---------- Detalhe do produto (imagem maior + quantidade) ----------
+    function abrirDetalheProduto(produtoId) {
+        const produto = produtos.find(p => p.id === produtoId);
+        if (!produto) return;
+        produtoDetalheId = produtoId;
+        qtdDetalhe = 1;
+        renderDetalheProduto();
+        $('overlay-produto').classList.add('aberto');
+    }
+
+    function fecharDetalheProduto() {
+        $('overlay-produto').classList.remove('aberto');
+        produtoDetalheId = null;
+    }
+
+    function renderDetalheProduto() {
+        const produto = produtos.find(p => p.id === produtoDetalheId);
+        if (!produto) return;
+        const nome = produto.nome_exibicao || produto.nome || 'Item';
+        $('produto-detalhe-img').style.backgroundImage = produto.imagem_url ? `url('${produto.imagem_url}')` : '';
+        $('produto-detalhe-nome').textContent = nome;
+        $('produto-detalhe-preco').textContent = money(produto.preco);
+        $('produto-detalhe-desc').textContent = produto.descricao || produto.ingredientes || '';
+        $('produto-detalhe-desc').style.display = (produto.descricao || produto.ingredientes) ? '' : 'none';
+        $('produto-detalhe-qtd').textContent = qtdDetalhe;
+        $('produto-detalhe-adicionar').textContent =
+            `Adicionar · ${money(Number(produto.preco) * qtdDetalhe)}`;
+    }
+
+    $('fechar-produto-detalhe').addEventListener('click', fecharDetalheProduto);
+    $('overlay-produto').addEventListener('click', (e) => {
+        if (e.target.id === 'overlay-produto') fecharDetalheProduto();
+    });
+    $('produto-detalhe-menos').addEventListener('click', () => {
+        qtdDetalhe = Math.max(1, qtdDetalhe - 1);
+        renderDetalheProduto();
+    });
+    $('produto-detalhe-mais').addEventListener('click', () => {
+        qtdDetalhe += 1;
+        renderDetalheProduto();
+    });
+    $('produto-detalhe-adicionar').addEventListener('click', () => {
+        if (!produtoDetalheId) return;
+        adicionarAoCarrinho(produtoDetalheId, qtdDetalhe);
+        fecharDetalheProduto();
+    });
 
     // ---------- Teste de impressão (temporário, fase de testes no local) ----------
     // Imprime um cupom de exemplo sem criar pedido nem consumir número de
@@ -176,23 +235,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // ---------- Carrinho ----------
-    function adicionarAoCarrinho(produtoId) {
+    function adicionarAoCarrinho(produtoId, qtd = 1) {
         const produto = produtos.find(p => p.id === produtoId);
         if (!produto) return;
         const existente = carrinho.find(i => i.id === produtoId);
         if (existente) {
-            existente.qtd += 1;
+            existente.qtd += qtd;
         } else {
             carrinho.push({
                 id: produto.id,
                 nome: produto.nome,
                 nome_exibicao: produto.nome_exibicao || produto.nome,
                 preco: Number(produto.preco) || 0,
-                qtd: 1
+                qtd
             });
         }
         atualizarBarraCarrinho();
         piscarCard(produtoId);
+        piscarBarraCarrinho();
     }
 
     function piscarCard(produtoId) {
@@ -200,6 +260,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!card) return;
         card.style.transform = 'scale(.95)';
         setTimeout(() => { card.style.transform = ''; }, 120);
+    }
+
+    // Pisca a barra do carrinho em vermelho — mostra pro cliente pra onde o
+    // item foi quando ele toca no "+" (confusão comum nos testes no local).
+    let timeoutPiscarCarrinho = null;
+    function piscarBarraCarrinho() {
+        const barra = document.querySelector('.barra-carrinho');
+        if (!barra) return;
+        barra.classList.add('piscar');
+        clearTimeout(timeoutPiscarCarrinho);
+        timeoutPiscarCarrinho = setTimeout(() => barra.classList.remove('piscar'), 450);
     }
 
     function totalCarrinho() {

@@ -167,11 +167,18 @@
             justify-content: space-between;
             gap: 16px;
             box-shadow: 0 -6px 18px rgba(0,0,0,.06);
+            transition: background .2s ease;
         }
         .barra-carrinho .resumo { display: flex; flex-direction: column; gap: 2px; }
-        .barra-carrinho .resumo .rotulo { font-size: .72rem; font-weight: 800; letter-spacing: .06em; color: #9aa5b1; text-transform: uppercase; }
-        .barra-carrinho .resumo .valor { font-size: 1.1rem; font-weight: 800; color: #2c3e50; }
-        .barra-carrinho .resumo .valor span { color: var(--marca); }
+        .barra-carrinho .resumo .rotulo { font-size: .72rem; font-weight: 800; letter-spacing: .06em; color: #9aa5b1; text-transform: uppercase; transition: color .2s ease; }
+        .barra-carrinho .resumo .valor { font-size: 1.1rem; font-weight: 800; color: #2c3e50; transition: color .2s ease; }
+        .barra-carrinho .resumo .valor span { color: var(--marca); transition: color .2s ease; }
+        /* Pisca vermelho ao adicionar um item — mostra pro cliente pra onde o
+           item foi quando ele toca no "+" (dúvida recorrente nos testes). */
+        .barra-carrinho.piscar { background: #e74c3c; }
+        .barra-carrinho.piscar .resumo .rotulo,
+        .barra-carrinho.piscar .resumo .valor,
+        .barra-carrinho.piscar .resumo .valor span { color: #fff; }
         .barra-carrinho button {
             background: var(--marca);
             color: #fff;
@@ -236,6 +243,21 @@
         .btn { border: none; border-radius: 12px; padding: 15px 22px; font-size: 1.05rem; font-weight: 800; cursor: pointer; }
         .btn-primario { background: var(--marca); color: #fff; flex: 1; }
         .btn-secundario { background: #eef2f7; color: #2c3e50; }
+
+        /* ---------- Detalhe do produto (imagem maior + quantidade) ---------- */
+        .produto-detalhe-img {
+            height: 280px; position: relative; flex: none;
+            background-color: #f4ede4; background-position: center; background-size: cover; background-repeat: no-repeat;
+            display: flex; align-items: center; justify-content: center; font-size: 3.5rem;
+        }
+        .btn-fechar-detalhe {
+            position: absolute; top: 16px; right: 16px; width: 44px; height: 44px; border-radius: 50%;
+            background: #fff; border: none; font-size: 1.2rem; font-weight: 800; color: #2c3e50;
+            cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.2);
+        }
+        .produto-detalhe-nome { font-size: 1.35rem; font-weight: 800; text-transform: uppercase; }
+        .produto-detalhe-preco { font-size: 1.3rem; font-weight: 800; color: var(--marca); margin-top: 6px; }
+        .produto-detalhe-desc { color: #7f8c8d; margin-top: 10px; line-height: 1.4; }
 
         /* ---------- Tela de boas-vindas (ociosa) ---------- */
         .tela-boas-vindas {
@@ -411,6 +433,28 @@
             <div class="modal-rodape">
                 <button class="btn btn-secundario" id="btn-continuar-comprando">Adicionar mais itens</button>
                 <button class="btn btn-primario" id="btn-confirmar-pedido">Confirmar pedido</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de detalhe do produto (imagem maior + quantidade) -->
+    <div class="overlay" id="overlay-produto">
+        <div class="modal" style="max-width:480px;">
+            <div class="produto-detalhe-img" id="produto-detalhe-img">
+                <button class="btn-fechar-detalhe" id="fechar-produto-detalhe">✕</button>
+            </div>
+            <div class="modal-corpo">
+                <div class="produto-detalhe-nome" id="produto-detalhe-nome"></div>
+                <div class="produto-detalhe-preco" id="produto-detalhe-preco"></div>
+                <div class="produto-detalhe-desc" id="produto-detalhe-desc"></div>
+                <div class="stepper" style="justify-content:center;margin-top:22px;gap:20px;">
+                    <button id="produto-detalhe-menos">−</button>
+                    <span class="qtd" id="produto-detalhe-qtd" style="font-size:1.2rem;min-width:28px;">1</span>
+                    <button id="produto-detalhe-mais">+</button>
+                </div>
+            </div>
+            <div class="modal-rodape">
+                <button class="btn btn-primario" id="produto-detalhe-adicionar" style="width:100%;">Adicionar</button>
             </div>
         </div>
     </div>
