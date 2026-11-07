@@ -449,7 +449,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const total = totalCarrinho();
         const itens = itensDoPedido();
         const pedidoRef = COL_PEDIDOS.doc();
-        mostrarAguarda('Pagamento no cartão', 'Preparando a maquininha...', null, total, false);
+        mostrarAguarda('Pagamento no cartão', 'Preparando a maquininha...', null, total);
         try {
             const senha = await obterSenha();
             const cobranca = await chamarFunction('criarCobrancaPoint', {
@@ -467,7 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 status_pos_pagamento: 'PENDENTE_PREPARO',
                 pagamento_id: cobranca.id
             });
-            mostrarAguarda('Pagamento no cartão', 'Insira, aproxime ou passe o cartão na maquininha.', null, total, true);
+            mostrarAguarda('Pagamento no cartão', 'Insira, aproxime ou passe o cartão na maquininha.', null, total);
             aguardarResultado(pedidoRef, senha, itens, total, 'CARTAO', TEMPO_ESPERA_CARTAO_MS);
         } catch (err) {
             console.warn('totem cartão:', err.message);
@@ -480,7 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const total = totalCarrinho();
         const itens = itensDoPedido();
         const pedidoRef = COL_PEDIDOS.doc();
-        mostrarAguarda('Pagamento por PIX', 'Gerando o QR Code...', null, total, false);
+        mostrarAguarda('Pagamento por PIX', 'Gerando o QR Code...', null, total);
         try {
             const senha = await obterSenha();
             const pay = await chamarFunction('processarPagamentoDireto', {
@@ -496,7 +496,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 pagamento_id: pay.id,
                 pix_copia_cola: dados.qr_code || null
             });
-            mostrarAguarda('Pagamento por PIX', 'Abra o app do seu banco, escolha pagar com PIX e leia o QR Code.', dados.qr_code_base64, total, true);
+            mostrarAguarda('Pagamento por PIX', 'Abra o app do seu banco, escolha pagar com PIX e leia o QR Code.', dados.qr_code_base64, total);
             aguardarResultado(pedidoRef, senha, itens, total, 'PIX', TEMPO_ESPERA_PIX_MS);
         } catch (err) {
             console.warn('totem pix:', err.message);
@@ -505,7 +505,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function mostrarAguarda(titulo, msg, qrBase64, total, podeCancelar) {
+    function mostrarAguarda(titulo, msg, qrBase64, total) {
         pagando = true;
         $('aguarda-titulo').textContent = titulo;
         $('aguarda-msg').textContent = msg;
@@ -517,9 +517,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // travado — some quando o QR Code já está na tela (o próprio QR já
         // comunica "é sua vez de agir" melhor que um spinner do lado).
         $('aguarda-spinner').style.display = qrBase64 ? 'none' : '';
-        $('btn-cancelar-pag').style.display = podeCancelar ? '' : 'none';
-        $('btn-cancelar-pag').disabled = false;
-        $('aguarda-cancelar-aviso').style.display = 'none';
         $('tela-pagamento').classList.remove('aberta');
         $('tela-aguarda-pag').classList.add('aberta');
     }
@@ -550,37 +547,40 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? '' : 'O pagamento não foi concluído. Tente novamente ou escolha outra forma.');
             }
         }, err => console.error('totem: erro ao observar pagamento', err));
+        // Sem botão de cancelar manual nessa tela — tentar cancelar no meio de
+        // uma cobrança em andamento só gerava confusão pra equipe sem precisar
+        // (ver comentário abaixo). Se nada acontecer em tempoMs, cancela sozinho.
         aguardaTimer = setTimeout(() => cancelarPagamentoEmAndamento(), tempoMs);
         // No cartão, depois de passar na maquininha a confirmação leva alguns
         // segundos pra chegar (webhook da Mercado Pago) — a tela ficava parada
-        // com "Insira, aproxime ou passe o cartão" + botão de cancelar, e quem
-        // tava no caixa não sabia se tinha travado ou se era só demora normal
-        // (caso real: cliente passou o cartão, ficou ~10s sem nenhum feedback
-        // antes do pedido aparecer). Atualiza a mensagem pra deixar claro que
-        // é normal esperar um pouco nessa hora.
+        // com "Insira, aproxime ou passe o cartão" sem nenhum feedback (caso
+        // real: cliente passou o cartão, ficou ~10s assim antes do pedido
+        // aparecer). Atualiza a mensagem pra deixar claro que é normal esperar
+        // um pouco nessa hora.
         if (tipo === 'CARTAO') {
             aguardaMsgTimer = setTimeout(() => {
                 $('aguarda-msg').textContent = 'Confirmando o pagamento, aguarde... Se já passou o cartão, está tudo certo, pode levar alguns segundos.';
-                $('aguarda-cancelar-aviso').style.display = '';
             }, 4000);
         }
     }
 
+    // Cancelamento automático por tempo esgotado (TEMPO_ESPERA_CARTAO_MS /
+    // TEMPO_ESPERA_PIX_MS) — não existe mais botão manual pro cliente/equipe
+    // cancelar no meio da espera: um cancelamento no meio de uma cobrança já
+    // aprovada só confundia (o backend ignora e confirma o pedido mesmo
+    // assim, mas ninguém sabia disso olhando pra tela). Deixa o totem esperar
+    // o tempo todo e, se realmente não vier resposta, cancela sozinho.
     async function cancelarPagamentoEmAndamento() {
         if (!aguardaCtx) return;
         const { pedidoId, tipo } = aguardaCtx;
-        $('btn-cancelar-pag').disabled = true;
         try {
             await chamarFunction(tipo === 'PIX' ? 'cancelarPixTotem' : 'cancelarCobrancaPoint', { pedidoId });
             // O snapshot do pedido (CANCELADO_PAGAMENTO) leva de volta à escolha de pagamento.
             // Se já tinha sido pago (cancelado:false), o snapshot leva à confirmação.
         } catch (err) {
             console.warn('totem: falha ao cancelar pagamento', err.message);
-            $('aguarda-msg').textContent = 'Não consegui cancelar agora. Aguarde um instante ou chame um atendente.';
-            $('btn-cancelar-pag').disabled = false;
         }
     }
-    $('btn-cancelar-pag').addEventListener('click', cancelarPagamentoEmAndamento);
 
     // Contador de senha: reinicia todo dia (chave = data de hoje), transação
     // atômica pra não repetir número se dois clientes confirmarem junto.
