@@ -654,15 +654,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (await confirmarCancelamento()) resetarTotem();
     });
 
-    // Reset automático de segurança: se o cliente sumir sem tocar em "Novo
-    // pedido", a tela de confirmação não pode ficar travada esperando o
-    // próximo cliente pra sempre.
+    // Volta sozinho pra tela inicial depois de mostrar a senha — o cliente já
+    // tem o cupom impresso com a senha, não precisa ficar parado esperando
+    // nem tocar em nada; ficar preso nessa tela com um botão "Fazer novo
+    // pedido" confundia quem já tinha terminado (parecia pedir uma ação).
+    // 30s era tempo demais pra isso — 6s dá pra ler a senha na tela e sair.
     let resetTimer = null;
     document.addEventListener('DOMContentLoaded', () => {});
     const observerReset = new MutationObserver(() => {
         clearTimeout(resetTimer);
         if ($('tela-confirmacao').classList.contains('aberta')) {
-            resetTimer = setTimeout(() => $('btn-novo-pedido').click(), 30000);
+            resetTimer = setTimeout(() => $('btn-novo-pedido').click(), 6000);
         }
     });
     observerReset.observe($('tela-confirmacao'), { attributes: true, attributeFilter: ['class'] });
