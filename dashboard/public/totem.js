@@ -343,6 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let senhaAtual = null;     // reaproveitada se o cliente trocar de forma de pagamento
     let aguardaUnsub = null;
     let aguardaTimer = null;
+    let aguardaMsgTimer = null;
     let aguardaCtx = null;     // { pedidoId, tipo: 'CARTAO' | 'PIX' } do pagamento em andamento
 
     $('btn-confirmar-pedido').addEventListener('click', () => {
@@ -512,8 +513,13 @@ document.addEventListener('DOMContentLoaded', () => {
         const img = $('pix-qr');
         if (qrBase64) { img.src = 'data:image/png;base64,' + qrBase64; img.style.display = ''; }
         else { img.removeAttribute('src'); img.style.display = 'none'; }
+        // Spinner (girando) deixa claro que o sistema está processando, não
+        // travado — some quando o QR Code já está na tela (o próprio QR já
+        // comunica "é sua vez de agir" melhor que um spinner do lado).
+        $('aguarda-spinner').style.display = qrBase64 ? 'none' : '';
         $('btn-cancelar-pag').style.display = podeCancelar ? '' : 'none';
         $('btn-cancelar-pag').disabled = false;
+        $('aguarda-cancelar-aviso').style.display = 'none';
         $('tela-pagamento').classList.remove('aberta');
         $('tela-aguarda-pag').classList.add('aberta');
     }
@@ -521,7 +527,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function encerrarAguarda() {
         if (aguardaUnsub) { aguardaUnsub(); aguardaUnsub = null; }
         clearTimeout(aguardaTimer);
+        clearTimeout(aguardaMsgTimer);
         aguardaTimer = null;
+        aguardaMsgTimer = null;
         aguardaCtx = null;
         pagando = false;
     }
@@ -543,6 +551,19 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }, err => console.error('totem: erro ao observar pagamento', err));
         aguardaTimer = setTimeout(() => cancelarPagamentoEmAndamento(), tempoMs);
+        // No cartão, depois de passar na maquininha a confirmação leva alguns
+        // segundos pra chegar (webhook da Mercado Pago) — a tela ficava parada
+        // com "Insira, aproxime ou passe o cartão" + botão de cancelar, e quem
+        // tava no caixa não sabia se tinha travado ou se era só demora normal
+        // (caso real: cliente passou o cartão, ficou ~10s sem nenhum feedback
+        // antes do pedido aparecer). Atualiza a mensagem pra deixar claro que
+        // é normal esperar um pouco nessa hora.
+        if (tipo === 'CARTAO') {
+            aguardaMsgTimer = setTimeout(() => {
+                $('aguarda-msg').textContent = 'Confirmando o pagamento, aguarde... Se já passou o cartão, está tudo certo, pode levar alguns segundos.';
+                $('aguarda-cancelar-aviso').style.display = '';
+            }, 4000);
+        }
     }
 
     async function cancelarPagamentoEmAndamento() {

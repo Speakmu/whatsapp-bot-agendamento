@@ -290,6 +290,14 @@
         }
         @keyframes pulsar { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 
+        /* ---------- Tela de aguardando pagamento ---------- */
+        .spinner-pag {
+            width: 56px; height: 56px; margin: 4px auto;
+            border: 6px solid #e1e5ea; border-top-color: var(--marca);
+            border-radius: 50%; animation: girar .9s linear infinite;
+        }
+        @keyframes girar { to { transform: rotate(360deg); } }
+
         /* ---------- Tela de confirmação (senha) ---------- */
         .tela-confirmacao {
             position: fixed; inset: 0;
@@ -498,10 +506,12 @@
     <!-- Tela: aguardando cartão / PIX -->
     <div class="tela-confirmacao" id="tela-aguarda-pag">
         <h2 id="aguarda-titulo"></h2>
+        <div class="spinner-pag" id="aguarda-spinner"></div>
         <img id="pix-qr" alt="QR Code PIX" style="display:none;width:280px;height:280px;">
         <div class="total-pag" id="aguarda-total"></div>
         <p id="aguarda-msg"></p>
         <button class="btn btn-secundario" id="btn-cancelar-pag" type="button" style="max-width:320px">Cancelar pagamento</button>
+        <p id="aguarda-cancelar-aviso" style="font-size:.85rem;color:#9aa5b1;display:none;">Só cancele se a maquininha mostrar erro ou não reagir.</p>
     </div>
 
     <!-- Tela final: agradecimento + senha (passa rápido, volta sozinha) -->
