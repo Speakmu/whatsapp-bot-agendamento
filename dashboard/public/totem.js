@@ -332,6 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let aguardaUnsub = null;
     let aguardaTimer = null;
     let aguardaMsgTimer = null;
+    let aguardaSondaTimer = null;
     let aguardaCtx = null;     // { pedidoId, tipo: 'CARTAO' | 'PIX' } do pagamento em andamento
 
     $('btn-confirmar-pedido').addEventListener('click', () => {
@@ -513,8 +514,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (aguardaUnsub) { aguardaUnsub(); aguardaUnsub = null; }
         clearTimeout(aguardaTimer);
         clearTimeout(aguardaMsgTimer);
+        clearInterval(aguardaSondaTimer);
         aguardaTimer = null;
         aguardaMsgTimer = null;
+        aguardaSondaTimer = null;
         aguardaCtx = null;
         pagando = false;
     }
@@ -548,6 +551,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (tipo === 'CARTAO') {
             aguardaMsgTimer = setTimeout(() => {
                 $('aguarda-msg').textContent = 'Confirmando o pagamento, aguarde... Se já passou o cartão, está tudo certo, pode levar alguns segundos.';
+            }, 4000);
+            // Sonda ativa (mesmo padrão de mostrarAvisoCartaoPendente() no caixa.js):
+            // o aviso automático da Mercado Pago pra pagamentos do Point não está
+            // confiável nessa conta — conferido nos logs reais, nunca chegou um
+            // único aviso de cartão. Sem isso, a confirmação dependia só da
+            // varredura de segurança que roda 1x por minuto no servidor
+            // (reconciliarOrdersPoint), o que explicava a demora de até ~1min no
+            // totem enquanto o caixa, que já sonda assim, confirmava rápido.
+            // statusCobrancaPoint já aceita pedido de origem TOTEM sem login.
+            aguardaSondaTimer = setInterval(() => {
+                chamarFunction('statusCobrancaPoint', { pedidoId: pedidoRef.id }).catch(() => {});
             }, 4000);
         }
     }
