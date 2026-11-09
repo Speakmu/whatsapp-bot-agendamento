@@ -288,11 +288,17 @@
 
         /* ---------- Tela de aguardando pagamento ---------- */
         .spinner-pag {
-            width: 56px; height: 56px; margin: 4px auto;
-            border: 6px solid #e1e5ea; border-top-color: var(--marca);
+            width: 68px; height: 68px; margin: 4px auto;
+            border: 7px solid #e1e5ea; border-top-color: var(--marca);
             border-radius: 50%; animation: girar .9s linear infinite;
         }
         @keyframes girar { to { transform: rotate(360deg); } }
+        /* Títulos/mensagens dessa tela ("Preparando a maquininha...", "Insira,
+           aproxime ou passe o cartão...") ficavam pequenos pro tamanho do
+           monitor físico do totem — maiores que o padrão das outras telas de
+           confirmação. */
+        #aguarda-titulo { font-size: 2.2rem; }
+        #aguarda-msg { font-size: 1.45rem; max-width: 640px; line-height: 1.45; }
 
         /* ---------- Tela de confirmação (senha) ---------- */
         .tela-confirmacao {
