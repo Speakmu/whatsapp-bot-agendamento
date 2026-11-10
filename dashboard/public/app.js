@@ -1320,10 +1320,15 @@ document.addEventListener('DOMContentLoaded', () => {
             ? `<div class="order-obs"><a href="${escapeHtmlPedido(pedido.comprovante_url)}" target="_blank" rel="noopener">🧾 Ver comprovante PIX enviado pelo cliente</a></div>`
             : '';
         const canal = canalPedido(pedido);
+        // No totem o código do pedido (ID do Firestore, tipo "#gEFqO") não bate com
+        // nada que o cliente tenha em mãos — ele só conhece a senha numérica do
+        // cupom impresso ("Totem #12"). Mostra a senha aqui em vez do ID técnico.
+        const senhaTotem = canal === 'totem' ? String(pedido.nome_cliente || '').match(/^Totem #(\d+)$/) : null;
+        const codigoPedido = senhaTotem ? `#${senhaTotem[1]}` : `#${id.substring(0, 5)}`;
         return `
         <div class="order-card order-card--${canal}" id="card-${id}">
             <div class="order-header">
-                <span class="order-id">#${id.substring(0, 5)}</span>
+                <span class="order-id">${codigoPedido}</span>
                 ${badgeEntrega}
                 <span class="badge-canal badge-canal--${canal}" title="Origem do pedido">${ROTULO_CANAL[canal] || ROTULO_CANAL.sistema}</span>
                 <span class="order-time">⏰ ${hora}</span>
