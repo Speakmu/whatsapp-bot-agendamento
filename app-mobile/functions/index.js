@@ -226,7 +226,18 @@ export const criarCobrancaPoint = onRequest(
                         // Tipo já enviado à máquina (testado: qr e credit_card chegam sozinhos).
                         // PIX = qr; cartão = tipo fixo da config, ou o escolhido no Caixa quando a
                         // config é "escolher"; sem tipo, a própria máquina pergunta (ex.: totem).
-                        ...(tipoDefaultOrder(cfgPoint, req.body) ? { payment_method: { default_type: tipoDefaultOrder(cfgPoint, req.body) } } : {})
+                        ...(() => {
+                            const tipoDefault = tipoDefaultOrder(cfgPoint, req.body);
+                            if (!tipoDefault) return {};
+                            return {
+                                payment_method: {
+                                    default_type: tipoDefault,
+                                    // Sem isso a máquina pergunta "à vista ou parcelado?" pro crédito —
+                                    // mesma trava já usada na API antiga (pagamentoPoint, installments:1).
+                                    ...(tipoDefault === 'credit_card' ? { default_installments: 1, installments_cost: 'seller' } : {}),
+                                },
+                            };
+                        })()
                     }
                 },
                 { headers: {
