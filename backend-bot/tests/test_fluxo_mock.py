@@ -1272,3 +1272,56 @@ def test_repetir_retirada_nao_gera_bronca(ambiente, monkeypatch):
     monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
     resp = _conversar(tel, ["oi", "Retirada"])[-1]
     assert "já tinha informado" not in resp and "Ok, sua retirada já foi anotada!" in resp and "forma de pagamento" in resp
+
+
+def test_kibe_e_quibe_sao_o_mesmo_item(ambiente):
+    """Caso 13/11: a cliente escreveu 'kibes' e o item se chama 'Quibe': as travas de tipo/adição
+    recusaram e a IA disse que tinha adicionado."""
+    c = [{"id": "q1", "nome": "quibe", "nome_exibicao": "Quibe"}, {"id": "p1", "nome": "pastel pizza", "nome_exibicao": "Pastel Pizza"},
+         {"id": "e1", "nome": "esfirra carne", "nome_exibicao": "Esfirra Carne"}, {"id": "c1", "nome": "coxinha de frango", "nome_exibicao": "Coxinha de frango"}]
+    quibe, coxinha = c[0], c[3]
+    msg = "Gostaria de pedir 4 esfirras de carne, 4 kibes, 2 pastéis de pizza"
+    assert bot._tipo_do_item_incompativel(quibe, msg, c) is False
+    assert bot._adicao_permitida(quibe, "Kibe assado", [{"role": "assistant", "content": "Só fiquei em dúvida sobre o Kibe, frito ou assado?"}], {"itens": []}) is True
+    assert bot._tipo_do_item_incompativel(coxinha, msg, c) is True          # trava continua barrando troca de tipo
+    assert all(bot._token_parecido(a, b) for a, b in [("kibes", "quibe"), ("esfiha", "esfirra"), ("hamburger", "hamburguer")])
+    assert not any(bot._token_parecido(a, b) for a, b in [("pastel", "coxinha"), ("pastel", "esfirra"), ("coxinha", "quibe")])
+
+
+def test_ia_nao_pode_afirmar_adicao_de_item_recusado(ambiente, monkeypatch):
+    """Item recusado pelas travas + IA escrevendo 'Adicionei…' → o texto mostra o carrinho de verdade."""
+    cx, pc = _codigo("coxinha de frango"), _codigo("pastel de carne")
+    roteiro = {"quero 2 pastel de carne": [("adicionar_item", {"item_id": cx, "quantidade": 2}),
+                                           ("adicionar_item", {"item_id": pc, "quantidade": 2}),
+                                           "Adicionei 2 coxinhas e 2 pastéis ao seu pedido!"]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    resp = _conversar("553599000096", ["oi", "quero 2 pastel de carne"])[-1]
+    assert "Não consegui incluir" in resp and "Coxinha" in resp and "Adicionei 2 coxinhas" not in resp
+
+
+def test_reclamacao_de_pedido_recente_avisa_a_equipe_e_bloqueia_pedido(ambiente, monkeypatch):
+    """Caso 13/11: 'Os kibes não vieram' → o bot disse 15x 'vou avisar a equipe' sem avisar, prometeu
+    entrega sem taxa e montou pedido novo. Agora: alerta real + ferramentas de pedido bloqueadas."""
+    wa = "553599000097"
+    ambiente.collection("pedidos").add({"origem": "WHATSAPP", "telefone_cliente": wa, "status": "CONCLUIDO", "valor_total": 77.0,
+                                        "hora_pedido": bot.datetime.now(bot.timezone.utc) - bot.timedelta(hours=1)})
+    cx = _codigo("coxinha de frango")
+    roteiro = {"Os kibes não vieram": [("adicionar_item", {"item_id": cx, "quantidade": 4}), "Sinto muito! A equipe vai resolver."]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    _conversar(wa, ["oi", "Os kibes não vieram"])
+    h = ambiente.collection("historico_conversas").document(wa).get().to_dict()
+    assert h["precisa_atencao"] and h["tipo_atencao"] == "humano" and "Reclamação" in h["motivo_atencao"]
+    assert bot.obter_rascunho(wa)["itens"] == []        # nada de pedido novo durante a reclamação
+
+
+def test_troco_vai_pra_observacao_do_pedido(ambiente, monkeypatch):
+    cfg = bot.obter_config_bot()
+    tel = "553599000098"
+    bot.rascunho_adicionar_item(tel, _codigo("pastel de carne"), 1, cfg)
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
+    _conversar(tel, ["oi", "Ok será em dinheiro, favor trazer troco para 100"])
+    assert "Troco para R$ 100" in (bot.obter_rascunho(tel).get("observacao") or "")
+
+
+def test_rua_com_dois_pontos_nao_vira_bairro():
+    assert bot._e_nome_de_rua_na_mensagem("Rute Pinto Pereira", "Rua: Rute Pinto Pereira, 50") is True

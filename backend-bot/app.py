@@ -2111,10 +2111,42 @@ def _tokens_item(it):
     return {t for t in re.split(r"[^a-z0-9]+", nome) if len(t) >= 4 and t not in _PALAVRAS_GENERICAS_ITEM}
 
 
+def _sing(t):
+    return t[:-1] if len(t) > 4 and t.endswith("s") else t
+
+
+def _token_parecido(a, b):
+    """Mesma palavra, tolerando plural e grafia: kibe = quibe, esfiha = esfirra.
+    Caso real (13/11): a cliente escreveu "4 kibes" e o item se chama "Quibe" — minhas travas de
+    tipo e de adição trataram como item diferente, recusaram o quibe e a IA disse que tinha
+    adicionado. Palavras com menos de 4 letras só valem iguais."""
+    if len(a) < 4 or len(b) < 4:
+        return a == b
+    a, b = _sing(a), _sing(b)
+    if a == b or a[:4] == b[:4]:
+        return True
+    fa, fb = _fonetica(a), _fonetica(b)
+    return fa == fb or fa[:4] == fb[:4] or fuzz.ratio(fa, fb) >= 80
+
+
+def _fonetica(t):
+    """Aproxima o SOM da palavra em português: quibe/kibe → kibe, esfiha/esfirra → esfia."""
+    t = t.replace("ph", "f").replace("ck", "k").replace("qu", "k").replace("ss", "s").replace("rr", "r")
+    t = re.sub(r"c(?=[aou])", "k", t)
+    t = t.replace("y", "i").replace("w", "v").replace("h", "")
+    return t
+
+
+def _tokens_da_mensagem(mensagem):
+    return [t for t in re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")) if t]
+
+
 def _item_citado(item, texto):
     """O texto cita o item — pelo tipo (pastel/coxinhas...) ou por uma palavra do nome (presunto, catupiry)?"""
-    toks = set(re.split(r"[^a-z0-9]+", _normalizar_termo(texto or "")))
-    return _tipo_do_item_na_mensagem(item, texto) or bool(_tokens_item(item) & toks)
+    toks = _tokens_da_mensagem(texto)
+    if _tipo_do_item_na_mensagem(item, texto):
+        return True
+    return any(_token_parecido(a, t) for a in _tokens_item(item) for t in toks)
 
 
 _RE_MAIS_UM = re.compile(r"\b(mais|outr[oa]s?)\b")
@@ -2144,31 +2176,31 @@ _RE_CLIENTE_DISSE_QUE_ESTA_ERRADO = re.compile(
     r"nao pedi|nao foi o que pedi|ta bugado|bugou")
 
 
-def _raiz_tipo(item):
-    """4 primeiras letras do TIPO do item (1ª palavra do nome: pastel, coxinha, esfirra, coca...)."""
+def _palavra_tipo(item):
+    """TIPO do item = 1ª palavra do nome (pastel, coxinha, esfirra, coca, quibe...)."""
     nome = _normalizar_termo((item or {}).get("nome_exibicao") or (item or {}).get("nome") or "")
     for t in re.split(r"[^a-z0-9]+", nome):
         if len(t) >= 4 and t not in _PALAVRAS_GENERICAS_ITEM:
-            return t[:4]
+            return t
     return None
 
 
 def _tipo_do_item_incompativel(item, mensagem, cardapio):
-    """O cliente citou o TIPO de algum item do cardápio (pastel, coxinha, esfirra...) e o
-    item que a IA quer adicionar é de OUTRO tipo? Caso real (03/11): "1 pastel de frango com
-    catupiry" → a IA adicionou a coxinha de frango com catupiry. Apelido ensinado pela equipe
-    ("enroladinho de salsicha" → Salsicha) conta como tipo citado."""
-    raiz_item = _raiz_tipo(item)
-    if not raiz_item:
+    """O cliente citou o TIPO de algum item do cardápio (pastel, coxinha, esfirra...) e o item que a
+    IA quer adicionar é de OUTRO tipo? Caso real (03/11): "1 pastel de frango com catupiry" → a IA
+    adicionou a coxinha. Tolerante a grafia (kibe/quibe) e a apelido ensinado pela equipe."""
+    palavra = _palavra_tipo(item)
+    if not palavra:
         return False
-    toks = [t for t in re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")) if len(t) >= 4]
-    raizes_menu = {r for r in (_raiz_tipo(i) for i in cardapio or []) if r}
-    citados = {t[:4] for t in toks if t[:4] in raizes_menu}
-    if not citados or raiz_item in citados:
+    toks = [t for t in _tokens_da_mensagem(mensagem) if len(t) >= 4]
+    tipos = {w for w in (_palavra_tipo(i) for i in cardapio or []) if w}
+    citados = [t for t in toks if any(_token_parecido(t, w) for w in tipos)]
+    if not citados or any(_token_parecido(t, palavra) for t in toks):
         return False
     for ap in _apelidos_aprendidos().get(item.get("id"), []):
-        if any(len(t) >= 4 and t[:4] in citados for t in re.split(r"[^a-z0-9]+", _normalizar_termo(ap))):
-            return False
+        for a in _tokens_da_mensagem(ap):
+            if len(a) >= 4 and any(_token_parecido(a, t) for t in toks):
+                return False
     return True
 
 
@@ -2192,8 +2224,7 @@ def _tipo_do_item_na_mensagem(item, mensagem):
     tipo = next((p for p in re.split(r"[^a-z0-9]+", nome) if len(p) >= 3), "")
     if not tipo:
         return True
-    raiz = tipo[:4]
-    return any(t.startswith(raiz) for t in re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")))
+    return any(_token_parecido(tipo, t) for t in _tokens_da_mensagem(mensagem))
 
 
 def _itens_mencionados(mensagem, cardapio):
@@ -2311,7 +2342,7 @@ def _e_nome_de_rua_na_mensagem(nome, texto_cliente):
     n, t = _normalizar_termo(nome), _normalizar_termo(texto_cliente or "")
     if not n or not t:
         return False
-    return bool(re.search(r"\b(rua|r|av|avenida|travessa|tv|alameda|praca|pca|rodovia|estrada)\.?\s+"
+    return bool(re.search(r"\b(rua|r|av|avenida|travessa|tv|alameda|praca|pca|rodovia|estrada)[.:\-]*\s*"
                           r"(\w+\s+){0,3}" + re.escape(n) + r"\b", t))
 
 
@@ -2541,6 +2572,45 @@ def _tirar_pedido_de_nome(texto):
     if not novo or len(mantidas) == len(partes):
         return texto
     return novo
+
+
+_RE_RECLAMACAO = re.compile(
+    r"nao (veio|vieram|chegou|chegaram|recebi|veio completo)|\bfaltou\b|\bfaltaram\b|\bfaltando\b|veio (errad|faltando|diferente|frio|queimad|cru|so|apenas)|"
+    r"(pedido|item|itens|salgado|salgados) (errad|incompleto|incorreto|atrasad|frio)|pedido (veio|esta) errado|"
+    r"nao (foi )?entregue|\bfalto\w*\b|trocaram|esqueceram|esqueceu|\breclam\w+|cade (o )?(meu )?(pedido|motoboy|entregador)")
+
+_RE_NOVO_PEDIDO = re.compile(r"\bquero\b|\bqueria\b|gostaria de (pedir|fazer)|vou querer|novo pedido|outro pedido|fazer (um )?pedido|me (ve|manda)\b")
+
+# Ferramentas que montam/alteram pedido: bloqueadas enquanto o cliente está reclamando de um pedido já feito.
+_FERRAMENTAS_DE_PEDIDO = ("adicionar_item", "remover_item", "definir_entrega", "definir_pagamento", "definir_observacao",
+                          "fechar_pedido", "confirmar_bairro_na_cidade")
+
+
+def _pedido_recente_do_cliente(wa_id, horas=8):
+    """Último pedido do cliente nas últimas 'horas' horas (qualquer canal), ou None."""
+    try:
+        for doc, p in _pedidos_do_cliente(wa_id, limite=1):
+            hp = p.get("hora_pedido")
+            if hp and datetime.now(timezone.utc) - hp < timedelta(hours=horas) and p.get("status") != "CANCELADO":
+                return doc, p
+    except Exception as e:
+        print(f"Erro ao buscar pedido recente: {e}")
+    return None
+
+
+def _equipe_ja_chamada(wa_id, horas=2):
+    """A conversa já foi marcada pra equipe (cliente pediu humano / reclamou) nas últimas horas?"""
+    try:
+        d = db.collection("historico_conversas").document(wa_id).get(timeout=10)
+        x = (d.to_dict() or {}) if d.exists else {}
+        em = x.get("atencao_marcada_em")
+        return bool(x.get("precisa_atencao") and x.get("tipo_atencao") == "humano" and em
+                    and datetime.now(timezone.utc) - em < timedelta(hours=horas))
+    except Exception:
+        return False
+
+
+_RE_TROCO = re.compile(r"troco\s*(?:pra|para|de|p/)?\s*(?:r\$\s*)?(\d{2,4}(?:[.,]\d{1,2})?)")
 
 
 _RE_PEDIU_HUMANO = re.compile(
@@ -2948,6 +3018,33 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     pediu_humano = bool(_RE_PEDIU_HUMANO.search(_normalizar_termo(prompt or "")))
     if pediu_humano:
         marcar_atencao(id_usuario, f"Cliente pediu pra falar com a equipe: \"{str(prompt)[:150]}\"", tipo="humano")
+    # Caso real (13/11): "Os kibes não vieram" — o bot disse umas 15 vezes "vou avisar a equipe" e
+    # NUNCA avisou (a equipe só soube mais de 1 hora depois), prometeu entrega sem taxa e ainda
+    # montou um pedido novo dos kibes. Reclamação de pedido recente → alerta REAL pra equipe e
+    # as ferramentas de pedido ficam bloqueadas enquanto a equipe não responde.
+    reclamou = False
+    pedido_rec = _pedido_recente_do_cliente(wa_id) if _RE_RECLAMACAO.search(_normalizar_termo(prompt or "")) else None
+    if pedido_rec:
+        reclamou = True
+        marcar_atencao(id_usuario, f"Reclamação sobre o pedido #{pedido_rec[0].id[:5]}: \"{str(prompt)[:150]}\"",
+                       tipo="humano", dados={"pedido_id": pedido_rec[0].id})
+    equipe_chamada = pediu_humano or reclamou or _equipe_ja_chamada(id_usuario)
+    # Cliente começou um pedido novo de verdade (cita item sem reclamar, ou "quero…"): libera as ferramentas.
+    _novo = (not reclamou and not _RE_RECLAMACAO.search(_normalizar_termo(prompt or ""))
+             and (_RE_NOVO_PEDIDO.search(_normalizar_termo(prompt or "")) or _itens_mencionados(prompt, carregar_cardapio())))
+    bloquear_pedido = bool(equipe_chamada and not _novo)
+
+    # Troco no pedido (13/11: "troco para 100" ficou só na conversa, o pedido saiu com observação
+    # "Nenhuma" e o entregador não levou troco).
+    m_troco = _RE_TROCO.search(_normalizar_termo(prompt or ""))
+    if m_troco and obter_rascunho(id_usuario).get("itens"):
+        valor = m_troco.group(1).replace(",", ".")
+        valor = valor[:-2] if valor.endswith(".0") else valor
+        nota = f"Troco para R$ {valor}"
+        obs_atual = (obter_rascunho(id_usuario).get("observacao") or "").strip()
+        if nota.lower() not in obs_atual.lower():
+            rascunho_definir_observacao(id_usuario, f"{obs_atual} | {nota}" if obs_atual else nota, bot_cfg)
+
     # Caso real (01/10): cliente respondeu "Não é isso não" / 🤦 ao resumo errado e a
     # IA só piorou o carrinho a cada tentativa. Reclamação com carrinho montado →
     # o servidor ESVAZIA os itens e pede a lista de novo (sem IA); o próximo envio
@@ -3027,6 +3124,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         # com mais alguma coisa?", retomando a conversa antiga (que acabava em "Ok").
         rascunho_texto += ("\n  ATENÇÃO: o cliente ficou horas/dias sem escrever — é uma conversa NOVA. Cumprimente normalmente; "
                            "NÃO diga \"mais alguma coisa\" nem retome assunto ou pedido antigo.")
+    if bloquear_pedido and not pediu_humano:
+        rascunho_texto += ("\n  INSTRUÇÃO DESTA MENSAGEM: o cliente está com um PROBLEMA em um pedido já feito e a equipe JÁ FOI AVISADA "
+                           "(alerta no painel). Peça desculpas, diga que a equipe vai responder AQUI MESMO, NÃO monte nem altere pedido "
+                           "(as ferramentas de pedido estão bloqueadas) e NUNCA prometa reembolso, reenvio, entrega sem taxa, desconto "
+                           "ou prazo — quem decide é a equipe. Seja breve; não repita o mesmo pedido de desculpas a cada mensagem.")
     if pediu_humano:
         rascunho_texto += ("\n  INSTRUÇÃO DESTA MENSAGEM: o cliente pediu pra falar com a equipe e o servidor JÁ AVISOU a equipe. "
                            "Diga que chamou a equipe e que alguém responde AQUI MESMO nesta conversa em instantes "
@@ -3294,6 +3396,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         bairro_negado_confirmado = False
         consultou_pedido_sem_achar = False
         item_adicionado_ok = False
+        bloqueios_adicao = []     # (id, nome) de itens que as travas recusaram nesta mensagem
         pergunta_variacao = None
         retentativa_adicao_feita = False
         tool_choice_rodada = "auto"
@@ -3354,7 +3457,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 
                 content = ""
                 resultado = None
-                if function_name == "adicionar_item":
+                if bloquear_pedido and function_name in _FERRAMENTAS_DE_PEDIDO:
+                    resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg, status="erro",
+                                                 motivo="O cliente está reclamando de um pedido JÁ FEITO e a equipe foi avisada: NÃO monte nem altere pedido "
+                                                        "agora. Peça desculpas e diga que a equipe responde aqui mesmo; não prometa reembolso, reenvio, "
+                                                        "entrega sem taxa nem prazo.")
+                elif function_name == "adicionar_item":
                     it_pedido = _resolver_item(args.get("item_id"), cardapio_atual)
                     ja_no_carrinho = it_pedido and any(i.get("id") == it_pedido["id"] for i in obter_rascunho(id_usuario).get("itens") or [])
                     mencionados = _itens_mencionados(prompt, cardapio_atual)
@@ -3369,6 +3477,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         if certo_ctx:
                             item_certo, opcoes_variante = certo_ctx, None
                     indisp_pedidos = _indisponiveis_pedidos_na_mensagem(prompt, cardapio_atual)
+                    _bloqueio = (it_pedido and (
+                        (indisp_pedidos and it_pedido["id"] not in {x["id"] for x in indisp_pedidos}
+                         and not _tipo_do_item_na_mensagem(it_pedido, prompt))
+                        or _tipo_do_item_incompativel(it_pedido, prompt, cardapio_atual)
+                        or not _adicao_permitida(it_pedido, prompt, historico_msgs, obter_rascunho(id_usuario))))
+                    if _bloqueio:
+                        bloqueios_adicao.append((it_pedido["id"], it_pedido.get("nome_exibicao") or it_pedido.get("nome")))
                     if (it_pedido and indisp_pedidos and it_pedido["id"] not in {x["id"] for x in indisp_pedidos}
                             and not _tipo_do_item_na_mensagem(it_pedido, prompt)):
                         nomes_ind = " / ".join(x.get('nome_exibicao') or x.get('nome') for x in indisp_pedidos)
@@ -3773,6 +3888,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             leve = {"RETIRADA": "Ok, sua retirada já foi anotada!", "ENTREGA": "Ok, sua entrega já foi anotada!"}.get(tipo_atual, "Ok, já está anotado!")
             final_text = _RE_VOCE_JA_INFORMOU.sub(leve, final_text, count=1)
             log_observacao = log_observacao or "bronca_suavizada"
+
+        # Caso real (13/11): a trava recusou o "Quibe" e a IA escreveu "Acrescentei 4 kibes…" — o
+        # cliente achou que o pedido tinha kibe, o pedido saiu sem. Item recusado nesta mensagem que
+        # NÃO está no carrinho + texto afirmando adição → mostra o carrinho de verdade.
+        if bloqueios_adicao and not pedido_registrado_ok and _soa_como_adicao(final_text):
+            ids_carrinho = {i.get("id") for i in obter_rascunho(id_usuario).get("itens") or []}
+            faltam = [n for iid, n in bloqueios_adicao if iid not in ids_carrinho]
+            if faltam:
+                log_observacao = "afirmou_adicao_de_item_bloqueado"
+                final_text = (_texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
+                              + f"\nNão consegui incluir: {', '.join(dict.fromkeys(faltam))}. Pode me confirmar esse item?")
 
         # Nome já conhecido (o bot até chama o cliente por ele): não pede de novo.
         nome_conhecido = (obter_rascunho(id_usuario).get("nome_cliente") or nome_cliente or "").strip()
