@@ -160,6 +160,11 @@ def main():
             respostas = conversar(telefone, caso["mensagens"], args.pausa, args.verboso)
             pedidos = pedidos_do_telefone(telefone)
             falhas = avaliar(caso["espera"], pedidos, respostas)
+            if "atencao_humano" in caso["espera"]:
+                h = (db.collection("historico_conversas").document(telefone).get().to_dict() or {})
+                marcado = bool(h.get("precisa_atencao") and h.get("tipo_atencao") == "humano")
+                if marcado != caso["espera"]["atencao_humano"]:
+                    falhas.append(f"alerta pra equipe: esperado {caso['espera']['atencao_humano']}, ficou {marcado}")
             dur = time.time() - t0
             if not falhas:
                 ok_rodadas += 1

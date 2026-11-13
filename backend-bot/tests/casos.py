@@ -185,4 +185,58 @@ CASOS = [
         "espera": {"pedidos": 1, "resposta_contem": ["pix-teste@lileamar.com.br"],
                    "resposta_nao_contem": ["abc1231234567"]},
     },
+    # ---------- incidentes de nov/2026 com as mensagens reais dos clientes (rode: --snapshot -k real_) ----------
+    {   # Mariana 13/11: "kibes" x item "Quibe" — o pedido saiu sem kibe e o bot disse que tinha
+        "nome": "real_mariana_kibe_esfirra_pizza_espeto",
+        "mensagens": ["oi", "Gostaria de pedir 4 kibes, 2 pastéis de pizza, 2 espetos de frango e 2 pastéis de carne", "entrega",
+                      "Centro", "Rua Rute Pinto Pereira, 50", "Ok será em dinheiro, favor trazer troco para 100", "sim"],
+        "espera": {"pedidos": 1, "tipo_entrega": "ENTREGA", "forma_pagamento": "DINHEIRO", "observacao_contem": "troco",
+                   "quantidade": {"Quibe": 4, "Pastel Pizza": 2, "Espeto Frango": 2, "Pastel Carne": 2},
+                   "resposta_nao_contem": ["Não consegui incluir"]},
+    },
+    {
+        "nome": "real_kibe_assado_depois",
+        "mensagens": ["oi", "quero 4 kibes", "retirada", "dinheiro", "sim"],
+        "espera": {"pedidos": 1, "quantidade": {"Quibe": 4}},
+    },
+    {   # Mariana 13/11: depois da entrega "Os kibes não vieram" — bot prometeu sem avisar a equipe e montou pedido novo
+        "nome": "real_reclamacao_pos_pedido",
+        "mensagens": ["oi", "quero 2 pastel de carne", "retirada", "dinheiro", "sim",
+                      "Os kibes não vieram", "Faltou 4 kibes na entrega", "Por favor"],
+        "espera": {"pedidos": 1, "atencao_humano": True,
+                   "resposta_nao_contem": ["sem custo", "não cobraremos", "sem cobrar", "grátis", "gratis", "de graça", "reembols"]},
+    },
+    {   # Beatriz 06/11: "Retirada" repetido virava bronca; pedia o nome de novo
+        "nome": "real_retirada_repetida_nome_conhecido",
+        "mensagens": ["oi", "1 hambúrguer\n1 esfirra de frango\n1 coxinha c/ catupiry\n1 espetinho\n1 guaraná 200ml",
+                      "Beatriz Bonifácio", "Já pego aí", "Retirada", "Dinheiro", "sim"],
+        "espera": {"pedidos": 1, "tipo_entrega": "RETIRADA", "resposta_nao_contem": ["já tinha informado", "primeiro nome", "Não consegui incluir: Pastel"]},
+    },
+    {   # Taíssa 02/10: "Vai ser pix" não registrava o PIX
+        "nome": "real_vai_ser_pix",
+        "mensagens": ["oi", "quero 1 pastel de carne", "retirada", "vai ser pix", "sim"],
+        "espera": {"pedidos": 1, "forma_pagamento": "PIX"},
+    },
+    {   # Hugo/Hully 03/11: pedido de pastel virava coxinha
+        "nome": "real_pastel_nao_vira_coxinha",
+        "mensagens": ["oi", "Quero 1 pastel de frango com catupiry", "retirada", "dinheiro", "sim"],
+        "espera": {"itens_nao_contem": ["Coxinha"], "resposta_nao_contem": ["Adicionei 1 Coxinha"]},
+    },
+    {   # ketchup/maionese: sachê que acompanha, nunca item
+        "nome": "real_ketchup_maionese",
+        "mensagens": ["oi", "tem ketchup e maionese?", "quero 2 coxinha de frango com catupiry e uma maionese", "retirada", "dinheiro", "sim"],
+        "espera": {"pedidos": 1, "itens_nao_contem": ["ketchup", "maionese"], "resposta_contem": ["já acompanham"]},
+    },
+    {   # Isabella 26/10 e Francielle: endereço/horário vêm do cadastro, sem inventar
+        "nome": "real_endereco_e_horario_da_loja",
+        "mensagens": ["oi", "qual o endereço de vocês?", "vocês ficam até que horas?"],
+        "espera": {"pedidos": 0, "resposta_contem": ["Monsenhor Mancini", " às "], "resposta_nao_contem": ["Tonin", "perto do jantar"]},
+    },
+    {   # Taíssa 29/09: rua + bairro na mesma mensagem
+        "nome": "real_taissa_rua_e_bairro",
+        "mensagens": ["oi", "Um pastel de carne\nUm pastel de queijo\nUm de frango com catupiry\n\nPinto Ribeiro 505 , centro",
+                      "dinheiro", "sim", "sim"],
+        "espera": {"pedidos": 1, "tipo_entrega": "ENTREGA", "bairro": "Centro", "endereco_tem_numero": True},
+    },
+
 ]

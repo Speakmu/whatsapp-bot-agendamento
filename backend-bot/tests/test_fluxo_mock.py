@@ -1135,7 +1135,7 @@ def test_item_indisponivel_sempre_recebe_aviso_no_momento(ambiente, monkeypatch)
     bot.carregar_cardapio(forcar=True)
     monkeypatch.setattr(bot, "openai", _fake_openai_factory({"Quero 1 pastel de frango com catupiry": ["Anotado! Mais alguma coisa?"]}))
     resp = _conversar("553591526902", ["oi", "Quero 1 pastel de frango com catupiry"])[-1]
-    assert "No momento não temos o Pastel Frango com Catupiry" in resp
+    assert "No momento não temos: Pastel Frango com Catupiry" in resp
 
 
 def test_conversa_nova_apos_dias_nao_retoma_a_antiga(ambiente, monkeypatch):
@@ -1296,7 +1296,7 @@ def test_ia_nao_pode_afirmar_adicao_de_item_recusado(ambiente, monkeypatch):
                                            "Adicionei 2 coxinhas e 2 pastéis ao seu pedido!"]}
     monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
     resp = _conversar("553599000096", ["oi", "quero 2 pastel de carne"])[-1]
-    assert "Não consegui incluir" in resp and "Coxinha" in resp and "Adicionei 2 coxinhas" not in resp
+    assert "ainda não entrou no pedido" in resp and "Adicionei 2 coxinhas" not in resp and "Coxinha" not in resp
 
 
 def test_reclamacao_de_pedido_recente_avisa_a_equipe_e_bloqueia_pedido(ambiente, monkeypatch):
@@ -1325,3 +1325,96 @@ def test_troco_vai_pra_observacao_do_pedido(ambiente, monkeypatch):
 
 def test_rua_com_dois_pontos_nao_vira_bairro():
     assert bot._e_nome_de_rua_na_mensagem("Rute Pinto Pereira", "Rua: Rute Pinto Pereira, 50") is True
+
+
+def test_aviso_de_indisponivel_por_linha_e_com_plural(ambiente):
+    """Teste real 13/11: "esfirra de frango" não pode anunciar também "Esfirra Carne"; "esfirras de carne"
+    (plural) tem que anunciar."""
+    c = [{"id": "e1", "nome": "esfirra carne", "nome_exibicao": "Esfirra Carne", "disponivel": True, "disponivel_online": False},
+         {"id": "e2", "nome": "esfirra frango catupiry", "nome_exibicao": "Esfirra Frango Catupiry", "disponivel": True, "disponivel_online": False},
+         {"id": "h1", "nome": "hamburguer", "nome_exibicao": "Hamburguer", "disponivel": False},
+         {"id": "c1", "nome": "coxinha de frango com catupiry", "nome_exibicao": "Coxinha de frango com catupiry"}]
+    nomes = lambda m: sorted(x["nome_exibicao"] for x in bot._indisponiveis_pedidos_na_mensagem(m, c))
+    assert nomes("1 hambúrguer\n1 esfirra de frango\n1 coxinha c/ catupiry") == ["Hamburguer"]
+    assert nomes("quero 4 esfirras de carne, 2 hamburgueres") == ["Esfirra Carne", "Hamburguer"]
+    assert nomes("quero 2 coxinhas de frango com catupiry") == []
+
+
+def test_pedido_claro_nao_pede_permissao_pra_adicionar(ambiente, monkeypatch):
+    """Teste real 13/11: "quero 4 kibes" → a IA perguntava "Já posso adicionar?" sem adicionar. Força a adição."""
+    pc = _codigo("pastel de carne")
+    estado = {"tool_choices": []}
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
+        estado["tool_choices"].append(tool_choice)
+        if tool_choice == "required":
+            return _Resp(_Msg(tool_calls=[_tc("adicionar_item", {"item_id": pc, "quantidade": 4})]))
+        if isinstance(messages[-1], dict) and messages[-1].get("role") == "tool":
+            return _Resp(_Msg(content="Adicionei 4 pastéis de carne. Mais alguma coisa?"))
+        return _Resp(_Msg(content="Já posso adicionar 4 pastéis de carne para você?"))
+    monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
+    tel = "553599000099"
+    _conversar(tel, ["oi", "quero 4 pastel de carne"])
+    assert "required" in estado["tool_choices"] and [i["quantidade"] for i in bot.obter_rascunho(tel)["itens"]] == [4]
+
+
+def test_sabor_errado_do_mesmo_tipo_e_recusado(ambiente):
+    """Teste real 13/11: "2 pastéis de carne" → a IA adicionou Pastel Palmito."""
+    c = [{"id": "a", "nome": "pastel carne", "nome_exibicao": "Pastel Carne"}, {"id": "b", "nome": "pastel palmito", "nome_exibicao": "Pastel Palmito"},
+         {"id": "d", "nome": "pastel carne e queijo", "nome_exibicao": "Pastel Carne e Queijo"}, {"id": "e", "nome": "pastel queijo", "nome_exibicao": "Pastel Queijo"}]
+    carne, palmito, carne_queijo, queijo = c
+    assert bot._sabor_incompativel(palmito, "2 pastéis de carne", c) is True
+    assert bot._sabor_incompativel(carne, "2 pastéis de carne", c) is False
+    assert bot._sabor_incompativel(queijo, "pastel de carne e queijo", c) is True
+    assert bot._sabor_incompativel(carne_queijo, "pastel de carne e queijo", c) is False
+    assert bot._sabor_incompativel(palmito, "2 pastéis, 1 de carne e 1 de palmito", c) is False   # sem sabor na mesma parte: não bloqueia
+
+
+def test_nome_generico_nao_vira_nome_do_cliente(ambiente):
+    cfg = bot.obter_config_bot()
+    for n in ("cliente", "Cliente", "sem nome", "não informado"):
+        assert bot.rascunho_definir_nome("553599000100", n, cfg)["status"] == "erro"
+    assert bot.rascunho_definir_nome("553599000100", "Beatriz", cfg)["status"] == "ok"
+
+
+def test_sabor_nao_bloqueia_varios_itens_do_mesmo_tipo_na_mesma_mensagem(ambiente):
+    """Teste real 13/11: "2 pastéis de pizza e 2 pastéis de carne" — a 1ª versão da trava de sabor
+    recusava o de pizza por causa da linha do de carne."""
+    c = [{"id": "a", "nome": "pastel carne", "nome_exibicao": "Pastel Carne"}, {"id": "b", "nome": "pastel pizza", "nome_exibicao": "Pastel Pizza"},
+         {"id": "d", "nome": "pastel queijo", "nome_exibicao": "Pastel Queijo"}, {"id": "p", "nome": "pastel palmito", "nome_exibicao": "Pastel Palmito"}]
+    msg = "4 kibes, 2 pastéis de pizza, 2 espetos de frango e 2 pastéis de carne"
+    assert not bot._sabor_incompativel(c[0], msg, c) and not bot._sabor_incompativel(c[1], msg, c)
+    assert bot._sabor_incompativel(c[3], msg, c) is True
+
+
+def test_travas_nunca_bloqueiam_item_que_o_cliente_escreveu_cardapio_real(ambiente):
+    """Contra o CARDÁPIO REAL (tests/snapshot.json, gerado por snapshot_producao.py): nenhuma trava de
+    adição pode recusar um item quando o cliente escreve o nome dele — sozinho ou junto de outro item do
+    mesmo tipo. Foi assim que o "kibe"/"Quibe" e o "pastel de carne"+"pastel de pizza" escaparam."""
+    import json as _json
+    caminho = os.path.join(os.path.dirname(__file__), "snapshot.json")
+    if not os.path.exists(caminho):
+        pytest.skip("sem tests/snapshot.json (rode tests/snapshot_producao.py)")
+    docs = _json.load(open(caminho, encoding="utf-8"))["colecoes"]["cardapio"]
+    c = []
+    for did, d in docs.items():
+        it = dict(d); it["id"] = did
+        c.append(it)
+    nome = lambda i: i.get("nome_exibicao") or i.get("nome") or ""
+    ruins = []
+    for i in c:
+        msg = "quero 2 " + nome(i)
+        if bot._tipo_do_item_incompativel(i, msg, c) or bot._sabor_incompativel(i, msg, c):
+            ruins.append(nome(i))
+    por_tipo = {}
+    for i in c:
+        por_tipo.setdefault(bot._palavra_tipo(i), []).append(i)
+    for its in por_tipo.values():
+        for a in its:
+            for b2 in its:
+                if a is b2:
+                    continue
+                msg = "2 " + nome(a) + ", 3 " + nome(b2)
+                for x in (a, b2):
+                    if bot._sabor_incompativel(x, msg, c) or bot._tipo_do_item_incompativel(x, msg, c):
+                        ruins.append(nome(x) + " | " + msg)
+    assert not ruins, ruins[:5]

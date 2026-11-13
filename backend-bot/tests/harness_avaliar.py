@@ -27,6 +27,10 @@ def avaliar(espera, pedidos, respostas):
             falhas.append(f"valor_total: esperado {espera['valor_total']}, gravado {p.get('valor_total')}")
         if "bairro" in espera and str(p.get("bairro") or "").strip().lower() != espera["bairro"].lower():
             falhas.append(f"bairro: esperado {espera['bairro']}, gravado {p.get('bairro')}")
+        if "forma_pagamento" in espera and str(p.get("forma_pagamento") or "").upper() != espera["forma_pagamento"].upper():
+            falhas.append(f"forma_pagamento: esperado {espera['forma_pagamento']}, gravado {p.get('forma_pagamento')}")
+        if "observacao_contem" in espera and espera["observacao_contem"].lower() not in str(p.get("observacao") or "").lower():
+            falhas.append(f"observacao sem '{espera['observacao_contem']}' (gravada: {p.get('observacao')!r})")
         for trecho in espera.get("itens_contem", []):
             if trecho.lower() not in itens_txt:
                 falhas.append(f"item faltando: '{trecho}' (itens: {itens})")

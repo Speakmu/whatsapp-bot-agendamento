@@ -788,8 +788,10 @@ def rascunho_definir_pagamento(wa_id, forma, bot_cfg):
 def rascunho_definir_nome(wa_id, nome, bot_cfg):
     r = obter_rascunho(wa_id)
     nome = str(nome or "").strip()
-    if nome.lower() in ("", "none", "null", "n/a"):
-        return _resumo_rascunho(r, bot_cfg, status="erro", motivo="Nome vazio.")
+    # Teste real (13/11): a IA gravou o nome "cliente" e disse "Pedido confirmado no nome cliente".
+    if not re.search(r"[a-zA-ZÀ-ÿ]{2,}", nome) or _normalizar_termo(nome) in ("", "none", "null", "n/a", "cliente", "clientes", "sem nome", "nao informado",
+                                   "nao sei", "anonimo", "usuario", "nome", "desconhecido", "nao quer informar"):
+        return _resumo_rascunho(r, bot_cfg, status="erro", motivo="Nome vazio ou genérico: não registre; siga sem nome.")
     r["nome_cliente"] = nome
     _salvar_rascunho(wa_id, r, tocou=False)
     return _resumo_rascunho(r, bot_cfg)
@@ -2204,15 +2206,67 @@ def _tipo_do_item_incompativel(item, mensagem, cardapio):
     return True
 
 
+_STOPWORDS_NOME_ITEM = {"de", "da", "do", "dos", "das", "com", "sem", "e", "em", "ao", "na", "no"}
+
+
+def _segmentos_do_pedido(mensagem):
+    """Separa a mensagem em partes de pedido: uma por linha, vírgula, ponto e vírgula ou ' e '.
+    (Evita juntar palavras de itens diferentes: "esfirra de frango" + "coxinha c/ catupiry".)"""
+    partes = re.split(r"[\n;,]+|\s+e\s+", str(mensagem or ""))
+    return [[t for t in _tokens_da_mensagem(x)] for x in partes if x.strip()]
+
+
+def _palavras_do_nome(item):
+    nome = _normalizar_termo((item or {}).get("nome_exibicao") or (item or {}).get("nome") or "")
+    return [w for w in re.split(r"[^a-z0-9]+", nome) if len(w) >= 3 and w not in _STOPWORDS_NOME_ITEM]
+
+
+_PALAVRAS_SEM_SABOR = {"lata", "garrafa", "pet", "zero", "litro", "litros", "natural", "gelada", "grande", "pequena",
+                       "media", "mini", "tradicional", "simples", "assado", "frito", "assada", "frita"}
+
+
+def _sabor_incompativel(item, mensagem, cardapio):
+    """Mesmo TIPO, SABOR errado: o cliente escreveu "2 pastéis de carne" e a IA adicionou o Pastel
+    Palmito (teste real 13/11). Numa parte do pedido que cita o tipo do item e só sabores de OUTROS
+    itens do mesmo tipo (nenhum do próprio item), o item é recusado."""
+    tipo = _palavra_tipo(item)
+    if not tipo:
+        return False
+
+    def sabores(i):
+        return [w for w in _palavras_do_nome(i)
+                if len(w) >= 4 and not any(ch.isdigit() for ch in w)
+                and not _token_parecido(w, tipo) and w not in _PALAVRAS_SEM_SABOR]
+
+    proprios = sabores(item)
+    if not proprios:
+        return False
+    outros = set()
+    for i in cardapio or []:
+        pt = _palavra_tipo(i)
+        if pt and i.get("id") != item.get("id") and _token_parecido(pt, tipo):
+            outros.update(sabores(i))
+    outros = {w for w in outros if not any(_token_parecido(w, p) for p in proprios)}
+    # Só recusa se NENHUMA parte do pedido cita o sabor do próprio item (a mensagem pode ter vários
+    # pastéis: "2 de pizza" e "2 de carne" — cada item tem a sua linha) e alguma parte que cita o
+    # tipo traz sabor de OUTRO item. (Teste real 13/11: a 1ª versão olhava linha por linha e recusava
+    # o pastel de pizza por causa da linha do pastel de carne.)
+    cita_tipo = [seg for seg in _segmentos_do_pedido(mensagem) if any(_token_parecido(tipo, t) for t in seg)]
+    if any(_token_parecido(p, t) for seg in cita_tipo for p in proprios for t in seg):
+        return False
+    return any(_token_parecido(o, t) for seg in cita_tipo for o in outros for t in seg)
+
+
 def _indisponiveis_pedidos_na_mensagem(mensagem, cardapio):
-    """Itens indisponíveis no momento cujo nome COMPLETO o cliente escreveu
-    ("pastel de frango com catupiry" → Pastel Frango com Catupiry)."""
-    toks = set(re.split(r"[^a-z0-9]+", _normalizar_termo(mensagem or "")))
+    """Itens indisponíveis no momento que o cliente escreveu: TODAS as palavras do nome numa mesma parte
+    do pedido ("pastel de frango com catupiry" → Pastel Frango com Catupiry; "4 esfirras de carne" →
+    Esfirra Carne, mas "1 esfirra de frango" NÃO casa com Esfirra Carne). Tolerante a plural/grafia."""
+    segmentos = _segmentos_do_pedido(mensagem)
     achados = []
     for it in cardapio or []:
         if it.get('disponivel') is False or not _disponivel_online(it):
-            t = _tokens_item(it)
-            if t and t <= toks:
+            palavras = _palavras_do_nome(it)
+            if palavras and any(all(any(_token_parecido(w, t) for t in seg) for w in palavras) for seg in segmentos):
                 achados.append(it)
     return achados
 
@@ -2632,6 +2686,15 @@ def _soa_como_nao_temos(texto):
     t = _normalizar_termo(texto or "")
     return any(r in t for r in ("nao temos", "nao trabalhamos", "nao possuimos", "nao esta no cardapio",
                                 "nao tem no cardapio", "nao temos no cardapio", "nao consta no cardapio"))
+
+
+_RE_PEDE_PERMISSAO_DE_ADICAO = re.compile(
+    r"(ja )?posso (adicionar|incluir|anotar|colocar)|quer que eu (adicione|inclua|anote|coloque)|devo (adicionar|incluir|anotar)|"
+    r"gostaria que eu (adicione|inclua)|(deseja|quer) (que eu )?(adicionar|incluir)|so pra confirmar[^.?!]{0,40}(adicion|inclu)")
+
+
+def _soa_como_pedindo_permissao_de_adicao(texto):
+    return bool(texto and "?" in texto and _RE_PEDE_PERMISSAO_DE_ADICAO.search(_normalizar_termo(texto)))
 
 
 def _soa_como_adicao(texto):
@@ -3435,8 +3498,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 # retentativa forçada. Pergunta "tem X?" não entra (não é pedido).
                 soa_nao_temos = (_soa_como_nao_temos(final_text) and pergunta_variacao is None
                                  and _RE_MSG_DE_PEDIDO.search(_normalizar_termo(prompt)))
+                # Teste real (13/11): "quero 4 kibes" → a IA respondeu "Já posso adicionar 4 quibes?" três
+                # vezes, sem adicionar. Pedido claro de item não pede permissão: força a adição.
+                pedindo_permissao = (_soa_como_pedindo_permissao_de_adicao(final_text) and pergunta_variacao is None
+                                     and _RE_MSG_DE_PEDIDO.search(_normalizar_termo(prompt)))
                 if (not item_adicionado_ok and not retentativa_adicao_feita
-                        and (_soa_como_adicao(final_text) or soa_nao_temos)
+                        and (_soa_como_adicao(final_text) or soa_nao_temos or pedindo_permissao)
                         and _itens_mencionados(prompt, cardapio_atual)):
                     retentativa_adicao_feita = True
                     log_observacao = "retentativa_forcada_adicionar_item"
@@ -3481,6 +3548,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                         (indisp_pedidos and it_pedido["id"] not in {x["id"] for x in indisp_pedidos}
                          and not _tipo_do_item_na_mensagem(it_pedido, prompt))
                         or _tipo_do_item_incompativel(it_pedido, prompt, cardapio_atual)
+                        or _sabor_incompativel(it_pedido, prompt, cardapio_atual)
                         or not _adicao_permitida(it_pedido, prompt, historico_msgs, obter_rascunho(id_usuario))))
                     if _bloqueio:
                         bloqueios_adicao.append((it_pedido["id"], it_pedido.get("nome_exibicao") or it_pedido.get("nome")))
@@ -3491,6 +3559,11 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                                                      motivo=f"O cliente pediu '{nomes_ind}', que está INDISPONÍVEL NO MOMENTO, e '{it_pedido.get('nome_exibicao') or it_pedido.get('nome')}' "
                                                             "NÃO é o que ele pediu — não adicionei. Diga \"no momento não temos o item\" e ofereça "
                                                             "alternativas disponíveis; só adicione outro item se o cliente aceitar.")
+                    elif it_pedido and _sabor_incompativel(it_pedido, prompt, cardapio_atual):
+                        resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg, status="erro",
+                                                     motivo=f"'{it_pedido.get('nome_exibicao') or it_pedido.get('nome')}' NÃO é o SABOR que o cliente escreveu — "
+                                                            "não adicionei. Adicione o item do sabor que ELE pediu (código da lista do prompt); "
+                                                            "se esse sabor estiver indisponível ou não existir, avise — nunca troque por outro sabor.")
                     elif it_pedido and _tipo_do_item_incompativel(it_pedido, prompt, cardapio_atual):
                         resultado = _resumo_rascunho(obter_rascunho(id_usuario), bot_cfg, status="erro",
                                                      motivo=f"O cliente pediu outro TIPO de item: '{it_pedido.get('nome_exibicao') or it_pedido.get('nome')}' "
@@ -3898,7 +3971,7 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
             if faltam:
                 log_observacao = "afirmou_adicao_de_item_bloqueado"
                 final_text = (_texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
-                              + f"\nNão consegui incluir: {', '.join(dict.fromkeys(faltam))}. Pode me confirmar esse item?")
+                              + "\nAlgum item que você pediu ainda não entrou no pedido — me confirma quais faltam, por favor?")
 
         # Nome já conhecido (o bot até chama o cliente por ele): não pede de novo.
         nome_conhecido = (obter_rascunho(id_usuario).get("nome_cliente") or nome_cliente or "").strip()
@@ -3930,9 +4003,10 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         # "no momento não temos" (caso 03/11: a IA adicionou outro item sem dizer nada).
         indisp_msg = _indisponiveis_pedidos_na_mensagem(prompt, cardapio_atual)
         if indisp_msg and "no momento" not in _normalizar_termo(final_text or ""):
-            nomes_i = " e ".join(x.get('nome_exibicao') or x.get('nome') for x in indisp_msg)
+            nomes_i = [(x.get('nome_exibicao') or x.get('nome') or '').strip() for x in indisp_msg]
+            lista_i = nomes_i[0] if len(nomes_i) == 1 else ", ".join(nomes_i[:-1]) + " e " + nomes_i[-1]
             log_observacao = "aviso_item_indisponivel_acrescentado"
-            final_text = (final_text or "").rstrip() + f"\n\nNo momento não temos o {nomes_i}. Posso te oferecer outra opção?"
+            final_text = (final_text or "").rstrip() + f"\n\nNo momento não temos: {lista_i}. Posso te oferecer outra opção?"
 
         if pediu_humano and "equipe" not in _normalizar_termo(final_text or ""):
             log_observacao = "pediu_humano_texto_substituido"
