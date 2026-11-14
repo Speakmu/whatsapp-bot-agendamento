@@ -64,6 +64,8 @@ export const finalizarPedido = async ({
     calcularTotal,
     setCarrinho,
     setAbaAtiva,
+    setModalVisivel,
+    setStatusPagamento,
     pontosResgatados = 0,
     descontoCupom = 0,
     descontoPontos = 0,
@@ -132,8 +134,15 @@ export const finalizarPedido = async ({
     try {
         await db.collection('pedidos').add(pedido);
         setCarrinho([]);
+        // Mesmo modal de sucesso usado no pagamento por cartão (alert() nativo
+        // não aparece no iOS — ver app/index.tsx), seguido do redirecionamento.
+        if (setStatusPagamento && setModalVisivel) {
+            setStatusPagamento('sucesso');
+            setModalVisivel(true);
+        } else {
+            alert('Pedido enviado com sucesso!');
+        }
         setAbaAtiva('pedidos');
-        alert('Pedido enviado com sucesso!');
     } catch (error) {
         console.error("Erro ao gravar:", error);
         alert('Erro ao processar pedido.');

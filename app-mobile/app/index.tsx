@@ -402,6 +402,8 @@ interface SacolaProps {
   finalizarPedido: (dados: any) => void;
   processarPagamentoAPI: (dados: any) => void;
   setModalCartaoVisivel: (v: boolean) => void;
+  setModalVisivel: (v: boolean) => void;
+  setStatusPagamento: (s: 'sucesso' | 'erro') => void;
   processarPagamentoPix: () => void;
   tecladoVisivel: boolean;
   cupom?: string;
@@ -533,6 +535,7 @@ const SecaoSacola = ({
   setAbaAtiva, finalizarPedido,
   processarPagamentoAPI,
   setModalCartaoVisivel,
+  setModalVisivel, setStatusPagamento,
   processarPagamentoPix,
   tecladoVisivel,
   cupom, setCupom, aplicarCupom, cupomAplicado,
@@ -892,7 +895,7 @@ const SecaoSacola = ({
                 } else if (metodoPagamento === 'pix') {
                   processarPagamentoPix();
                 } else {
-                  finalizarPedido({ carrinho, usuarioId, nome, telefone, cpf, endereco, observacao, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, pontosResgatados,
+                  finalizarPedido({ carrinho, usuarioId, nome, telefone, cpf, endereco, observacao, bairro, taxaEntrega, metodoPagamento, tipoEntrega, calcularTotal, setCarrinho, setAbaAtiva, setModalVisivel, setStatusPagamento, pontosResgatados,
                     descontoCupom: calcularDesconto ? calcularDesconto() : 0,
                     descontoPontos: calcularDescontoResgate ? calcularDescontoResgate() : 0,
                     cupomCodigo: cupomAplicado?.codigo || null,
@@ -2867,6 +2870,8 @@ function AppCliente() {
                 finalizarPedido={finalizarPedido}
                 processarPagamentoAPI={processarPagamentoAPI}
                 setModalCartaoVisivel={setModalCartaoVisivel}
+                setModalVisivel={setModalVisivel}
+                setStatusPagamento={setStatusPagamento}
                 processarPagamentoPix={processarPagamentoPix}
                 tecladoVisivel={tecladoVisivel}
                 cupom={cupom}
@@ -2963,13 +2968,16 @@ function AppCliente() {
 
             <Text style={styles.textoModal}>
               {statusPagamento === 'sucesso'
-                ? 'Seu pagamento foi aprovado e já estamos preparando seu pedido!'
+                ? 'Pedido concluído com sucesso! Acompanhe tudo na aba Pedidos.'
                 : 'Não conseguimos processar seu pagamento. Tente novamente ou escolha outra forma.'}
             </Text>
 
             <TouchableOpacity
               style={[styles.btnModal, { backgroundColor: statusPagamento === 'sucesso' ? BRAND_GREEN : BRAND_GREEN }]}
-              onPress={() => setModalVisivel(false)}
+              onPress={() => {
+                setModalVisivel(false);
+                if (statusPagamento === 'sucesso') setAbaAtiva('pedidos');
+              }}
             >
               <Text style={{ color: '#fff', fontWeight: 'bold' }}>Entendido</Text>
             </TouchableOpacity>
@@ -3126,7 +3134,13 @@ function AppCliente() {
               <Text style={{ color: '#fff', fontWeight: 'bold' }}>Copiar Código PIX</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => setModalPixVisivel(false)} style={{ marginTop: 20 }}>
+            <TouchableOpacity
+              onPress={() => {
+                setModalPixVisivel(false);
+                setAbaAtiva('pedidos');
+              }}
+              style={{ marginTop: 20 }}
+            >
               <Text style={{ color: BRAND_GREEN, fontWeight: 'bold' }}>Fechar</Text>
             </TouchableOpacity>
           </View>
