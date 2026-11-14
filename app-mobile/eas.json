@@ -22,7 +22,12 @@
   },
   "submit": {
     "production": {
-      "android": { "track": "internal", "releaseStatus": "draft" }
+      "android": {
+        "track": "internal",
+        "releaseStatus": "draft",
+        "serviceAccountKeyPath": "C:/Users/muril/Documents/Documentos de sistemas/Geral/focus-antler-514617-m1-26f1d7e88099.json"
+      },
+      "ios": { "ascAppId": "6826547834" }
     }
   }
 }
