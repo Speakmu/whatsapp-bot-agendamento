@@ -431,6 +431,31 @@ interface PedidosProps {
   styles: any;
   getCorStatus: (status: string) => string;
   onVerPix: (codigo: string) => void;
+  tempoEstimadoEntrega: number;
+  tempoEstimadoRetirada: number;
+  agora: number;
+}
+// Previsão de chegada/retirada mostrada no card do pedido. Só faz sentido
+// enquanto o pedido está "na cozinha" (aguardando ou em preparo) — depois que
+// sai pra entrega ou já foi concluído/cancelado o status já conta a história.
+function textoPrevisao(item: any, tempoEstimadoEntrega: number, tempoEstimadoRetirada: number, agora: number): string | null {
+  if (!['PENDENTE_VALIDACAO', 'PENDENTE_PREPARO', 'EM_PREPARO', 'PRONTO_PARA_ENTREGA'].includes(item?.status)) return null;
+
+  const horaPedido = item?.hora_pedido;
+  const horaMs = horaPedido && typeof horaPedido.toMillis === 'function' ? horaPedido.toMillis() : null;
+  if (!horaMs) return null; // serverTimestamp ainda não resolveu no cliente
+
+  const retirada = String(item?.tipo_entrega || '').toUpperCase() === 'RETIRADA';
+  const tempoTotal = retirada ? tempoEstimadoRetirada : tempoEstimadoEntrega;
+  const decorridoMin = (agora - horaMs) / 60000;
+  const restanteMin = Math.ceil(tempoTotal - decorridoMin);
+
+  if (restanteMin > 0) {
+    return retirada
+      ? `⏱️ Previsão: pronto em até ${restanteMin} min`
+      : `⏱️ Previsão: chega em até ${restanteMin} min`;
+  }
+  return '⏱️ Já passou do previsto, pode demorar mais um pouquinho — já estamos nisso!';
 }
 // Texto amigável do status na aba "Meus Pedidos" (antes mostrava o nome
 // técnico cru: "SAIU PARA ENTREGA", "CONCLUIDO"). Retirada e entrega têm
@@ -450,7 +475,7 @@ function textoStatusPedido(item: any): string {
   }
 }
 
-const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix }: PedidosProps) => {
+const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix, tempoEstimadoEntrega, tempoEstimadoRetirada, agora }: PedidosProps) => {
   return (
     <View style={{ flex: 1, backgroundColor: '#f9f9f9', paddingTop: insets.top }}>
       <Text style={[styles.tituloSecao, { margin: 15 }]}>Meus Pedidos 📋</Text>
@@ -507,6 +532,15 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix }: P
               <Text style={styles.totalPedido}>
                 Total: R$ {typeof valorExibicao === 'number' ? valorExibicao.toFixed(2) : valorExibicao}
               </Text>
+
+              {(() => {
+                const previsao = textoPrevisao(item, tempoEstimadoEntrega, tempoEstimadoRetirada, agora);
+                return previsao ? (
+                  <Text style={{ marginTop: 6, color: '#555', fontWeight: '600', fontSize: 12 }}>
+                    {previsao}
+                  </Text>
+                ) : null;
+              })()}
 
               {aguardandoPix && (
                 <Text style={{ marginTop: 6, color: BRAND_GREEN, fontWeight: 'bold', fontSize: 12 }}>
@@ -1720,6 +1754,11 @@ function AppCliente() {
   const [bairro, setBairro] = useState('');
   const [bairrosEntrega, setBairrosEntrega] = useState<string[]>([]);
   const [taxaEntrega, setTaxaEntrega] = useState(0);
+  // Previsão de tempo mostrada na aba Pedidos (ver SecaoPedidos) — sem isso o
+  // cliente não tem nenhuma noção de prazo no app e acaba mandando mensagem
+  // no WhatsApp perguntando quanto falta, gerando atendimento desnecessário.
+  const [tempoEstimadoEntrega, setTempoEstimadoEntrega] = useState(40);
+  const [tempoEstimadoRetirada, setTempoEstimadoRetirada] = useState(20);
   useEffect(() => {
     const unsub = onSnapshot(doc(dbModular, 'configuracoes', 'bot'), (s: any) => {
       const d = s && s.exists() ? (s.data() || {}) : {};
@@ -1728,8 +1767,17 @@ function AppCliente() {
       setFeriasCfg({ ativo: d.ferias_ativo === true, inicio: d.ferias_inicio, fim: d.ferias_fim, mensagem: d.ferias_mensagem });
       setBairrosEntrega(Array.isArray(d.bairros_entrega) ? d.bairros_entrega : []);
       setTaxaEntrega(Number(d.taxa_entrega) || 0);
+      setTempoEstimadoEntrega(Number(d.tempo_estimado_entrega) || 40);
+      setTempoEstimadoRetirada(Number(d.tempo_estimado_retirada) || 20);
     }, () => { });
     return () => unsub();
+  }, []);
+  // Relógio pro contador da aba Pedidos: só precisa re-renderizar de tempos em
+  // tempos, não a cada segundo (o texto mostra minutos, não segundos).
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 30000);
+    return () => clearInterval(t);
   }, []);
   useEffect(() => {
     function recalcular() {
@@ -2747,6 +2795,9 @@ function AppCliente() {
                   setPixCopiaECola(codigo);
                   setModalPixVisivel(true);
                 }}
+                tempoEstimadoEntrega={tempoEstimadoEntrega}
+                tempoEstimadoRetirada={tempoEstimadoRetirada}
+                agora={agora}
               />
               )
             )}
