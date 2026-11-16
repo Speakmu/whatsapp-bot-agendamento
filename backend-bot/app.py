@@ -103,6 +103,10 @@ BOT_CONFIG_DEFAULTS = {
     # cliente pedir, o bot só informa que já acompanham (texto editável em Config do Bot).
     "aviso_sache_ativo": True,
     "aviso_sache_texto": "O ketchup e a maionese (sachês) já acompanham todos os pedidos, sem custo. 😊",
+    # Cliente pergunta quanto tempo demora: resposta FIXA (a IA inventava "30 a 45", "40 a 60 min").
+    "aviso_prazo_ativo": True,
+    "aviso_prazo_texto": ("O pedido leva até 40 minutos para ficar pronto. Se você comprou pelo aplicativo, "
+                          "pode acompanhar o andamento na aba Pedidos. 😊"),
 }
 
 def _params_do_modelo(modelo):
@@ -1959,6 +1963,15 @@ _RE_PERGUNTA_ENDERECO_LOJA = re.compile(
     r"\bfica (perto|proximo) (de|do|da)\b|ponto de referencia|\bperto d[oae]s?\b[^.!]*\?")
 
 
+_RE_PERGUNTA_PRAZO = re.compile(
+    r"quanto tempo|quanto demora|\bqual (e )?o (tempo|prazo)|\b(tempo|prazo|previsao|estimativa)\b[^.?!]{0,20}\b(entrega|entregar|preparo|pronto|ficar|chegar|retirada|retirar|pedido)|"
+    r"\b(entrega|entregar|preparo|pedido|retirada)\b[^.?!]{0,20}\b(tempo|prazo|previsao|estimativa)\b|"
+    r"\b(vai|vao|pode|costuma|deve|vem)\s+demora\w*|\bdemora\w* (muito|quanto|pra|para)|\bdemorad\w*|"
+    r"fica pronto|ficar pronto|fica pra quando|fica para quando|quando (fica|chega|sai|vai ficar)\b[^.?!]{0,20}\b(pronto|pedido|entrega)|"
+    r"que horas (fica|chega|sai|vai chegar|vai ficar|posso (buscar|retirar|pegar|ir))|quanto falta|em quanto tempo")
+_RE_NAO_E_PERGUNTA_PRAZO = re.compile(r"\bja saiu\b|\bquero\b|queria|gostaria|\bpedir\b|\badiciona|\bavis[ea]\w*[- ]?(me)?\b")
+
+
 _RE_PERGUNTA_HORARIO = re.compile(
     r"\bhorarios?\b|ate que horas|que horas (voces |a loja )?(abr|fech|fic|funcion|atend)|a que horas (voces |a loja )?(abr|fech)|"
     r"ate (a )?que hora|\b(abre|fecha|funciona|atende)\w* (hoje|amanha|domingo|sabado|segunda|ate)|ate quando (voces |a loja )?(fic|funcion|atend|abert)")
@@ -3140,6 +3153,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         salvar_historico_firestore(wa_id, "assistant", resposta_e, bot_cfg.get("max_historico_salvar"))
         registrar_log_conversa(id_usuario, origem, prompt, resposta_e, "servidor", observacao="endereco_da_loja_respondido_pelo_servidor")
         return resposta_e
+
+    # Cliente perguntou o tempo do pedido/entrega: resposta fixa de Config do Bot. A IA não tem
+    # esse dado e inventava prazo diferente a cada vez ("30 a 45", "40 a 60 minutos").
+    p_prazo = _normalizar_termo(prompt or "")
+    aviso_prazo = str(bot_cfg.get("aviso_prazo_texto") or BOT_CONFIG_DEFAULTS["aviso_prazo_texto"]).strip()
+    if (bot_cfg.get("aviso_prazo_ativo", True) and aviso_prazo and len(prompt or "") <= 140
+            and _RE_PERGUNTA_PRAZO.search(p_prazo) and not _RE_NAO_E_PERGUNTA_PRAZO.search(p_prazo)):
+        salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        salvar_historico_firestore(wa_id, "assistant", aviso_prazo, bot_cfg.get("max_historico_salvar"))
+        registrar_log_conversa(id_usuario, origem, prompt, aviso_prazo, "servidor", observacao="prazo_respondido_pelo_servidor")
+        return aviso_prazo
 
     horario_txt = _horario_legivel(bot_cfg)
     if (horario_txt and len(prompt or "") <= 90 and _RE_PERGUNTA_HORARIO.search(_normalizar_termo(prompt or ""))

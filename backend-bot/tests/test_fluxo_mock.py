@@ -1430,3 +1430,40 @@ def test_pergunta_de_pedido_inexistente_com_carrinho_aberto_e_respondida(ambient
     monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
     resp = _conversar(tel, ["oi", "O meu pedido já saiu para entrega"])[-1]
     assert "Não encontrei nenhum pedido seu já registrado" in resp and "ainda não foi fechado" in resp and "Pastel" in resp
+
+
+PERGUNTAS_DE_PRAZO_REAIS = [
+    "Quanto tempo?", "Sabe me dizer quanto tempo", "Vai demorar muito",
+    "Boa tarde! Vai demorar muito?  12:30h eu preciso sair para trabalhar...",
+    "qual o tempo de entrega ?", "Qual o prazo de entrega?", "Quanto tempo para entregar 2 pastel ?",
+    "Pra entrega de salgado é qual tempo porfavor?", "Fiz um pedido sabe me informar o tempo de entrega?",
+    "Fiz o pedido pelo app mas não consegui ver qual a estimativa de tempo pra entregar",
+    "Fiz o pedido pelo link agora porém não tem o tempo para entrega. Pode me informar porfavor.",
+]
+
+
+def test_prazo_do_pedido_e_resposta_fixa_do_servidor(ambiente, monkeypatch):
+    """Clientes perguntavam 'quanto tempo?' e a IA inventava '30 a 45', '40 a 60 minutos'. A resposta
+    agora é fixa (até 40 min + acompanhar na aba Pedidos), igual pra qualquer jeito de perguntar."""
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({}))
+    for i, pergunta in enumerate(PERGUNTAS_DE_PRAZO_REAIS):
+        resp = _conversar(f"5535990001{i:02d}", ["oi", pergunta])[-1]
+        assert "até 40 minutos" in resp and "aba Pedidos" in resp, (pergunta, resp)
+        assert "30" not in resp and "60" not in resp
+
+
+def test_prazo_nao_atrapalha_status_nem_pedido(ambiente, monkeypatch):
+    """'já saiu pra entrega?', 'me avise quando sair' e 'quero 2 coxinhas' NÃO são pergunta de prazo."""
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"outra coisa": ["resposta da ia"]}))
+    for i, frase in enumerate(["O meu pedido já saiu para entrega", "Quando sair para entrega me avise",
+                               "Avise-me quando estiver pronto", "quero 2 coxinhas de frango", "vocês entregam rápido?"]):
+        resp = _conversar(f"5535990002{i:02d}", ["oi", frase])[-1]
+        assert "até 40 minutos para ficar pronto" not in resp, (frase, resp)
+
+
+def test_prazo_pode_ser_editado_e_desligado(ambiente, monkeypatch):
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"quanto tempo": ["resposta da ia"]}))
+    ambiente.collection("configuracoes").document("bot").set({"aviso_prazo_texto": "Uns 25 minutinhos!"}, merge=True)
+    assert "25 minutinhos" in _conversar("553599000300", ["oi", "quanto tempo?"])[-1]
+    ambiente.collection("configuracoes").document("bot").set({"aviso_prazo_ativo": False}, merge=True)
+    assert "25 minutinhos" not in _conversar("553599000301", ["oi", "quanto tempo?"])[-1]

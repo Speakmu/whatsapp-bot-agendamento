@@ -33,7 +33,9 @@ document.addEventListener('DOMContentLoaded', () => {
         aviso_encomenda_festa_ativo: true,
         aviso_encomenda_festa_texto: 'Para encomendas de salgadinhos para festa ou cento de salgados, fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp).',
         aviso_sache_ativo: true,
-        aviso_sache_texto: 'O ketchup e a maionese (sachês) já acompanham todos os pedidos, sem custo. 😊'
+        aviso_sache_texto: 'O ketchup e a maionese (sachês) já acompanham todos os pedidos, sem custo. 😊',
+        aviso_prazo_ativo: true,
+        aviso_prazo_texto: 'O pedido leva até 40 minutos para ficar pronto. Se você comprou pelo aplicativo, pode acompanhar o andamento na aba Pedidos. 😊'
     };
 
     // Config técnica de suporte (não é decisão comercial do cliente) — só
@@ -154,6 +156,8 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-festa-texto').value = d.aviso_encomenda_festa_texto || '';
             $('bot-sache-ativo').checked = d.aviso_sache_ativo !== false;
             $('bot-sache-texto').value = d.aviso_sache_texto || '';
+            $('bot-prazo-ativo').checked = d.aviso_prazo_ativo !== false;
+            $('bot-prazo-texto').value = d.aviso_prazo_texto || '';
             $('bot-nome-atendente').value = d.nome_atendente || '';
             $('bot-nome-empresa').value = d.nome_empresa || '';
             $('bot-chave-pix').value = d.chave_pix || '';
@@ -209,6 +213,8 @@ document.addEventListener('DOMContentLoaded', () => {
             aviso_encomenda_festa_texto: $('bot-festa-texto').value.trim() || BOT_DEFAULTS.aviso_encomenda_festa_texto,
             aviso_sache_ativo: $('bot-sache-ativo').checked,
             aviso_sache_texto: $('bot-sache-texto').value.trim() || BOT_DEFAULTS.aviso_sache_texto,
+            aviso_prazo_ativo: $('bot-prazo-ativo').checked,
+            aviso_prazo_texto: $('bot-prazo-texto').value.trim() || BOT_DEFAULTS.aviso_prazo_texto,
             nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,
             nome_empresa: $('bot-nome-empresa').value.trim() || BOT_DEFAULTS.nome_empresa,
             chave_pix: $('bot-chave-pix').value.trim(),

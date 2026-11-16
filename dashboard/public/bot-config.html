@@ -116,6 +116,13 @@
                 <small>Eles n&atilde;o s&atilde;o item do card&aacute;pio: o bot n&atilde;o adiciona ao pedido, n&atilde;o cobra e n&atilde;o chama a equipe &mdash; s&oacute; informa isso.</small>
             </div>
 
+            <label class="check-line"><input id="bot-prazo-ativo" type="checkbox"> Responder com a mensagem abaixo quando o cliente perguntar quanto tempo demora o pedido</label>
+            <div class="campo">
+                <label>Mensagem sobre o tempo do pedido</label>
+                <textarea id="bot-prazo-texto" placeholder="O pedido leva at&eacute; 40 minutos para ficar pronto. Se voc&ecirc; comprou pelo aplicativo, pode acompanhar o andamento na aba Pedidos."></textarea>
+                <small>Resposta fixa (a IA n&atilde;o inventa prazo). Vale para perguntas como "quanto tempo?", "vai demorar muito?", "qual o tempo de entrega?".</small>
+            </div>
+
             <div class="acoes"><button class="btn btn-salvar" id="salvar-bot">Salvar configura&ccedil;&otilde;es do bot</button></div>
         </div>
 
