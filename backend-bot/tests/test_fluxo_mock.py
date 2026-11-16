@@ -53,7 +53,7 @@ def _fake_openai_factory(roteiro):
          do cliente (cada rodada do loop consome um passo), fechando com texto.
     O passo é escolhido pelo número de resultados de ferramenta já presentes
     desde a última mensagem do cliente. tool_choice="none" sempre devolve texto."""
-    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
         idx_user = max(i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "user")
         ultima = messages[idx_user]["content"]
         feitos = sum(1 for m in messages[idx_user:] if isinstance(m, dict) and m.get("role") == "tool")
@@ -209,7 +209,7 @@ def test_carrinho_sobrevive_sem_historico(ambiente, monkeypatch):
 
 def test_prompt_traz_estado_do_rascunho(ambiente, monkeypatch):
     capturado = {}
-    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
         capturado["system"] = messages[0]["content"]
         return _Resp(_Msg(content="ok"))
     monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
@@ -281,7 +281,7 @@ def test_prompt_contem_cardapio_com_codigos(ambiente, monkeypatch):
     Item indisponível só no online (botão "esgotar no app e WhatsApp") APARECE marcado:
     antes sumia e a IA trocava pastel por coxinha (03/11)."""
     capturado = {}
-    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
         capturado["system"] = messages[0]["content"]
         capturado["tools"] = [t["function"]["name"] for t in tools]
         return _Resp(_Msg(content="ok"))
@@ -343,7 +343,7 @@ def test_caminho_legado_nome_produto_usa_apelido(ambiente):
 
 def test_prompt_mostra_apelido_ao_lado_do_item(ambiente, monkeypatch):
     capturado = {}
-    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
         capturado["system"] = messages[0]["content"]
         return _Resp(_Msg(content="ok"))
     monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
@@ -413,7 +413,7 @@ def test_slots_obvios_pelo_servidor(ambiente, monkeypatch):
     """'retirada' e 'dinheiro' viram estado ANTES da IA, mesmo que ela não
     chame definir_*; e o prompt avisa a IA do que o servidor já registrou."""
     capturado = {}
-    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
         capturado["system"] = messages[0]["content"]
         return _Resp(_Msg(content="Certo! Como vai pagar?"))
     monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
@@ -498,7 +498,7 @@ def test_ia_diz_que_adicionou_sem_chamar_funcao_forca_retentativa(ambiente, monk
     # silêncio. Agora o servidor força UMA retentativa exigindo a ferramenta.
     cz = _codigo("coca cola zero 600ml")
     estado = {"chamadas": 0, "tool_choices": []}
-    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
         estado["tool_choices"].append(tool_choice)
         estado["chamadas"] += 1
         ultimo = messages[-1]
@@ -606,7 +606,7 @@ def test_pergunta_de_fechamento_com_radical_vale_como_pedido_de_confirmacao():
 
 def test_prompt_lista_bairros_atendidos(ambiente, monkeypatch):
     capturado = {}
-    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
         capturado["system"] = messages[0]["content"]
         return _Resp(_Msg(content="ok"))
     monkeypatch.setattr(bot, "openai", types.SimpleNamespace(chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create))))
@@ -832,7 +832,7 @@ def test_nao_temos_em_pedido_com_itens_do_cardapio_forca_adicao(ambiente, monkey
     """Caso 26/09: pedido de vários itens, IA disse 'não temos' sem adicionar nada."""
     pc = _codigo("pastel de carne")
     estado = {"tool_choices": []}
-    def create(model, messages, tools=None, tool_choice=None, timeout=None):
+    def create(model, messages, tools=None, tool_choice=None, timeout=None, **_k):
         estado["tool_choices"].append(tool_choice)
         if tool_choice == "required":
             return _Resp(_Msg(tool_calls=[_tc("adicionar_item", {"item_id": pc, "quantidade": 2})]))
@@ -929,8 +929,8 @@ def test_nome_de_rua_nao_vira_bairro_pendente(ambiente):
     cfg = bot.obter_config_bot()
     tel = "553597260102"
     bot.rascunho_adicionar_item(tel, _codigo("esfirra de carne"), 1, cfg)
-    r = bot.rascunho_definir_entrega(tel, "ENTREGA", "Pinto Ribeiro", None, cfg,
-                                     texto_cliente="Qual o valor da entrega na rua Pinto Ribeiro 505?")
+    r = bot.rascunho_definir_entrega(tel, "ENTREGA", "Rui Barbosa", None, cfg,
+                                     texto_cliente="Qual o valor da entrega na rua Rui Barbosa 505?")
     assert not bot.obter_rascunho(tel)["bairro_pendente"] and "NOME DO BAIRRO" in " ".join(r["avisos"])
 
 
@@ -946,7 +946,7 @@ def test_cliente_diz_bairro_oficial_com_pendente_aberto(ambiente, monkeypatch):
 
 
 def test_oferece_endereco_do_ultimo_pedido(ambiente, monkeypatch):
-    """Caso Isabel (29/09): recebeu no dia anterior na Rua Noruega 140 e o bot pediu
+    """Caso real (29/09): recebeu no dia anterior na Rua Noruega 140 e o bot pediu
     tudo de novo. Agora oferece o mesmo endereço; 'sim' grava rua e bairro."""
     cfg = bot.obter_config_bot()
     tel = "553574006702"
@@ -1012,15 +1012,15 @@ def test_festa_nao_usa_telefone_do_cadastro(ambiente, monkeypatch):
 
 
 def test_ia_nao_readiciona_pedido_inteiro_a_cada_mensagem(ambiente, monkeypatch):
-    """Caso Thais (01/10): a cada mensagem ('Thais', o endereço...) a IA readicionava
+    """Caso real (01/10): a cada mensagem ('Ana', o endereço...) a IA readicionava
     o pedido inteiro — R$ 51 virou R$ 197,50 e a cliente cancelou."""
     cx, pc = _codigo("coxinha de frango"), _codigo("pastel de carne")
     de_novo = [("adicionar_item", {"item_id": cx, "quantidade": 3}), ("adicionar_item", {"item_id": pc, "quantidade": 1}), "ok"]
-    roteiro = {"quero 3 coxinha de frango e 1 pastel de carne": de_novo, "Thais": de_novo, "E este": de_novo,
+    roteiro = {"quero 3 coxinha de frango e 1 pastel de carne": de_novo, "Ana": de_novo, "E este": de_novo,
                "Rua Carlos Grau 152 San Genaro pagamento no pix": de_novo}
     monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
     tel = "553599598500"
-    _conversar(tel, ["oi", "quero 3 coxinha de frango e 1 pastel de carne", "Thais", "E este",
+    _conversar(tel, ["oi", "quero 3 coxinha de frango e 1 pastel de carne", "Ana", "E este",
                      "Rua Carlos Grau 152 San Genaro pagamento no pix"])
     assert sorted(i["quantidade"] for i in bot.obter_rascunho(tel)["itens"]) == [1, 3]
 
@@ -1227,10 +1227,10 @@ def test_nome_dado_depois_de_fechar_atualiza_o_pedido(ambiente):
     _, ref = ambiente.collection("pedidos").add({"origem": "WHATSAPP", "telefone_cliente": wa, "status": "PENDENTE_PREPARO",
                                                  "nome_cliente": "Cliente", "valor_total": 20.0,
                                                  "hora_pedido": bot.datetime.now(bot.timezone.utc)})
-    bot._atualizar_nome_do_pedido_recente(wa, "Gabriel")
-    assert ref.get().to_dict()["nome_cliente"] == "Gabriel"
+    bot._atualizar_nome_do_pedido_recente(wa, "Carlos")
+    assert ref.get().to_dict()["nome_cliente"] == "Carlos"
     bot._atualizar_nome_do_pedido_recente(wa, "Outro Nome")      # já tem nome real: não troca
-    assert ref.get().to_dict()["nome_cliente"] == "Gabriel"
+    assert ref.get().to_dict()["nome_cliente"] == "Carlos"
 
 
 def test_aviso_novo_nao_herda_dados_do_aviso_antigo(ambiente):
@@ -1242,7 +1242,7 @@ def test_aviso_novo_nao_herda_dados_do_aviso_antigo(ambiente):
 
 
 def test_nao_pede_o_nome_de_novo_quando_ja_sabe(ambiente):
-    t = "Obrigado, Beatriz! Resumo:\n- 1x Hamburguer\nTotal: R$ 35,50\n\nConfere? Posso finalizar? E me diz seu primeiro nome para anotar, se preferir."
+    t = "Obrigado, Maria! Resumo:\n- 1x Hamburguer\nTotal: R$ 35,50\n\nConfere? Posso finalizar? E me diz seu primeiro nome para anotar, se preferir."
     r = bot._tirar_pedido_de_nome(t)
     assert "primeiro nome" not in r and "Posso finalizar?" in r and "Total: R$ 35,50" in r
     assert bot._tirar_pedido_de_nome("Posso fechar? Me diz o nome do bairro também.") == "Posso fechar? Me diz o nome do bairro também."
@@ -1268,7 +1268,7 @@ def test_repetir_retirada_nao_gera_bronca(ambiente, monkeypatch):
     tel = "553599000095"
     bot.rascunho_adicionar_item(tel, _codigo("pastel de carne"), 1, cfg)
     bot.rascunho_definir_entrega(tel, "RETIRADA", None, None, cfg)
-    roteiro = {"Retirada": ["Você já tinha informado que seria retirada, Beatriz. Agora só preciso saber a forma de pagamento: PIX, cartão ou dinheiro?"]}
+    roteiro = {"Retirada": ["Você já tinha informado que seria retirada, Maria. Agora só preciso saber a forma de pagamento: PIX, cartão ou dinheiro?"]}
     monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
     resp = _conversar(tel, ["oi", "Retirada"])[-1]
     assert "já tinha informado" not in resp and "Ok, sua retirada já foi anotada!" in resp and "forma de pagamento" in resp
@@ -1324,7 +1324,7 @@ def test_troco_vai_pra_observacao_do_pedido(ambiente, monkeypatch):
 
 
 def test_rua_com_dois_pontos_nao_vira_bairro():
-    assert bot._e_nome_de_rua_na_mensagem("Rute Pinto Pereira", "Rua: Rute Pinto Pereira, 50") is True
+    assert bot._e_nome_de_rua_na_mensagem("Maria Souza Lima", "Rua: Maria Souza Lima, 50") is True
 
 
 def test_aviso_de_indisponivel_por_linha_e_com_plural(ambiente):
@@ -1373,7 +1373,7 @@ def test_nome_generico_nao_vira_nome_do_cliente(ambiente):
     cfg = bot.obter_config_bot()
     for n in ("cliente", "Cliente", "sem nome", "não informado"):
         assert bot.rascunho_definir_nome("553599000100", n, cfg)["status"] == "erro"
-    assert bot.rascunho_definir_nome("553599000100", "Beatriz", cfg)["status"] == "ok"
+    assert bot.rascunho_definir_nome("553599000100", "Maria", cfg)["status"] == "ok"
 
 
 def test_sabor_nao_bloqueia_varios_itens_do_mesmo_tipo_na_mesma_mensagem(ambiente):
@@ -1418,3 +1418,15 @@ def test_travas_nunca_bloqueiam_item_que_o_cliente_escreveu_cardapio_real(ambien
                     if bot._sabor_incompativel(x, msg, c) or bot._tipo_do_item_incompativel(x, msg, c):
                         ruins.append(nome(x) + " | " + msg)
     assert not ruins, ruins[:5]
+
+
+def test_pergunta_de_pedido_inexistente_com_carrinho_aberto_e_respondida(ambiente, monkeypatch):
+    """Teste real 16/11: 'meu pedido já saiu para entrega?' sem pedido fechado e com carrinho aberto → o bot
+    repetia o resumo do carrinho 4x, ignorando a pergunta."""
+    cfg = bot.obter_config_bot()
+    tel = "553599000101"
+    bot.rascunho_adicionar_item(tel, _codigo("pastel de carne"), 1, cfg)
+    roteiro = {"O meu pedido já saiu para entrega": [("consultar_meu_pedido", {}), "Seu pedido foi registrado e já saiu para entrega!"]}
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    resp = _conversar(tel, ["oi", "O meu pedido já saiu para entrega"])[-1]
+    assert "Não encontrei nenhum pedido seu já registrado" in resp and "ainda não foi fechado" in resp and "Pastel" in resp

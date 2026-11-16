@@ -160,6 +160,19 @@ def main():
             respostas = conversar(telefone, caso["mensagens"], args.pausa, args.verboso)
             pedidos = pedidos_do_telefone(telefone)
             falhas = avaliar(caso["espera"], pedidos, respostas)
+            if any(k in caso["espera"] for k in ("estado_contem", "estado_nao_contem", "estado_obs_contem")):
+                rs = bot.obter_rascunho(telefone)
+                nomes = [str(i.get("nome")).lower() for i in (rs.get("itens") or [])] + \
+                        [str(i.get("nome")).lower() for p in pedidos for i in (p.get("itens") or [])]
+                obs = " | ".join([str(rs.get("observacao") or "")] + [str(p.get("observacao") or "") for p in pedidos]).lower()
+                for t in caso["espera"].get("estado_contem", []):
+                    if not any(t.lower() in n for n in nomes):
+                        falhas.append(f"carrinho/pedido sem '{t}' (tem: {nomes})")
+                for t in caso["espera"].get("estado_nao_contem", []):
+                    if any(t.lower() in n for n in nomes):
+                        falhas.append(f"carrinho/pedido com '{t}' indevido (tem: {nomes})")
+                if "estado_obs_contem" in caso["espera"] and caso["espera"]["estado_obs_contem"].lower() not in obs:
+                    falhas.append(f"observação sem '{caso['espera']['estado_obs_contem']}' (obs: {obs!r})")
             if "atencao_humano" in caso["espera"]:
                 h = (db.collection("historico_conversas").document(telefone).get().to_dict() or {})
                 marcado = bool(h.get("precisa_atencao") and h.get("tipo_atencao") == "humano")

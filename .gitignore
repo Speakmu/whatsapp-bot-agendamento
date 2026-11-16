@@ -7,6 +7,7 @@ whatsapp-bot-agendamentos.json
 
 # ===== Testes do bot (snapshot da producao tem chave PIX/telefone; relatorios sao locais) =====
 backend-bot/tests/snapshot*.json
+backend-bot/tests/conversas_reais*.json
 backend-bot/tests/relatorios/
 backend-bot/tests/ultimo_teste.log
 

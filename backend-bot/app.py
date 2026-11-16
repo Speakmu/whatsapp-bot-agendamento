@@ -111,7 +111,12 @@ def _params_do_modelo(modelo):
     fica baixo. Os demais (gpt-4o, gpt-4.1...) não recebem nada."""
     m = str(modelo or "")
     if not m.startswith("gpt-5") or "chat" in m:
-        return {}
+        # Antes nenhuma chamada definia temperature: a OpenAI usa 1,0 (o máximo de criatividade) e o
+        # mesmo pedido saía certo numa vez e trocado/inventado na outra. Atendimento tem que seguir
+        # instrução, não criar: temperatura 0. (BOT_TEMPERATURA="padrao" só existe pro teste comparar
+        # com o comportamento antigo.)
+        t = os.environ.get("BOT_TEMPERATURA", "0")
+        return {} if t == "padrao" else {"temperature": float(t)}
     # gpt-5.4/5.5 (inclusive os mini): a OpenAI não aceita funções + raciocínio no
     # /chat/completions ("Function tools with reasoning_effort are not supported")
     # — só com raciocínio 'none'.
@@ -1168,8 +1173,8 @@ def _montar_itens_pedido(itens, tipo_entrega, bot_cfg=None):
     }
 
 def _variantes_telefone(wa_id):
-    """O WhatsApp manda o número SEM o nono dígito (553592678488) e o app grava
-    COM ele (5535992678488). Devolve as duas formas pra busca achar os dois."""
+    """O WhatsApp manda o número SEM o nono dígito (553599990000) e o app grava
+    COM ele (5535999990000). Devolve as duas formas pra busca achar os dois."""
     t = re.sub(r"\D", "", str(wa_id or ""))
     v = {t}
     if t.startswith("55") and len(t) == 12:
@@ -1430,7 +1435,7 @@ def classificar_imagem_cliente(caminho_local, tipo_midia):
 def _atualizar_nome_do_pedido_recente(wa_id, nome):
     """O cliente deu o nome DEPOIS de o pedido fechar (o bot fecha como 'Cliente' quando não sabe):
     atualiza o pedido recente, senão o card, a impressão e o aviso de saída mostram 'cliente'.
-    Caso real (06/11): "Anotei seu nome, Gabriel!" e o pedido continuou como 'cliente'."""
+    Caso real (06/11): "Anotei seu nome, Carlos!" e o pedido continuou como 'cliente'."""
     nome = str(nome or "").strip()
     if not nome:
         return
@@ -2156,7 +2161,7 @@ _RE_MAIS_UM = re.compile(r"\b(mais|outr[oa]s?)\b")
 
 def _adicao_permitida(item, prompt, historico, rascunho):
     """A IA só pode somar um item que o cliente pediu NESTA mensagem. Caso real
-    (01/10): a cada mensagem ("Thais", "E este", o endereço...) o gpt-4o-mini
+    (01/10): a cada mensagem ("Ana", "E este", o endereço...) o gpt-4o-mini
     readicionava o pedido inteiro — 3 coxinhas viraram 9, o total foi de R$ 51
     pra R$ 197,50 e a cliente cancelou. Vale se a mensagem cita o item; ou, em
     resposta curta ("sim", "a primeira", "mais uma"), se a última fala do bot
@@ -2391,13 +2396,13 @@ def _pergunta_perimetro(bairro, bot_cfg):
 
 def _e_nome_de_rua_na_mensagem(nome, texto_cliente):
     """O cliente escreveu esse nome logo depois de 'rua'/'av'...? Então é a RUA, não
-    o bairro. Caso real (29/09): "rua Pinto Ribeiro 505" → a IA passou "Pinto
+    o bairro. Caso real (29/09): "rua Rui Barbosa 505" → a IA passou "Pinto
     Ribeiro" como bairro e perguntou o perímetro urbano de uma rua."""
     n, t = _normalizar_termo(nome), _normalizar_termo(texto_cliente or "")
     if not n or not t:
         return False
     return bool(re.search(r"\b(rua|r|av|avenida|travessa|tv|alameda|praca|pca|rodovia|estrada)[.:\-]*\s*"
-                          r"(\w+\s+){0,3}" + re.escape(n) + r"\b", t))
+                          r"([a-z]+\s+){0,3}" + re.escape(n) + r"\b", t))
 
 
 def _marcar_bairro_pendente(wa_id, bairro, bot_cfg, texto_cliente=None):
@@ -2492,8 +2497,8 @@ def _resolver_bairro_pendente(wa_id, id_usuario, mensagem, bot_cfg):
     r = obter_rascunho(id_usuario)
     if not r.get("bairro_pendente"):
         return []
-    # Caso real (29/09): pendente era a RUA ("Pinto Ribeiro"); a cliente respondeu
-    # "Centro! Pinto Ribeiro 505 centro" e o bot seguiu com a rua. Se a mensagem cita
+    # Caso real (29/09): pendente era a RUA ("Rui Barbosa"); a cliente respondeu
+    # "Centro! Rui Barbosa 505 centro" e o bot seguiu com a rua. Se a mensagem cita
     # um bairro da lista oficial, é esse o bairro.
     msg_norm = f" {' '.join(re.split(r'[^a-z0-9]+', _normalizar_termo(mensagem or '')))} "
     oficiais = sorted((str(b).strip() for b in (bot_cfg or {}).get("bairros_entrega") or [] if str(b).strip()),
@@ -2615,7 +2620,7 @@ _RE_PEDE_NOME = re.compile(
 
 def _tirar_pedido_de_nome(texto):
     """O nome do cliente já é conhecido: tira do texto as frases que pedem o nome de novo (o resto
-    do texto fica exatamente como está). Caso real (06/11): "Obrigado, Beatriz! … E me diz seu
+    do texto fica exatamente como está). Caso real (06/11): "Obrigado, Maria! … E me diz seu
     primeiro nome para anotar, se preferir." Não mexe em "nome do bairro". Se a resposta inteira
     fosse isso, mantém como está."""
     if not texto:
@@ -3200,6 +3205,21 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     # 5. Prompt Otimizado (Limpo e Direto)
     system_prompt = f"""
     Voce e {nome_atendente}, a IA da {nome_empresa}. Aja de forma natural, educada e vendedora.
+
+    REGRAS DE OURO (valem acima de qualquer outra instrução; você NÃO decide nada sozinha):
+    1. Você só REGISTRA o que o cliente disse (com as ferramentas) e só INFORMA o que está no CARDÁPIO,
+       nos DADOS DO SISTEMA, no PEDIDO EM ANDAMENTO ou no resultado de uma ferramenta.
+    2. NUNCA troque, "corrija" nem sugira trocar um item por conta própria. Se o item pedido não existe
+       ou está indisponível, diga isso e pergunte o que o cliente quer fazer.
+    3. NUNCA prometa nada em nome da loja (desconto, taxa grátis, reembolso, reenvio, brinde, prazo):
+       quem decide é a equipe.
+    4. Em dúvida, faça UMA pergunta curta. Não suponha endereço, bairro, forma de pagamento, nome,
+       quantidade nem sabor.
+    5. NUNCA invente informação (horário, endereço, preço, taxa, telefone, ponto de referência). Se não
+       estiver nos dados, diga que a equipe confirma.
+    6. Não retome pedido antigo nem comece pedido novo sem o cliente pedir.
+    7. Se o cliente reclamar de um pedido já feito, NÃO monte pedido: peça desculpas e diga que a equipe
+       responde aqui mesmo.
 
     --- DADOS DO SISTEMA ---
     {contexto_identificacao}
@@ -3803,6 +3823,13 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 if consultou_pedido_sem_achar and not obter_rascunho(id_usuario).get("itens"):
                     final_text = ("Não encontrei nenhum pedido seu registrado por aqui. Se quiser, me diga os "
                                   "itens que você gostaria de pedir que eu já vou te ajudando!")
+                elif consultou_pedido_sem_achar:
+                    # Teste real (16/11): "meu pedido já saiu?" sem pedido fechado e com carrinho aberto → o
+                    # resumo do carrinho vinha 4x seguidas, como se a pergunta não existisse. Responde a pergunta.
+                    final_text = ("Não encontrei nenhum pedido seu já registrado por aqui. O que você está montando "
+                                  "ainda não foi fechado:\n"
+                                  + _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente,
+                                                            pergunta_prioritaria=pergunta_variacao))
                 else:
                     final_text = _texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente, pergunta_prioritaria=pergunta_variacao)
 
