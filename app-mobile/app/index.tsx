@@ -433,12 +433,12 @@ interface PedidosProps {
   onVerPix: (codigo: string) => void;
   tempoEstimadoEntrega: number;
   tempoEstimadoRetirada: number;
-  agora: number;
 }
-// Previsão de chegada/retirada mostrada no card do pedido. Só faz sentido
-// enquanto o pedido está "na cozinha" (aguardando ou em preparo) — depois que
-// sai pra entrega ou já foi concluído/cancelado o status já conta a história.
-function textoPrevisao(item: any, tempoEstimadoEntrega: number, tempoEstimadoRetirada: number, agora: number): string | null {
+// Previsão de chegada/retirada mostrada no card do pedido, como cronômetro
+// regressivo MM:SS. Só faz sentido enquanto o pedido está "na cozinha"
+// (aguardando ou em preparo) — depois que sai pra entrega ou já foi
+// concluído/cancelado o status já conta a história.
+function restanteMsPedido(item: any, tempoEstimadoEntrega: number, tempoEstimadoRetirada: number, agora: number): { restanteMs: number; retirada: boolean } | null {
   if (!['PENDENTE_VALIDACAO', 'PENDENTE_PREPARO', 'EM_PREPARO', 'PRONTO_PARA_ENTREGA'].includes(item?.status)) return null;
 
   const horaPedido = item?.hora_pedido;
@@ -446,16 +446,14 @@ function textoPrevisao(item: any, tempoEstimadoEntrega: number, tempoEstimadoRet
   if (!horaMs) return null; // serverTimestamp ainda não resolveu no cliente
 
   const retirada = String(item?.tipo_entrega || '').toUpperCase() === 'RETIRADA';
-  const tempoTotal = retirada ? tempoEstimadoRetirada : tempoEstimadoEntrega;
-  const decorridoMin = (agora - horaMs) / 60000;
-  const restanteMin = Math.ceil(tempoTotal - decorridoMin);
-
-  if (restanteMin > 0) {
-    return retirada
-      ? `⏱️ Previsão: pronto em até ${restanteMin} min`
-      : `⏱️ Previsão: chega em até ${restanteMin} min`;
-  }
-  return '⏱️ Já passou do previsto, pode demorar mais um pouquinho — já estamos nisso!';
+  const tempoTotalMs = (retirada ? tempoEstimadoRetirada : tempoEstimadoEntrega) * 60000;
+  return { restanteMs: tempoTotalMs - (agora - horaMs), retirada };
+}
+function formatarMMSS(ms: number): string {
+  const totalSeg = Math.max(0, Math.floor(ms / 1000));
+  const mm = Math.floor(totalSeg / 60).toString().padStart(2, '0');
+  const ss = (totalSeg % 60).toString().padStart(2, '0');
+  return `${mm}:${ss}`;
 }
 // Texto amigável do status na aba "Meus Pedidos" (antes mostrava o nome
 // técnico cru: "SAIU PARA ENTREGA", "CONCLUIDO"). Retirada e entrega têm
@@ -475,7 +473,14 @@ function textoStatusPedido(item: any): string {
   }
 }
 
-const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix, tempoEstimadoEntrega, tempoEstimadoRetirada, agora }: PedidosProps) => {
+const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix, tempoEstimadoEntrega, tempoEstimadoRetirada }: PedidosProps) => {
+  // Tique local (1x/segundo) só enquanto essa aba está montada — não pesa o
+  // resto do app, que não precisa re-renderizar a cada segundo.
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
   return (
     <View style={{ flex: 1, backgroundColor: '#f9f9f9', paddingTop: insets.top }}>
       <Text style={[styles.tituloSecao, { margin: 15 }]}>Meus Pedidos 📋</Text>
@@ -534,12 +539,25 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix, tem
               </Text>
 
               {(() => {
-                const previsao = textoPrevisao(item, tempoEstimadoEntrega, tempoEstimadoRetirada, agora);
-                return previsao ? (
-                  <Text style={{ marginTop: 6, color: '#555', fontWeight: '600', fontSize: 12 }}>
-                    {previsao}
+                const r = restanteMsPedido(item, tempoEstimadoEntrega, tempoEstimadoRetirada, agora);
+                if (!r) return null;
+                if (r.restanteMs > 0) {
+                  return (
+                    <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+                      <Text style={{ fontSize: 18, fontWeight: 'bold', color: BRAND_GREEN, fontVariant: ['tabular-nums'] }}>
+                        ⏱️ {formatarMMSS(r.restanteMs)}
+                      </Text>
+                      <Text style={{ marginLeft: 8, color: '#555', fontSize: 12 }}>
+                        {r.retirada ? 'pra ficar pronto' : 'pra chegar'}
+                      </Text>
+                    </View>
+                  );
+                }
+                return (
+                  <Text style={{ marginTop: 8, color: '#555', fontWeight: '600', fontSize: 12 }}>
+                    ⏱️ Já passou do previsto, pode demorar mais um pouquinho — já estamos nisso!
                   </Text>
-                ) : null;
+                );
               })()}
 
               {aguardandoPix && (
@@ -1772,13 +1790,6 @@ function AppCliente() {
     }, () => { });
     return () => unsub();
   }, []);
-  // Relógio pro contador da aba Pedidos: só precisa re-renderizar de tempos em
-  // tempos, não a cada segundo (o texto mostra minutos, não segundos).
-  const [agora, setAgora] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setAgora(Date.now()), 30000);
-    return () => clearInterval(t);
-  }, []);
   useEffect(() => {
     function recalcular() {
       const { aberto, texto } = calcularHorarioFuncionamento(horarioCfg, datasEspeciais, feriasCfg);
@@ -2797,7 +2808,6 @@ function AppCliente() {
                 }}
                 tempoEstimadoEntrega={tempoEstimadoEntrega}
                 tempoEstimadoRetirada={tempoEstimadoRetirada}
-                agora={agora}
               />
               )
             )}
