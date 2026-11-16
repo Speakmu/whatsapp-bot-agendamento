@@ -1776,7 +1776,7 @@ function AppCliente() {
   // cliente não tem nenhuma noção de prazo no app e acaba mandando mensagem
   // no WhatsApp perguntando quanto falta, gerando atendimento desnecessário.
   const [tempoEstimadoEntrega, setTempoEstimadoEntrega] = useState(40);
-  const [tempoEstimadoRetirada, setTempoEstimadoRetirada] = useState(20);
+  const [tempoEstimadoRetirada, setTempoEstimadoRetirada] = useState(40);
   useEffect(() => {
     const unsub = onSnapshot(doc(dbModular, 'configuracoes', 'bot'), (s: any) => {
       const d = s && s.exists() ? (s.data() || {}) : {};
@@ -1786,7 +1786,7 @@ function AppCliente() {
       setBairrosEntrega(Array.isArray(d.bairros_entrega) ? d.bairros_entrega : []);
       setTaxaEntrega(Number(d.taxa_entrega) || 0);
       setTempoEstimadoEntrega(Number(d.tempo_estimado_entrega) || 40);
-      setTempoEstimadoRetirada(Number(d.tempo_estimado_retirada) || 20);
+      setTempoEstimadoRetirada(Number(d.tempo_estimado_retirada) || 40);
     }, () => { });
     return () => unsub();
   }, []);
