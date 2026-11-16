@@ -3195,14 +3195,18 @@ function AppCliente() {
               <Text style={{ color: '#fff', fontWeight: 'bold' }}>Copiar Código PIX</Text>
             </TouchableOpacity>
 
+            <Text style={{ marginTop: 16, color: '#555', fontSize: 12, textAlign: 'center' }}>
+              Depois de pagar, acompanhe seu pedido na aba Pedidos — ele já está registrado.
+            </Text>
+
             <TouchableOpacity
               onPress={() => {
                 setModalPixVisivel(false);
                 setAbaAtiva('pedidos');
               }}
-              style={{ marginTop: 20 }}
+              style={{ marginTop: 16 }}
             >
-              <Text style={{ color: BRAND_GREEN, fontWeight: 'bold' }}>Fechar</Text>
+              <Text style={{ color: BRAND_GREEN, fontWeight: 'bold' }}>Já paguei, ver meu pedido</Text>
             </TouchableOpacity>
           </View>
         </View>
