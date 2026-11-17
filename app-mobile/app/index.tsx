@@ -513,15 +513,25 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix, tem
               <View style={{ marginVertical: 8 }}>
                 {Array.isArray(listaItens) ? (
                   // Caso seja um ARRAY (Novo formato: [{nome: 'Pizza', preco: 10}])
+                  // Preço alinhado à direita, igual um ticket de verdade — antes
+                  // o nome sozinho à esquerda deixava a linha toda em branco.
                   listaItens.map((subItem: any, index: number) => {
                     const nomeExibicao = typeof subItem === 'object' && subItem !== null
                       ? (subItem.nome || subItem.nome_exibicao)
                       : String(subItem);
+                    const precoItem = typeof subItem === 'object' && subItem !== null ? Number(subItem.preco) : NaN;
 
                     return (
-                      <Text key={index} style={styles.itensPedido}>
-                        • {nomeExibicao}
-                      </Text>
+                      <View key={index} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <Text style={[styles.itensPedido, { marginBottom: 0, flexShrink: 1, paddingRight: 8 }]}>
+                          • {nomeExibicao}
+                        </Text>
+                        {!isNaN(precoItem) && (
+                          <Text style={[styles.itensPedido, { marginBottom: 0 }]}>
+                            R$ {precoItem.toFixed(2)}
+                          </Text>
+                        )}
+                      </View>
                     );
                   })
                 ) : (
@@ -534,9 +544,12 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix, tem
                 )}
               </View>
 
-              <Text style={styles.totalPedido}>
-                Total: R$ {typeof valorExibicao === 'number' ? valorExibicao.toFixed(2) : valorExibicao}
-              </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#eee', paddingTop: 8 }}>
+                <Text style={styles.totalPedido}>Total</Text>
+                <Text style={styles.totalPedido}>
+                  R$ {typeof valorExibicao === 'number' ? valorExibicao.toFixed(2) : valorExibicao}
+                </Text>
+              </View>
 
               {(() => {
                 const r = restanteMsPedido(item, tempoEstimadoEntrega, tempoEstimadoRetirada, agora);
