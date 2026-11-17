@@ -2446,10 +2446,11 @@ function AppCliente() {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const lista = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+      // Pedido cancelado some da lista do cliente automaticamente — ficar
+      // empilhando cancelado por cancelado só confundia e poluía a aba.
+      const lista = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter((p: any) => p.status !== 'CANCELADO');
       setMeusPedidos(lista);
     }, (error) => {
       // 🔥 SE O ERRO APARECER AQUI: Procure um link no terminal/console
