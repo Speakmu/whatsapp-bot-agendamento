@@ -543,12 +543,12 @@ const SecaoPedidos = ({ meusPedidos, insets, styles, getCorStatus, onVerPix, tem
                 if (!r) return null;
                 if (r.restanteMs > 0) {
                   return (
-                    <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ marginTop: 8 }}>
                       <Text style={{ fontSize: 18, fontWeight: 'bold', color: BRAND_GREEN, fontVariant: ['tabular-nums'] }}>
                         ⏱️ {formatarMMSS(r.restanteMs)}
                       </Text>
-                      <Text style={{ marginLeft: 8, color: '#555', fontSize: 12 }}>
-                        {r.retirada ? 'pra ficar pronto' : 'pra chegar'}
+                      <Text style={{ marginTop: 2, color: '#555', fontSize: 12 }}>
+                        O pedido pode levar de 20 a 40 minutos.
                       </Text>
                     </View>
                   );
