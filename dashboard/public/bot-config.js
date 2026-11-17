@@ -34,6 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
         aviso_encomenda_festa_texto: 'Para encomendas de salgadinhos para festa ou cento de salgados, fale direto com a loja: Loja 1 - 3531-5342 (fixo) ou 98807-5519 (WhatsApp).',
         aviso_sache_ativo: true,
         aviso_sache_texto: 'O ketchup e a maionese (sachês) já acompanham todos os pedidos, sem custo. 😊',
+        aviso_pedido_fechado_texto: 'Seu pedido já foi fechado e não é possível acrescentar itens a ele. Se quiser mais alguma coisa, é só me dizer que eu monto um novo pedido. 😊',
+        aviso_fechamento_texto: 'Depois de fechado, o pedido não pode receber novos itens — para algo a mais, é só fazer um novo pedido.',
         aviso_prazo_ativo: true,
         aviso_prazo_texto: 'O pedido leva até 40 minutos para ficar pronto. Se você comprou pelo aplicativo, pode acompanhar o andamento na aba Pedidos. 😊'
     };
@@ -156,6 +158,8 @@ document.addEventListener('DOMContentLoaded', () => {
             $('bot-festa-texto').value = d.aviso_encomenda_festa_texto || '';
             $('bot-sache-ativo').checked = d.aviso_sache_ativo !== false;
             $('bot-sache-texto').value = d.aviso_sache_texto || '';
+            $('bot-fechado-texto').value = d.aviso_pedido_fechado_texto || '';
+            $('bot-fechamento-texto').value = d.aviso_fechamento_texto || '';
             $('bot-prazo-ativo').checked = d.aviso_prazo_ativo !== false;
             $('bot-prazo-texto').value = d.aviso_prazo_texto || '';
             $('bot-nome-atendente').value = d.nome_atendente || '';
@@ -213,6 +217,8 @@ document.addEventListener('DOMContentLoaded', () => {
             aviso_encomenda_festa_texto: $('bot-festa-texto').value.trim() || BOT_DEFAULTS.aviso_encomenda_festa_texto,
             aviso_sache_ativo: $('bot-sache-ativo').checked,
             aviso_sache_texto: $('bot-sache-texto').value.trim() || BOT_DEFAULTS.aviso_sache_texto,
+            aviso_pedido_fechado_texto: $('bot-fechado-texto').value.trim() || BOT_DEFAULTS.aviso_pedido_fechado_texto,
+            aviso_fechamento_texto: $('bot-fechamento-texto').value.trim() || BOT_DEFAULTS.aviso_fechamento_texto,
             aviso_prazo_ativo: $('bot-prazo-ativo').checked,
             aviso_prazo_texto: $('bot-prazo-texto').value.trim() || BOT_DEFAULTS.aviso_prazo_texto,
             nome_atendente: $('bot-nome-atendente').value.trim() || BOT_DEFAULTS.nome_atendente,

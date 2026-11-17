@@ -116,6 +116,17 @@
                 <small>Eles n&atilde;o s&atilde;o item do card&aacute;pio: o bot n&atilde;o adiciona ao pedido, n&atilde;o cobra e n&atilde;o chama a equipe &mdash; s&oacute; informa isso.</small>
             </div>
 
+            <div class="campo">
+                <label>Aviso no fechamento do pedido</label>
+                <textarea id="bot-fechamento-texto" placeholder="Depois de fechado, o pedido n&atilde;o pode receber novos itens."></textarea>
+                <small>Acrescentado ao final da mensagem de &quot;pedido registrado&quot;.</small>
+            </div>
+            <div class="campo">
+                <label>Resposta quando o cliente pede para acrescentar item a um pedido j&aacute; fechado</label>
+                <textarea id="bot-fechado-texto" placeholder="Seu pedido j&aacute; foi fechado e n&atilde;o &eacute; poss&iacute;vel acrescentar itens a ele."></textarea>
+                <small>Resposta fixa, sem passar pela IA (evita abrir um segundo carrinho confuso).</small>
+            </div>
+
             <label class="check-line"><input id="bot-prazo-ativo" type="checkbox"> Responder com a mensagem abaixo quando o cliente perguntar quanto tempo demora o pedido</label>
             <div class="campo">
                 <label>Mensagem sobre o tempo do pedido</label>

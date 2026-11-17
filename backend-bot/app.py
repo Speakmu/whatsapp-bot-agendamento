@@ -104,6 +104,11 @@ BOT_CONFIG_DEFAULTS = {
     "aviso_sache_ativo": True,
     "aviso_sache_texto": "O ketchup e a maionese (sachês) já acompanham todos os pedidos, sem custo. 😊",
     # Cliente pergunta quanto tempo demora: resposta FIXA (a IA inventava "30 a 45", "40 a 60 min").
+    # Pedido já fechado não recebe item novo: o cliente que pede "acrescenta mais um" depois de
+    # fechar gerava carrinho paralelo e confusão. Resposta fixa + aviso no fechamento.
+    "aviso_pedido_fechado_texto": ("Seu pedido já foi fechado e não é possível acrescentar itens a ele. "
+                                   "Se quiser mais alguma coisa, é só me dizer que eu monto um novo pedido. 😊"),
+    "aviso_fechamento_texto": "Depois de fechado, o pedido não pode receber novos itens — para algo a mais, é só fazer um novo pedido.",
     "aviso_prazo_ativo": True,
     "aviso_prazo_texto": ("O pedido leva até 40 minutos para ficar pronto. Se você comprou pelo aplicativo, "
                           "pode acompanhar o andamento na aba Pedidos. 😊"),
@@ -1972,6 +1977,16 @@ _RE_PERGUNTA_PRAZO = re.compile(
 _RE_NAO_E_PERGUNTA_PRAZO = re.compile(r"\bja saiu\b|\bquero\b|queria|gostaria|\bpedir\b|\badiciona|\bavis[ea]\w*[- ]?(me)?\b")
 
 
+_RE_ACRESCENTAR = re.compile(
+    r"acrescent|adicion|inclu[ia]|incluir|(coloc|pon|poe|bot|mand)\w*\s+mais|\bmais (um|uma|uns|umas|dois|duas|tres|\d+)\b|"
+    r"esqueci|faltou|tem como (por|colocar|mandar|incluir|acrescentar|adicionar)|(por|pra por|para por|colocar) junto|"
+    r"mesmo pedido|\bmais esses?\b|\bmais isso\b")
+_RE_PEDIDO_NOVO_EXPLICITO = re.compile(r"(novo|outro|segundo) pedido|pedido (novo|separado)|pedir de novo|fazer outro")
+_RE_SO_AGRADECIMENTO = re.compile(
+    r"^(ok|okay|blz|beleza|certo|tudo bem|ta bom|tá bom|ta certo|show|valeu|vlw|obg|obgd|obrigad[oa]|muito obrigad[oa]|"
+    r"brigad[oa]|perfeito|otimo|combinado|entendi|ta|top|massa)([ ,.!]+(obg|obgd|obrigad[oa]|valeu|vlw|ok|ta bom|tudo bem|certo|show|ate mais|tchau))*[ .!]*$")
+
+
 _RE_PERGUNTA_HORARIO = re.compile(
     r"\bhorarios?\b|ate que horas|que horas (voces |a loja )?(abr|fech|fic|funcion|atend)|a que horas (voces |a loja )?(abr|fech)|"
     r"ate (a )?que hora|\b(abre|fecha|funciona|atende)\w* (hoje|amanha|domingo|sabado|segunda|ate)|ate quando (voces |a loja )?(fic|funcion|atend|abert)")
@@ -2243,6 +2258,9 @@ _PALAVRAS_SEM_SABOR = {"lata", "garrafa", "pet", "zero", "litro", "litros", "nat
                        "media", "mini", "tradicional", "simples", "assado", "frito", "assada", "frita"}
 
 
+_QTD_PALAVRAS = {"um", "uma", "uns", "umas", "dois", "duas", "tres", "quatro", "cinco", "seis", "meia", "duzia"}
+
+
 def _sabor_incompativel(item, mensagem, cardapio):
     """Mesmo TIPO, SABOR errado: o cliente escreveu "2 pastéis de carne" e a IA adicionou o Pastel
     Palmito (teste real 13/11). Numa parte do pedido que cita o tipo do item e só sabores de OUTROS
@@ -2269,9 +2287,18 @@ def _sabor_incompativel(item, mensagem, cardapio):
     # pastéis: "2 de pizza" e "2 de carne" — cada item tem a sua linha) e alguma parte que cita o
     # tipo traz sabor de OUTRO item. (Teste real 13/11: a 1ª versão olhava linha por linha e recusava
     # o pastel de pizza por causa da linha do pastel de carne.)
-    cita_tipo = [seg for seg in _segmentos_do_pedido(mensagem) if any(_token_parecido(tipo, t) for t in seg)]
+    segs = _segmentos_do_pedido(mensagem)
+    cita_tipo = [seg for seg in segs if any(_token_parecido(tipo, t) for t in seg)]
     if any(_token_parecido(p, t) for seg in cita_tipo for p in proprios for t in seg):
         return False
+    # Parte do pedido SEM nenhuma palavra de tipo ("Um de frango com catupiry" depois de "um pastel
+    # de carne"): o cliente omitiu o tipo e o sabor é o do próprio item → não é troca de sabor.
+    tipos_cardapio = {pt for pt in (_palavra_tipo(i) for i in cardapio or []) if pt}
+    for seg in segs:
+        if (any(t in _QTD_PALAVRAS or t.isdigit() for t in seg)   # é uma linha de item ("um de frango"), não só um sabor solto
+                and not any(_token_parecido(tp, t) for tp in tipos_cardapio for t in seg)
+                and any(_token_parecido(p, t) for p in proprios for t in seg)):
+            return False
     return any(_token_parecido(o, t) for seg in cita_tipo for o in outros for t in seg)
 
 
@@ -3114,6 +3141,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
     _novo = (not reclamou and not _RE_RECLAMACAO.search(_normalizar_termo(prompt or ""))
              and (_RE_NOVO_PEDIDO.search(_normalizar_termo(prompt or "")) or _itens_mencionados(prompt, carregar_cardapio())))
     bloquear_pedido = bool(equipe_chamada and not _novo)
+    # "Tá bom obg" é só agradecimento: nenhuma ferramenta de pedido pode rodar (16/11: a IA tentou
+    # adicionar item e respondeu sobre um carrinho velho).
+    _p_ag = _normalizar_termo(prompt or "").strip(".!?, ")
+    # (só com palavra de agradecimento: "ok" sozinho pode ser o "sim" do fechamento)
+    if _RE_SO_AGRADECIMENTO.search(_p_ag) and re.search(r"obg|obrigad|valeu|vlw", _p_ag):
+        bloquear_pedido = True
 
     # Troco no pedido (13/11: "troco para 100" ficou só na conversa, o pedido saiu com observação
     # "Nenhuma" e o entregador não levou troco).
@@ -3153,6 +3186,17 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
         salvar_historico_firestore(wa_id, "assistant", resposta_e, bot_cfg.get("max_historico_salvar"))
         registrar_log_conversa(id_usuario, origem, prompt, resposta_e, "servidor", observacao="endereco_da_loja_respondido_pelo_servidor")
         return resposta_e
+
+    # Pedido de acrescentar depois do pedido fechado (caso real 16/11): a IA abria um carrinho
+    # paralelo e o cliente se perdia. Sem carrinho aberto + pedido recente → resposta fixa.
+    p_acr = _normalizar_termo(prompt or "")
+    if (_RE_ACRESCENTAR.search(p_acr) and not _RE_PEDIDO_NOVO_EXPLICITO.search(p_acr)
+            and not obter_rascunho(id_usuario).get("itens") and _pedido_recente_do_cliente(wa_id, horas=3)):
+        aviso_fechado = str(bot_cfg.get("aviso_pedido_fechado_texto") or BOT_CONFIG_DEFAULTS["aviso_pedido_fechado_texto"]).strip()
+        salvar_historico_firestore(wa_id, "user", prompt, bot_cfg.get("max_historico_salvar"))
+        salvar_historico_firestore(wa_id, "assistant", aviso_fechado, bot_cfg.get("max_historico_salvar"))
+        registrar_log_conversa(id_usuario, origem, prompt, aviso_fechado, "servidor", observacao="acrescentar_pedido_fechado_respondido_pelo_servidor")
+        return aviso_fechado
 
     # Cliente perguntou o tempo do pedido/entrega: resposta fixa de Config do Bot. A IA não tem
     # esse dado e inventava prazo diferente a cada vez ("30 a 45", "40 a 60 minutos").
@@ -4023,6 +4067,12 @@ def get_openai_response(prompt: str, wa_id: str, origem: str = "WPP"):
                 log_observacao = "afirmou_adicao_de_item_bloqueado"
                 final_text = (_texto_seguro_progresso(id_usuario, bot_cfg, nome_cliente=nome_cliente)
                               + "\nAlgum item que você pediu ainda não entrou no pedido — me confirma quais faltam, por favor?")
+
+        # Pedido fechado agora: avisa que depois disso não dá pra acrescentar item.
+        if pedido_registrado_ok:
+            aviso_fech = str(bot_cfg.get("aviso_fechamento_texto") or BOT_CONFIG_DEFAULTS["aviso_fechamento_texto"]).strip()
+            if aviso_fech and aviso_fech not in (final_text or ""):
+                final_text = f"{(final_text or '').rstrip()}{chr(10)}{chr(10)}{aviso_fech}"
 
         # Nome já conhecido (o bot até chama o cliente por ele): não pede de novo.
         nome_conhecido = (obter_rascunho(id_usuario).get("nome_cliente") or nome_cliente or "").strip()

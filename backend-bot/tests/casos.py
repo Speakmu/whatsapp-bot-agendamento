@@ -215,6 +215,13 @@ CASOS = [
         "mensagens": ["oi", "quero 1 pastel de carne", "retirada", "vai ser pix", "sim"],
         "espera": {"pedidos": 1, "forma_pagamento": "PIX"},
     },
+    {   # Amanda 16/11: pediu pra acrescentar depois de fechar e a IA abriu um carrinho paralelo
+        "nome": "real_acrescentar_depois_de_fechado",
+        "mensagens": ["oi", "1 pastel de carne\n2 coxinhas com catupiry", "retirada", "dinheiro", "sim",
+                      "Tem como acrescentar um pastel de frango pf", "Mais esses", "Tá bom obg"],
+        "espera": {"pedidos": 1, "resposta_contem": ["já foi fechado", "não pode receber novos itens"],
+                   "estado_nao_contem": ["pastel frango"]},
+    },
     {   # Caso 03/11: pedido de pastel virava coxinha
         "nome": "real_pastel_nao_vira_coxinha",
         "mensagens": ["oi", "Quero 1 pastel de frango com catupiry", "retirada", "dinheiro", "sim"],

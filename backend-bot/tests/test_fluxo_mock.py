@@ -573,7 +573,7 @@ def test_confirmacao_explicita_fecha_mesmo_sem_ver_resumo(ambiente, monkeypatch)
     tel = "5535999000016"
     respostas = _conversar(tel, ["oi", "1 coxinha retirada dinheiro", "sim"])
     assert len(_pedidos(ambiente, tel)) == 1
-    assert respostas[-1] == "Pedido registrado! Total R$ 6,50."
+    assert respostas[-1].startswith("Pedido registrado! Total R$ 6,50.")
 
 
 def test_pagamento_inventado_pela_ia_e_recusado(ambiente, monkeypatch):
@@ -666,7 +666,7 @@ def test_ia_remonta_pedido_igual_depois_de_fechado_nao_duplica(ambiente, monkeyp
         "sim": (("fechar_pedido", {}), "Pedido registrado!"),
         "confirma": [("adicionar_item", {"item_id": cx, "quantidade": 1}), ("definir_entrega", {"tipo": "RETIRADA"}),
                      ("definir_pagamento", {"forma": "dinheiro"}), ("fechar_pedido", {}), "Já está registrado!"],
-        "quero mais 2 coxinha": [("adicionar_item", {"item_id": cx, "quantidade": 2}), ("definir_entrega", {"tipo": "RETIRADA"}),
+        "quero 2 coxinha": [("adicionar_item", {"item_id": cx, "quantidade": 2}), ("definir_entrega", {"tipo": "RETIRADA"}),
                                  ("definir_pagamento", {"forma": "dinheiro"}), ("ver_resumo", {}), "2x Coxinha. Posso fechar?"],
     }
     monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
@@ -677,7 +677,10 @@ def test_ia_remonta_pedido_igual_depois_de_fechado_nao_duplica(ambiente, monkeyp
     fech = next(f for f in log["ferramentas"] if f["nome"] == "fechar_pedido")
     assert json.loads(fech["resultado"]).get("ja_estava_fechado") is True
     assert bot.obter_rascunho(tel)["itens"] == []          # remontagem foi limpa
-    _conversar(tel, ["quero mais 2 coxinha", "sim"])
+    # "quero mais 2" depois de fechado = acrescentar: resposta fixa; o pedido novo é outro pedido
+    fixa = _conversar(tel, ["quero mais 2 coxinha"])[-1]
+    assert "já foi fechado" in fixa and "não é possível acrescentar" in fixa
+    _conversar(tel, ["quero 2 coxinha", "sim"])
     assert len(_pedidos(ambiente, tel)) == 2
 
 
@@ -1369,6 +1372,19 @@ def test_sabor_errado_do_mesmo_tipo_e_recusado(ambiente):
     assert bot._sabor_incompativel(palmito, "2 pastéis, 1 de carne e 1 de palmito", c) is False   # sem sabor na mesma parte: não bloqueia
 
 
+def test_sabor_sem_a_palavra_do_tipo_na_linha_nao_e_bloqueado(ambiente):
+    """17/11 (teste real): "Um pastel de carne / Um pastel de queijo / Um de frango com catupiry" -
+    a 3a linha omite 'pastel'; a trava recusava o Pastel Frango com Catupiry."""
+    c = [{"id": "a", "nome": "pastel carne", "nome_exibicao": "Pastel Carne"}, {"id": "q", "nome": "pastel queijo", "nome_exibicao": "Pastel Queijo"},
+         {"id": "f", "nome": "pastel frango com catupiry", "nome_exibicao": "Pastel Frango com Catupiry"},
+         {"id": "e", "nome": "esfirra frango", "nome_exibicao": "Esfirra Frango"}, {"id": "p", "nome": "pastel palmito", "nome_exibicao": "Pastel Palmito"}]
+    msg = "Um pastel de carne\nUm pastel de queijo\nUm de frango com catupiry"
+    assert bot._sabor_incompativel(c[2], msg, c) is False
+    # sabor de OUTRO tipo continua nao valendo: o "frango" da esfirra nao libera o pastel de frango
+    assert bot._sabor_incompativel(c[2], "2 pastéis de carne e 3 esfirras de frango com catupiry", c) is True
+    assert bot._sabor_incompativel(c[4], msg, c) is True
+
+
 def test_nome_generico_nao_vira_nome_do_cliente(ambiente):
     cfg = bot.obter_config_bot()
     for n in ("cliente", "Cliente", "sem nome", "não informado"):
@@ -1467,3 +1483,41 @@ def test_prazo_pode_ser_editado_e_desligado(ambiente, monkeypatch):
     assert "25 minutinhos" in _conversar("553599000300", ["oi", "quanto tempo?"])[-1]
     ambiente.collection("configuracoes").document("bot").set({"aviso_prazo_ativo": False}, merge=True)
     assert "25 minutinhos" not in _conversar("553599000301", ["oi", "quanto tempo?"])[-1]
+
+
+def test_acrescentar_depois_de_fechado_resposta_fixa_e_aviso_no_fechamento(ambiente, monkeypatch):
+    """Caso real 16/11: pedido fechado e o cliente pediu 'tem como acrescentar um pastel?' — a IA abriu
+    carrinho paralelo e o cliente se perdeu. Agora: resposta fixa, sem carrinho novo; e o fechamento
+    já avisa que depois de fechado não dá pra acrescentar."""
+    cx = _codigo("coxinha de frango")
+    roteiro = {
+        "1 coxinha retirada dinheiro": [("adicionar_item", {"item_id": cx, "quantidade": 1}), ("definir_entrega", {"tipo": "RETIRADA"}),
+                                        ("definir_pagamento", {"forma": "dinheiro"}), ("ver_resumo", {}),
+                                        "1x Coxinha, R$ 6,50, retirada, dinheiro. Confere? Posso fechar?"],
+        "sim": (("fechar_pedido", {}), "Pedido registrado!"),
+    }
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory(roteiro))
+    tel = "553599000400"
+    r = _conversar(tel, ["oi", "1 coxinha retirada dinheiro", "sim"])
+    assert "Pedido registrado" in r[-1] and "não pode receber novos itens" in r[-1]
+    for frase in ["Tem como acrescentar um pastel de frango pf", "E pra por junto", "esqueci de pedir uma coca", "Mais esses"]:
+        resp = _conversar(tel, [frase])[-1]
+        assert "já foi fechado" in resp and "não é possível acrescentar" in resp, (frase, resp)
+        assert bot.obter_rascunho(tel)["itens"] == []
+    assert len(_pedidos(ambiente, tel)) == 1
+
+
+def test_acrescentar_sem_pedido_recente_nao_dispara(ambiente, monkeypatch):
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({"quero acrescentar": ["resposta da ia"]}))
+    resp = _conversar("553599000401", ["oi", "quero acrescentar"])[-1]
+    assert "já foi fechado" not in resp
+
+
+def test_agradecimento_nao_mexe_no_carrinho(ambiente, monkeypatch):
+    """16/11: 'Tá bom obg' fez a IA tentar adicionar item. Agradecimento puro bloqueia ferramentas de pedido."""
+    cx = _codigo("coxinha de frango")
+    monkeypatch.setattr(bot, "openai", _fake_openai_factory({
+        "tá bom obg": [("adicionar_item", {"item_id": cx, "quantidade": 1}), "adicionei"]}))
+    tel = "553599000402"
+    _conversar(tel, ["oi", "tá bom obg"])
+    assert bot.obter_rascunho(tel)["itens"] == []
